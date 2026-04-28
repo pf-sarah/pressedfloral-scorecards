@@ -338,7 +338,20 @@
     <!-- Goals table -->
     <section style="padding:0;">
       <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;font-size:11px;font-family:var(--mono);">
+        <table style="width:100%;border-collapse:collapse;font-size:11px;font-family:var(--mono);table-layout:fixed;">
+          <colgroup>
+            <col style="width:48px">   <!-- Type -->
+            <col style="width:52px">   <!-- Location -->
+            <col style="width:90px">   <!-- Department -->
+            <col style="width:105px">  <!-- Role -->
+            <col style="width:auto">   <!-- Goal Name (fills remaining) -->
+            <col style="width:60px">   <!-- Lower Better -->
+            <col style="width:52px">   <!-- Capped -->
+            <col style="width:58px">   <!-- Target -->
+            <col style="width:52px">   <!-- Min -->
+            <col style="width:55px">   <!-- Status -->
+            <col style="width:28px">   <!-- Actions -->
+          </colgroup>
           <thead id="bank-thead"></thead>
           <tbody id="bank-tbody"></tbody>
         </table>
