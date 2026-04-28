@@ -167,13 +167,6 @@
   </div>
 </div>
 
-<!-- User badge in sidebar footer -->
-<div id="user-badge" style="display:none;padding:10px 8px;border-top:1.5px solid var(--border);margin-top:auto;">
-  <div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="user-email-display"></div>
-  <div style="font-size:10px;color:var(--text-faint);font-family:var(--mono);" id="user-role-display"></div>
-  <button onclick="authSignOut()" style="margin-top:6px;padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:none;font-family:var(--sans);font-size:11px;cursor:pointer;color:var(--text-muted);">Sign out</button>
-</div>
-
 <div id="sidebar">
   <div id="sidebar-header">
     <h1>Pressed Floral</h1>
@@ -204,7 +197,15 @@
     <div onclick="switchMode('guide')" class="nav-item" id="nav-item-guide">
       <span class="nav-icon">&#9432;</span> How To Use
     </div>
+    <div onclick="switchMode('migrate')" class="nav-item" id="nav-item-migrate" style="color:var(--brick);">
+      <span class="nav-icon">&#8593;</span> Migrate Data
+    </div>
   </nav>
+  <div id="user-badge" style="padding:10px 8px;border-top:1.5px solid var(--border);">
+    <div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="user-email-display">Not signed in</div>
+    <div style="font-size:10px;color:var(--text-faint);font-family:var(--mono);margin-top:2px;" id="user-role-display"></div>
+    <button onclick="authSignOut()" style="margin-top:6px;padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:none;font-family:var(--sans);font-size:11px;cursor:pointer;color:var(--text-muted);">Sign out</button>
+  </div>
 </div>
 
 <div id="app-main">
@@ -797,6 +798,15 @@
     </div>
   </div>
 
+  <div class="screen" id="screen-migrate">
+    <section>
+      <div class="section-title">Migrate Local Data to Supabase</div>
+      <p style="font-size:13px;color:var(--text-muted);line-height:1.7;margin-bottom:16px;">This tool will upload your locally saved goals, actuals, and scorecards to Supabase so they're available to all users. Run this once from your browser where the data was originally saved.</p>
+      <div id="migrate-status" style="font-size:13px;font-family:var(--mono);color:var(--text-muted);margin-bottom:16px;line-height:1.9;"></div>
+      <button onclick="runMigration()" style="padding:12px 28px;background:var(--brick);color:#fff;border:none;border-radius:var(--radius-sm);font-family:var(--sans);font-size:14px;font-weight:600;cursor:pointer;">Start Migration</button>
+    </section>
+  </div>
+
   <!-- Global row action menu -->
   <div id="gs2-row-menu" style="display:none;position:fixed;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius-sm);box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:500;min-width:130px;padding:4px;">
     <div id="gs2-row-menu-edit" style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;font-size:13px;font-family:var(--sans);color:var(--text);border-radius:4px;" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='none'">&#9998;&nbsp; Edit</div>
@@ -849,15 +859,15 @@ async function loadUserProfile() {
       setTimeout(function() { reject(new Error('Profile fetch timed out')); }, 5000);
     });
     var r = await Promise.race([fetchPromise, timeoutPromise]);
+    var emailEl = document.getElementById('user-email-display');
+    var roleEl  = document.getElementById('user-role-display');
+    if (emailEl) emailEl.textContent = currentUser.email;
     if (r && r.data) {
       currentProfile = r.data;
-      var emailEl = document.getElementById('user-email-display');
-      var roleEl  = document.getElementById('user-role-display');
-      var badge   = document.getElementById('user-badge');
-      if (emailEl) emailEl.textContent = currentUser.email;
-      if (roleEl)  roleEl.textContent  = currentProfile.role === 'admin' ? 'Admin — all access' : 'Manager — ' + (currentProfile.departments||[]).join(', ');
-      if (badge)   badge.style.display = 'block';
+      if (roleEl) roleEl.textContent = currentProfile.role === 'admin' ? 'Admin — all access' : 'Manager — ' + (currentProfile.departments||[]).join(', ');
       applyRoleRestrictions();
+    } else {
+      if (roleEl) roleEl.textContent = currentUser.email;
     }
   } catch(e) {
     console.warn('Profile load failed:', e.message);
@@ -1381,7 +1391,7 @@ function updateHeaderLabel() {
 
 function switchMode(mode) {
   currentMode = mode;
-  ['landing','setup','actuals','history','rippling','guide','scorecard'].forEach(function(m) {
+  ['landing','setup','actuals','history','rippling','guide','scorecard','migrate'].forEach(function(m) {
     var screen = document.getElementById('screen-' + m);
     if (screen) screen.className = 'screen' + (m === mode ? ' active' : '');
     var navItem = document.getElementById('nav-item-' + m);
@@ -5918,6 +5928,104 @@ function clearAllRipplingData() {
   keysToRemove.forEach(function(k) { localStorage.removeItem(k); });
   showToast('All Rippling data cleared', 'success');
   loadRipplingSaved();
+}
+
+async function runMigration() {
+  if (!sb || !currentUser) { showToast('Must be signed in to migrate', 'error'); return; }
+  var status = document.getElementById('migrate-status');
+  var log = function(msg) { status.innerHTML += msg + '<br>'; };
+  status.innerHTML = '';
+  log('Starting migration...');
+
+  // 1. Migrate Goal Bank
+  try {
+    var raw = localStorage.getItem('goal-bank-v1');
+    var goals = raw ? JSON.parse(raw) : [];
+    if (goals.length) {
+      log('Found ' + goals.length + ' goals in Goal Bank...');
+      for (var i = 0; i < goals.length; i++) {
+        var g = goals[i];
+        var row = {
+          goal_tier: g.goalTier||'individual', location: g.location||null,
+          department: g.department||null, role: g.role||null, name: g.name,
+          goal_value: g.goalValue, min_value: g.minValue,
+          lower_better: g.lowerBetter!==false, capped: g.capped||'no',
+          cap_pct: g.capPct||100, active: g.active!==false
+        };
+        await sb.from('goals_bank').upsert(row, {onConflict: 'name,goal_tier,department,location,role'}).catch(function(){});
+      }
+      log('✓ Migrated ' + goals.length + ' goals');
+    } else { log('No goals found in localStorage'); }
+  } catch(e) { log('✗ Goal Bank error: ' + e.message); }
+
+  // 2. Migrate Actuals
+  try {
+    var actualsCount = 0;
+    for (var k = 0; k < localStorage.length; k++) {
+      var key = localStorage.key(k);
+      if (key && key.indexOf('actuals-v1:') === 0) {
+        var month = key.replace('actuals-v1:', '');
+        var actData = JSON.parse(localStorage.getItem(key));
+        for (var goalKey in actData) {
+          var parts = goalKey.split('|');
+          var row2 = {
+            period: month, goal_tier: parts[0], location: parts[1]||null,
+            department: parts[2]||null, goal_name: parts[3],
+            actual_value: actData[goalKey]
+          };
+          await sb.from('actuals').upsert(row2, {onConflict: 'period,goal_tier,location,department,goal_name'}).catch(function(){});
+          actualsCount++;
+        }
+      }
+    }
+    log('✓ Migrated ' + actualsCount + ' actuals entries');
+  } catch(e) { log('✗ Actuals error: ' + e.message); }
+
+  // 3. Migrate Scorecards
+  try {
+    var scCount = 0;
+    for (var k2 = 0; k2 < localStorage.length; k2++) {
+      var key2 = localStorage.key(k2);
+      if (key2 && key2.indexOf('scorecards:') === 0) {
+        var period2 = key2.replace('scorecards:', '');
+        var scs = JSON.parse(localStorage.getItem(key2));
+        for (var si = 0; si < scs.length; si++) {
+          var sc = scs[si];
+          var row3 = {
+            employee_name: sc.employeeName, role: sc.role, department: sc.department,
+            location: sc.location, manager: sc.manager, pay_type: sc.payType,
+            hourly_rate: sc.hourlyRate||null, hours_worked: sc.hours||null,
+            base_earnings: sc.baseEarnings, bonus_potential_pct: sc.bonusPotentialPct||10,
+            scorecard_month: sc.scorecardMonth||period2, period_type: sc.scorecardPeriodType||'monthly',
+            weighted_achievement: sc.weightedAchievement, bonus_amount: sc.bonusAmount,
+            scorecard_capped: sc.scorecardCapped||false, flag_120: sc.flag120||false,
+            goals: sc.goals, submitted_at: sc.submittedAt||new Date().toISOString()
+          };
+          await sb.from('scorecards').insert(row3).catch(function(){});
+          scCount++;
+        }
+      }
+    }
+    log('✓ Migrated ' + scCount + ' scorecards');
+  } catch(e) { log('✗ Scorecards error: ' + e.message); }
+
+  // 4. Migrate Rippling data
+  try {
+    var ripCount = 0;
+    for (var k3 = 0; k3 < localStorage.length; k3++) {
+      var key3 = localStorage.key(k3);
+      if (key3 && key3.indexOf('rippling:') === 0) {
+        var rMonth = key3.replace('rippling:', '');
+        var emps = JSON.parse(localStorage.getItem(key3));
+        await sbSaveRippling(rMonth, emps).catch(function(){});
+        ripCount += emps.length;
+      }
+    }
+    log('✓ Migrated ' + ripCount + ' Rippling employee records');
+  } catch(e) { log('✗ Rippling error: ' + e.message); }
+
+  log('<strong>Migration complete!</strong> Refresh the page to see your data.');
+  showToast('Migration complete!', 'success');
 }
 
 function sendGoalPayload(payload) {
