@@ -582,7 +582,8 @@
     </section>
 
     <section id="sc-add-goals-section" style="display:none;">
-      <div class="section-title">Add more goals from bank</div>
+      <div class="section-title">Department Goals</div>
+      <p style="font-size:12px;color:var(--text-muted);font-family:var(--mono);margin-bottom:10px;">Select which department goals apply to this employee's scorecard:</p>
       <div id="sc-bank-picker" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
     </section>
 
@@ -5687,12 +5688,11 @@ async function scLoadGoals() {
   var bank = [];
   try { var raw = localStorage.getItem(BANK_KEY); bank = raw ? JSON.parse(raw) : []; } catch(e) {}
 
-  // Filter: company goals + dept goals matching dept + individual goals matching role
+  // Auto-load: company goals + individual goals matching role only
   scGoals = bank.filter(function(g) {
     if (g.active === false) return false;
     var tier = g.goalTier || inferTier(g);
     if (tier === 'company') return true;
-    if (tier === 'department') return (!g.department || g.department === dept) && (!g.location || g.location === loc);
     if (tier === 'individual') return (!g.role || g.role === role) && (!g.department || g.department === dept);
     return false;
   }).map(function(g) {
@@ -5703,13 +5703,26 @@ async function scLoadGoals() {
     });
   });
 
+  // Department goals available as a picker (matching dept only)
+  var deptGoals = bank.filter(function(g) {
+    if (g.active === false) return false;
+    var tier = g.goalTier || inferTier(g);
+    return tier === 'department' && (!g.department || g.department === dept) && (!g.location || g.location === loc);
+  });
+
   await scLoadActuals();
 
-  document.getElementById('sc-goals-section').style.display = scGoals.length > 0 ? 'block' : 'none';
-  document.getElementById('sc-goals-empty').style.display   = scGoals.length === 0 ? 'block' : 'none';
-  document.getElementById('sc-add-goals-section').style.display = 'block';
+  document.getElementById('sc-goals-section').style.display = 'block';
+  document.getElementById('sc-goals-empty').style.display = scGoals.length === 0 ? 'block' : 'none';
+  document.getElementById('sc-add-goals-section').style.display = deptGoals.length > 0 ? 'block' : 'none';
   document.getElementById('sc-submit-section').style.display = 'block';
-  scRenderBankPicker(bank, dept, loc, role);
+  // Only show dept goals not already on the scorecard
+  var deptGoalsFiltered = deptGoals.filter(function(g) {
+    return !scGoals.some(function(sg) { return sg.name === g.name && (sg.goalTier||'') === (g.goalTier||''); });
+  });
+  var section = document.getElementById('sc-add-goals-section');
+  if (section) section.style.display = deptGoalsFiltered.length > 0 ? 'block' : 'none';
+  scRenderDeptPicker(deptGoalsFiltered);
   scRender();
 }
 
@@ -5767,6 +5780,57 @@ function scRenderBankPicker(bank, dept, loc, role) {
       '<span style="font-size:12px;color:var(--text);">'+escAttr(g.name)+'</span>' +
     '</div>';
   }).join('');
+}
+
+function scRenderDeptPicker(deptGoals) {
+  var picker = document.getElementById('sc-bank-picker');
+  if (!picker) return;
+  if (!deptGoals.length) {
+    picker.innerHTML = '<span style="font-size:12px;color:var(--text-muted);font-family:var(--mono);">No department goals found in the Goal Bank for this department.</span>';
+    return;
+  }
+  var tierColors = {department:'#d6e8d6'};
+  var tierText   = {department:'#1a5c1a'};
+  picker.innerHTML = deptGoals.map(function(g) {
+    var onCard = scGoals.some(function(sg) { return sg.name === g.name && (sg.goalTier||'') === (g.goalTier||''); });
+    var gJson = JSON.stringify(g).replace(/"/g,'&quot;');
+    return '<div onclick="scToggleDeptGoal(JSON.parse(this.dataset.g),this)" data-g="'+gJson+'" '+
+      'style="padding:6px 12px;border:1.5px solid '+(onCard?'var(--brick)':'var(--border)')+';border-radius:var(--radius-sm);cursor:pointer;display:flex;align-items:center;gap:6px;background:'+(onCard?'var(--brick-light)':'var(--surface)')+';" '+
+      'onmouseover="this.style.opacity=\'0.8\'" onmouseout="this.style.opacity=\'1\'">' +
+      '<span style="font-size:9px;padding:1px 5px;border-radius:99px;background:#d6e8d6;color:#1a5c1a;font-weight:700;">Dept</span>' +
+      '<span style="font-size:12px;color:var(--text);">'+escAttr(g.name)+'</span>' +
+      (onCard ? '<span style="font-size:10px;color:var(--brick);">✓</span>' : '') +
+    '</div>';
+  }).join('');
+}
+
+function scToggleDeptGoal(g, el) {
+  var onCard = scGoals.some(function(sg) { return sg.name === g.name && (sg.goalTier||'') === (g.goalTier||''); });
+  if (onCard) {
+    // Remove from scorecard — put back in picker
+    scGoals = scGoals.filter(function(sg) { return !(sg.name === g.name && (sg.goalTier||'') === (g.goalTier||'')); });
+  } else {
+    // Add to scorecard — remove from picker
+    scGoals.push(Object.assign({}, g, { scWeight: g.defaultWeight||'', scTarget: g.goalValue, scActual: '' }));
+  }
+  // Re-render both the scorecard table and the dept picker
+  scRender();
+  // Rebuild the dept picker without goals already on the card
+  var dept = scEmployee ? scEmployee.department || '' : '';
+  var loc  = scEmployee ? scEmployee.location  || '' : '';
+  var bank = [];
+  try { bank = JSON.parse(localStorage.getItem(BANK_KEY)||'[]'); } catch(e) {}
+  var deptGoals = bank.filter(function(g2) {
+    if (g2.active === false) return false;
+    var tier = g2.goalTier || inferTier(g2);
+    return tier === 'department' && (!g2.department || g2.department === dept) && (!g2.location || g2.location === loc);
+  }).filter(function(g2) {
+    // Only show goals NOT already on the scorecard
+    return !scGoals.some(function(sg) { return sg.name === g2.name && (sg.goalTier||'') === (g2.goalTier||''); });
+  });
+  var section = document.getElementById('sc-add-goals-section');
+  if (section) section.style.display = deptGoals.length > 0 ? 'block' : 'none';
+  scRenderDeptPicker(deptGoals);
 }
 
 function scAddFromBank(g) {
