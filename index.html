@@ -834,7 +834,7 @@ function initSupabase() {
 async function loadUserProfile() {
   if (!sb || !currentUser) return;
   console.log('loadUserProfile: fetching for', currentUser.id);
-  var r = await sb.from('manager_profiles').select('*').eq('id', currentUser.id).single();
+  var r = await sb.from('manager_profiles').select('*').eq('id', currentUser.id).maybeSingle();
   console.log('loadUserProfile result:', JSON.stringify(r));
   if (r.error) {
     console.error('Profile error:', r.error.message);
