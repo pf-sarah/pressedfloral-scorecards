@@ -833,7 +833,15 @@ function initSupabase() {
 
 async function loadUserProfile() {
   if (!sb || !currentUser) return;
+  console.log('loadUserProfile: fetching for', currentUser.id);
   var r = await sb.from('manager_profiles').select('*').eq('id', currentUser.id).single();
+  console.log('loadUserProfile result:', JSON.stringify(r));
+  if (r.error) {
+    console.error('Profile error:', r.error.message);
+    // Still hide auth overlay even if no profile found
+    hideAuthOverlay();
+    return;
+  }
   if (r.data) {
     currentProfile = r.data;
     var emailEl = document.getElementById('user-email-display');
@@ -842,8 +850,10 @@ async function loadUserProfile() {
     if (emailEl) emailEl.textContent = currentUser.email;
     if (roleEl)  roleEl.textContent  = currentProfile.role === 'admin' ? 'Admin — all access' : 'Manager — ' + (currentProfile.departments||[]).join(', ');
     if (badge)   badge.style.display = 'block';
-    // Apply UI restrictions for non-admins
     applyRoleRestrictions();
+  } else {
+    console.warn('No profile found for user', currentUser.id);
+    hideAuthOverlay();
   }
 }
 
