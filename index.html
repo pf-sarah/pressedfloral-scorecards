@@ -274,7 +274,13 @@
     <!-- Filter bar -->
     <section style="padding:14px 16px;">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
-        <div class="section-title" id="bank-table-title" style="margin:0;">Goal Bank</div>
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div class="section-title" id="bank-table-title" style="margin:0;">Goal Bank</div>
+          <select id="bank-month" onchange="bankLoad()" style="padding:5px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;background:var(--surface);">
+            <option value="">No month selected</option>
+          </select>
+          <span id="bank-month-status" style="font-size:11px;font-family:var(--mono);color:var(--text-muted);"></span>
+        </div>
         <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);font-family:var(--sans);cursor:pointer;">
           <input type="checkbox" id="bank-show-inactive" onchange="bankRender()" style="accent-color:var(--brick);">
           Show inactive
@@ -321,6 +327,7 @@
         <select id="bank-sort" onchange="bankRender()" style="flex:1;min-width:130px;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;background:var(--surface);">
           <option value="type">Sort: Type</option>
           <option value="dept">Sort: Department</option>
+          <option value="loc">Sort: Location</option>
           <option value="role">Sort: Role</option>
           <option value="name">Sort: Goal Name</option>
         </select>
@@ -331,20 +338,7 @@
     <!-- Goals table -->
     <section style="padding:0;">
       <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;font-size:11px;font-family:var(--mono);table-layout:fixed;">
-          <colgroup>
-            <col style="width:52px">  <!-- Type -->
-            <col style="width:55px">  <!-- Location -->
-            <col style="width:90px">  <!-- Department -->
-            <col style="width:105px"> <!-- Role -->
-            <col style="width:120px"> <!-- Goal Name -->
-            <col style="width:55px">  <!-- Default Target -->
-            <col style="width:45px">  <!-- Min -->
-            <col style="width:62px">  <!-- Lower Better -->
-            <col style="width:58px">  <!-- Capped -->
-            <col style="width:55px">  <!-- Status -->
-            <col style="width:28px">  <!-- Actions -->
-          </colgroup>
+        <table style="width:100%;border-collapse:collapse;font-size:11px;font-family:var(--mono);">
           <thead id="bank-thead"></thead>
           <tbody id="bank-tbody"></tbody>
         </table>
@@ -427,13 +421,17 @@
             <col style="width:75px">   <!-- Month -->
             <col style="width:90px">   <!-- Actual -->
             <col style="width:62px">   <!-- Achieve% -->
-            <col style="width:28px">   <!-- Save -->
+
           </colgroup>
           <thead id="act-thead"></thead>
           <tbody id="act-tbody"></tbody>
         </table>
       </div>
       <div id="act-empty" style="display:none;padding:20px 16px;font-size:13px;color:var(--text-muted);font-family:var(--mono);">No company or department goals found in the Goal Bank.</div>
+      <div id="act-save-bar" style="display:none;padding:12px 16px;border-top:1.5px solid var(--border);background:var(--brick-light);">
+        <button onclick="actSaveAll()" style="padding:10px 24px;background:var(--brick);color:#fff;border:none;border-radius:var(--radius-sm);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;">&#10003; Save Actuals</button>
+        <span style="font-size:12px;color:var(--text-muted);font-family:var(--mono);margin-left:12px;">You have unsaved changes</span>
+      </div>
     </section>
 
     <section style="background:var(--surface2);border-style:dashed;">
@@ -872,17 +870,20 @@ async function loadUserProfile() {
   } catch(e) {
     console.warn('Profile load failed:', e.message);
   }
-  // Always hide the auth overlay regardless of profile load success
+  // Always hide the auth overlay and apply restrictions
   hideAuthOverlay();
+  applyRoleRestrictions();
   bankLoad();
   actLoad();
 }
 
 function applyRoleRestrictions() {
-  var isAdmin = currentProfile && currentProfile.role === 'admin';
-  // Hide Goal Bank editing for non-admins (read-only)
-  var addGoalBtn = document.querySelector('.add-goal-btn');
-  if (addGoalBtn && !isAdmin) addGoalBtn.style.display = 'none';
+  var isAdmin = !currentProfile || currentProfile.role === 'admin'; // default to showing if profile not loaded
+  var isExplicitlyNotAdmin = currentProfile && currentProfile.role !== 'admin';
+  // Only hide Goal Bank editing if explicitly a non-admin
+  document.querySelectorAll('.add-goal-btn').forEach(function(btn) {
+    btn.style.display = isExplicitlyNotAdmin ? 'none' : '';
+  });
 }
 
 function showAuthOverlay() {
@@ -4825,7 +4826,37 @@ var bankGoals = []; // all goals in the bank
 var bankEditIdx = null;
 var BANK_KEY = 'goal-bank-v1';
 
+async function bankPopulateMonths() {
+  var sel = document.getElementById('bank-month');
+  if (!sel) return;
+  var now = new Date();
+  var currentMonthVal = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  var current = sel.value || currentMonthVal;
+  sel.innerHTML = '<option value="">No month selected</option>';
+  // Show 6 past months + current + 6 future months
+  for (var i = -6; i <= 6; i++) {
+    var d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    var val = d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0');
+    var label = d.toLocaleString('default', {month:'long', year:'numeric'});
+    var opt = document.createElement('option');
+    opt.value = val; opt.textContent = label;
+    if (val === current) opt.selected = true;
+    sel.appendChild(opt);
+  }
+}
+
+function bankGetMonthTargets(monthVal) {
+  if (!monthVal) return {};
+  try { return JSON.parse(localStorage.getItem('bank-month-targets:' + monthVal) || '{}'); } catch(e) { return {}; }
+}
+
+function bankSaveMonthTargets(monthVal, data) {
+  if (!monthVal) return;
+  localStorage.setItem('bank-month-targets:' + monthVal, JSON.stringify(data));
+}
+
 async function bankLoad() {
+  await bankPopulateMonths();
   try {
     if (sb && currentUser) {
       // Load from Supabase
@@ -4911,6 +4942,7 @@ function bankRender() {
   filtered.sort(function(a,b){
     if (sort==='type'){var ta=tierOrder[a.goalTier||inferTier(a)]||0,tb=tierOrder[b.goalTier||inferTier(b)]||0;return ta!==tb?ta-tb:(a.department||'')<(b.department||'')?-1:1;}
     if (sort==='dept') return (a.department||'')<(b.department||'')?-1:1;
+    if (sort==='loc') return (a.location||'')<(b.location||'')?-1:1;
     if (sort==='role') return (a.role||'')<(b.role||'')?-1:1;
     if (sort==='name') return (a.name||'')<(b.name||'')?-1:1;
     return 0;
@@ -4927,18 +4959,32 @@ function bankRender() {
   var tierColors={company:'#f5e6d3',department:'#d6e8d6',individual:'#d3e4f5'};
   var tierText={company:'#7a3010',department:'#1a5c1a',individual:'#0a3d6b'};
 
+  var monthVal = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
+  var now = new Date();
+  var currentMonthVal = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  var isPastMonth = monthVal && monthVal < currentMonthVal;
+  var monthTargets = bankGetMonthTargets(monthVal);
+
+  // Update month status label
+  var statusEl = document.getElementById('bank-month-status');
+  if (statusEl) {
+    if (!monthVal) statusEl.textContent = '';
+    else if (isPastMonth) statusEl.textContent = '🔒 Past month — read only';
+    else if (monthVal === currentMonthVal) statusEl.textContent = '● Current month';
+    else statusEl.textContent = '○ Future month';
+  }
+
   thead.innerHTML='<tr>'+
     '<th style="'+thS+colCtx+'">Type</th>'+
     '<th style="'+thS+colCtx+'">Loc</th>'+
     '<th style="'+thS+colCtx+'">Department</th>'+
     '<th style="'+thS+colCtx+'">Role</th>'+
     '<th style="'+thS+colGoal+'">Goal Name</th>'+
-    '<th style="'+thS+colGoal+'">Default Target</th>'+
-    '<th style="'+thS+colGoal+'">Min</th>'+
     '<th style="'+thS+colGoal+'">Lower Better</th>'+
     '<th style="'+thS+colGoal+'">Capped</th>'+
+    (monthVal ? '<th style="'+thS+'background:#f5f8f3;">Target</th><th style="'+thS+'background:#f5f8f3;">Minimum</th>' : '')+
     '<th style="'+thS+'background:#fff;">Status</th>'+
-    '<th style="'+thS+'background:#fff;"></th>'+
+    (monthVal && !isPastMonth ? '<th id="bank-save-th" style="'+thS+'background:#fff;"><button onclick="bankSaveMonthTargetsAll()" style="padding:2px 10px;background:var(--brick);color:#fff;border:none;border-radius:var(--radius-sm);font-size:10px;font-family:var(--sans);cursor:pointer;display:none;" id="bank-save-btn">Save</button></th>' : '<th style="'+thS+'background:#fff;"></th>')+
   '</tr>';
 
   if (filtered.length===0){tbody.innerHTML='';empty.style.display='block';return;}
@@ -4950,24 +4996,66 @@ function bankRender() {
     var tier=g.goalTier||inferTier(g);
     var inactive=g.active===false;
     var rowStyle=inactive?'opacity:0.45;':'';
+    var mKey = (g._sbId || g.name) + '|' + (g.goalTier||'');
+    var mData = monthTargets[mKey] || {};
+    var mTarget = mData.target !== undefined ? mData.target : '';
+    var mMin = mData.min !== undefined ? mData.min : '';
+    var inpStyle = 'width:100%;padding:2px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid '+(isPastMonth?'var(--border)':'var(--brick)')+';border-radius:3px;background:'+(isPastMonth?'var(--surface2)':'#fff')+';';
+
     return '<tr data-idx="'+g._idx+'" style="'+rowStyle+'">'+
       '<td style="padding:5px 6px;'+border+colCtx+'"><span style="font-size:9px;padding:1px 5px;border-radius:99px;background:'+(tierColors[tier]||'#eee')+';color:'+(tierText[tier]||'#333')+';font-weight:700;">'+(tier==='individual'?'Indiv':tier==='department'?'Dept':'Co')+'</span></td>'+
       td(g.location||'—',colCtx)+td(g.department||'—',colCtx)+td(g.role||'—',colCtx)+
       '<td style="padding:5px 6px;'+border+colGoal+'font-weight:600;">'+escAttr(g.name||'')+'</td>'+
-      td(g.goalValue,colGoal)+td(g.minValue,colGoal)+
       td(g.lowerBetter!==false?'Yes':'No',colGoal)+
       td(g.capped==='yes'?'Yes ('+g.capPct+'%)':'No',colGoal)+
+      (monthVal ?
+        '<td style="padding:3px 5px;'+border+'background:#f5f8f3;">'+
+          (isPastMonth
+            ? '<span style="font-size:11px;color:var(--text-muted);">'+(mTarget!==''?mTarget:'—')+'</span>'
+            : '<input type="number" step="any" value="'+escAttr(String(mTarget))+'" data-mkey="'+escAttr(mKey)+'" data-field="target" oninput="bankMonthTargetChange(this)" style="'+inpStyle+'">')+
+        '</td>'+
+        '<td style="padding:3px 5px;'+border+'background:#f5f8f3;">'+
+          (isPastMonth
+            ? '<span style="font-size:11px;color:var(--text-muted);">'+(mMin!==''?mMin:'—')+'</span>'
+            : '<input type="number" step="any" value="'+escAttr(String(mMin))+'" data-mkey="'+escAttr(mKey)+'" data-field="min" oninput="bankMonthTargetChange(this)" style="'+inpStyle+'">')+
+        '</td>'
+      : '')+
       '<td style="padding:5px 6px;'+border+'background:#fff;">'+
         '<span style="font-size:9px;padding:1px 6px;border-radius:99px;font-weight:600;background:'+(inactive?'#f0ece6':'#eef5ec')+';color:'+(inactive?'#7a7268':'#1a5c1a')+'">'+(inactive?'Inactive':'Active')+'</span>'+
       '</td>'+
       '<td style="padding:5px 6px;'+border+'background:#fff;">'+
-        '<button onclick="bankToggleRowMenu('+g._idx+',this)" style="padding:2px 4px;border:none;background:none;font-size:14px;cursor:pointer;color:var(--text-muted);line-height:1;letter-spacing:1px;">&#8942;</button>'+
+        (!isPastMonth ? '<button onclick="bankToggleRowMenu('+g._idx+',this)" style="padding:2px 4px;border:none;background:none;font-size:14px;cursor:pointer;color:var(--text-muted);line-height:1;letter-spacing:1px;">&#8942;</button>' : '')+
       '</td>'+
     '</tr>';
   }).join('');
 
   var title=document.getElementById('bank-table-title');
   if(title) title.textContent='Goal Bank ('+bankGoals.filter(function(g){return g.active!==false;}).length+' active)';
+}
+
+function bankMonthTargetChange(inp) {
+  var mKey = inp.dataset.mkey;
+  var field = inp.dataset.field;
+  var monthVal = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
+  if (!monthVal || !mKey) return;
+  var targets = bankGetMonthTargets(monthVal);
+  if (!targets[mKey]) targets[mKey] = {};
+  var val = inp.value !== '' ? parseFloat(inp.value) : undefined;
+  if (val !== undefined) targets[mKey][field] = val;
+  else delete targets[mKey][field];
+  bankSaveMonthTargets(monthVal, targets);
+  // Show save button
+  var saveBtn = document.getElementById('bank-save-btn');
+  if (saveBtn) saveBtn.style.display = 'inline-block';
+}
+
+function bankSaveMonthTargetsAll() {
+  var monthVal = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
+  if (!monthVal) return;
+  // Already saving on each input change — just confirm and hide button
+  var saveBtn = document.getElementById('bank-save-btn');
+  if (saveBtn) saveBtn.style.display = 'none';
+  showToast('Targets & minimums saved for ' + document.getElementById('bank-month').options[document.getElementById('bank-month').selectedIndex].text, 'success');
 }
 
 // ── Bank row menu ───────────────────────────────────────────────
@@ -5042,15 +5130,15 @@ function bankShowInlineRow(g){
   var lowerOpts='<option value="true"'+(!g||g.lowerBetter!==false?' selected':'')+'>Yes</option><option value="false"'+(g&&g.lowerBetter===false?' selected':'')+'>No</option>';
   var cappedOpts='<option value="no"'+(!g||g.capped!=='yes'?' selected':'')+'>No</option><option value="yes"'+(g&&g.capped==='yes'?' selected':'')+'>Yes</option>';
 
-  var rowHTML='<tr id="bank-inline-row" style="'+bg+'"><td colspan="11" style="padding:10px 12px;border-bottom:2px solid var(--brick);'+bg+'">'+
+  var monthVal = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
+  var colCount = monthVal ? 11 : 9;
+  var rowHTML='<tr id="bank-inline-row" style="'+bg+'"><td colspan="'+colCount+'" style="padding:10px 12px;border-bottom:2px solid var(--brick);'+bg+'">'+
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:10px;">'+
       '<div><span style="'+labelS+'">Type</span><select id="banki-type" onchange="bankInlineTypeChange()" style="'+inputS+'">'+typeOpts+'</select></div>'+
       '<div id="banki-loc-wrap"><span style="'+labelS+'">Location</span><select id="banki-loc" style="'+inputS+'">'+locOpts+'</select></div>'+
       '<div id="banki-dept-wrap"><span style="'+labelS+'">Department</span><select id="banki-dept" onchange="bankInlineDeptChange()" style="'+inputS+'">'+deptOpts+'</select></div>'+
       '<div id="banki-role-wrap"><span style="'+labelS+'">Role</span><select id="banki-role" style="'+inputS+'"><option value="">Select role</option></select></div>'+
       '<div style="grid-column:1/-1;"><span style="'+labelS+'">Goal name</span><input type="text" id="banki-name" value="'+escAttr(g?g.name||'':'')+'" placeholder="e.g. Individual Ratio" style="'+inputS+'"></div>'+
-      '<div><span style="'+labelS+'">Default target</span><input type="number" step="any" id="banki-target" value="'+escAttr(String(g?g.goalValue||'':''))+'" placeholder="e.g. 1.6" style="'+inputS+'"></div>'+
-      '<div><span style="'+labelS+'">Minimum</span><input type="number" step="any" id="banki-min" value="'+escAttr(String(g?g.minValue||'':''))+'" placeholder="e.g. 2.0" style="'+inputS+'"></div>'+
       '<div><span style="'+labelS+'">Lower is better?</span><select id="banki-lower" style="'+inputS+'">'+lowerOpts+'</select></div>'+
       '<div><span style="'+labelS+'">Capped?</span><select id="banki-capped" onchange="bankInlineCappedChange()" style="'+inputS+'">'+cappedOpts+'</select></div>'+
       '<div id="banki-cappct-wrap" style="'+(g&&g.capped==='yes'?'':'display:none;')+'"><span style="'+labelS+'">Cap %</span><input type="number" id="banki-cappct" value="'+escAttr(String(g?g.capPct||100:100))+'" style="'+inputS+'"></div>'+
@@ -5115,16 +5203,15 @@ async function bankSaveInline(){
   var dept   =document.getElementById('banki-dept')?document.getElementById('banki-dept').value:'';
   var role   =document.getElementById('banki-role')?document.getElementById('banki-role').value:'';
   var name   =document.getElementById('banki-name')?document.getElementById('banki-name').value.trim():'';
-  var target =document.getElementById('banki-target')?document.getElementById('banki-target').value:'';
-  var min    =document.getElementById('banki-min')?document.getElementById('banki-min').value:'';
+  var target = '';
+  var min    = '';
   var lower  =document.getElementById('banki-lower')?document.getElementById('banki-lower').value==='true':true;
   var capped =document.getElementById('banki-capped')?document.getElementById('banki-capped').value:'no';
   var capPct =document.getElementById('banki-cappct')?document.getElementById('banki-cappct').value:100;
 
   if(!type){showToast('Select a goal type','error');return;}
   if(!name){showToast('Goal name is required','error');return;}
-  if(!target){showToast('Default target is required','error');return;}
-  if(!min){showToast('Minimum is required','error');return;}
+
   if((type==='department'||type==='individual')&&!dept){showToast('Department is required','error');return;}
   if(type==='individual'&&!role){showToast('Role is required','error');return;}
 
@@ -5256,6 +5343,9 @@ function actRender() {
   var deptF  = document.getElementById('act-dept')  ? document.getElementById('act-dept').value  : '';
   var locF   = document.getElementById('act-loc')   ? document.getElementById('act-loc').value   : '';
 
+  var monthVal2 = monthF; // e.g. '2026-04'
+  var monthTargets2 = monthVal2 ? bankGetMonthTargets(monthVal2) : {};
+
   var filtered = actGoals.filter(function(g) {
     if (g.active === false) return false;
     var tier = g.goalTier || inferTier(g);
@@ -5296,7 +5386,7 @@ function actRender() {
     '<th style="'+thS+colAct+'">Month</th>'+
     '<th style="'+thS+colAct+'">Actual</th>'+
     '<th style="'+thS+colAct+'">Achieve%</th>'+
-    '<th style="'+thS+'background:#fff;"></th>'+
+    
   '</tr>';
 
   if (filtered.length===0) {
@@ -5337,38 +5427,60 @@ function actRender() {
       '<td style="padding:5px 6px;'+border+colCtx+'"><span style="font-size:9px;padding:1px 5px;border-radius:99px;background:'+(tierColors[tier]||'#eee')+';color:'+(tierText[tier]||'#333')+';font-weight:700;">'+(tier==='company'?'Co':'Dept')+'</span></td>'+
       td(g.location||'—',colCtx)+td(g.department||'—',colCtx)+
       '<td style="padding:5px 6px;'+border+colGoal+'font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:0;">'+escAttr(g.name||'')+'</td>'+
-      td(g.goalValue,colGoal)+td(g.minValue,colGoal)+
+      (function(){
+        var mKey2=(g._sbId||g.name)+'|'+(g.goalTier||'');
+        var md=monthTargets2[mKey2]||{};
+        var tv=md.target!==undefined?md.target:g.goalValue;
+        var mv=md.min!==undefined?md.min:g.minValue;
+        return td(tv,colGoal)+td(mv,colGoal);
+      })()+
       td(g.lowerBetter!==false?'Yes':'No',colGoal)+td(g.capped==='yes'?'Yes':'No',colGoal)+
       '<td style="padding:5px 6px;'+border+colAct+'font-size:10px;color:var(--text-muted);">'+escAttr(formatMonthLabel(r.month))+'</td>'+
       '<td style="padding:3px 5px;'+border+colAct+'">'+
-        '<input type="number" step="any" value="'+escAttr(String(r.actual))+'" data-key="'+escAttr(r.key)+'" data-month="'+escAttr(r.month)+'" '+
-        'style="width:100%;padding:3px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid var(--brick);border-radius:4px;background:#fff;">'+
+        ((!g.goalValue && g.goalValue !== 0) || (!g.minValue && g.minValue !== 0)
+          ? '<span style="font-size:10px;color:var(--text-muted);font-family:var(--mono);padding:2px 4px;background:var(--surface2);border-radius:3px;display:inline-block;" title="Set Target and Minimum in Goal Bank first">No target/min set</span>'
+          : '<input type="number" step="any" value="'+escAttr(String(r.actual))+'" data-key="'+escAttr(r.key)+'" data-month="'+escAttr(r.month)+'" '+
+            'oninput="actMarkDirty()" '+
+            'style="width:100%;padding:3px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid var(--brick);border-radius:4px;background:#fff;">'
+        )+
       '</td>'+
       '<td style="padding:5px 6px;'+border+colAct+r.achColor+'">'+r.ach+'</td>'+
-      '<td style="padding:5px 6px;'+border+'background:#fff;">'+
-        '<button onclick="actSaveRow(this)" title="Save" style="padding:2px 5px;border:none;background:none;font-size:14px;cursor:pointer;color:var(--brick);">&#10003;</button>'+
-      '</td>'+
     '</tr>';
   }).join('');
 }
 
-async function actSaveRow(btn) {
-  var row=btn.closest?btn.closest('tr'):btn.parentElement.parentElement;
-  var inp=row?row.querySelector('input[type="number"]'):null;
-  if (!inp) return;
-  var key=inp.dataset.key, month=inp.dataset.month;
-  var val=inp.value!==''?parseFloat(inp.value):null;
-  if (!actAllActuals[month]) actAllActuals[month]={};
-  if (val!==null) actAllActuals[month][key]=val; else delete actAllActuals[month][key];
-  // Save to localStorage
-  localStorage.setItem(ACT_ACTUALS_PREFIX+month, JSON.stringify(actAllActuals[month]));
-  // Also save to Supabase
-  if (sb && currentUser && val!==null) {
-    await sbSaveActual(month, key, val);
+function actMarkDirty() {
+  var bar = document.getElementById('act-save-bar');
+  if (bar) bar.style.display = 'block';
+}
+
+async function actSaveAll() {
+  var inputs = document.querySelectorAll('#act-tbody input[type="number"]');
+  inputs.forEach(function(inp) {
+    var key = inp.dataset.key, month = inp.dataset.month;
+    if (!key || !month) return;
+    var val = inp.value !== '' ? parseFloat(inp.value) : null;
+    if (!actAllActuals[month]) actAllActuals[month] = {};
+    if (val !== null) actAllActuals[month][key] = val;
+    else delete actAllActuals[month][key];
+    localStorage.setItem(ACT_ACTUALS_PREFIX + month, JSON.stringify(actAllActuals[month]));
+  });
+  if (sb && currentUser) {
+    var saves = [];
+    inputs.forEach(function(inp) {
+      var key = inp.dataset.key, month = inp.dataset.month;
+      var val = inp.value !== '' ? parseFloat(inp.value) : null;
+      if (key && month && val !== null) saves.push(sbSaveActual(month, key, val));
+    });
+    await Promise.all(saves);
   }
-  showToast('Saved!','success');
+  var bar = document.getElementById('act-save-bar');
+  if (bar) bar.style.display = 'none';
+  showToast('Actuals saved!', 'success');
   actRender();
 }
+
+async function actSaveRow(btn) { await actSaveAll(); }
 
 function actExportCSV() {
   var monthF=document.getElementById('act-month')?document.getElementById('act-month').value:'';
