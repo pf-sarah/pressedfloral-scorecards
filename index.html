@@ -817,12 +817,21 @@ var currentProfile = null; // manager_profiles row
 function initSupabase() {
   if (window.supabase) {
     sb = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+    // Check for existing session first
+    sb.auth.getSession().then(async function(result) {
+      if (result.data && result.data.session) {
+        currentUser = result.data.session.user;
+        await loadUserProfile();
+      } else {
+        showAuthOverlay();
+      }
+    });
+    // Listen for future auth changes
     sb.auth.onAuthStateChange(async function(event, session) {
-      if (session && session.user) {
+      if (event === 'SIGNED_IN' && session && session.user) {
         currentUser = session.user;
         await loadUserProfile();
-        hideAuthOverlay();
-      } else {
+      } else if (event === 'SIGNED_OUT') {
         currentUser = null;
         currentProfile = null;
         showAuthOverlay();
