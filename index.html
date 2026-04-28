@@ -842,28 +842,30 @@ function initSupabase() {
 
 async function loadUserProfile() {
   if (!sb || !currentUser) return;
-  console.log('loadUserProfile: fetching for', currentUser.id);
-  var r = await sb.from('manager_profiles').select('*').eq('id', currentUser.id).maybeSingle();
-  console.log('loadUserProfile result:', JSON.stringify(r));
-  if (r.error) {
-    console.error('Profile error:', r.error.message);
-    // Still hide auth overlay even if no profile found
-    hideAuthOverlay();
-    return;
+  try {
+    // Add a 5 second timeout to prevent hanging
+    var fetchPromise = sb.from('manager_profiles').select('*').eq('id', currentUser.id).maybeSingle();
+    var timeoutPromise = new Promise(function(_, reject) {
+      setTimeout(function() { reject(new Error('Profile fetch timed out')); }, 5000);
+    });
+    var r = await Promise.race([fetchPromise, timeoutPromise]);
+    if (r && r.data) {
+      currentProfile = r.data;
+      var emailEl = document.getElementById('user-email-display');
+      var roleEl  = document.getElementById('user-role-display');
+      var badge   = document.getElementById('user-badge');
+      if (emailEl) emailEl.textContent = currentUser.email;
+      if (roleEl)  roleEl.textContent  = currentProfile.role === 'admin' ? 'Admin — all access' : 'Manager — ' + (currentProfile.departments||[]).join(', ');
+      if (badge)   badge.style.display = 'block';
+      applyRoleRestrictions();
+    }
+  } catch(e) {
+    console.warn('Profile load failed:', e.message);
   }
-  if (r.data) {
-    currentProfile = r.data;
-    var emailEl = document.getElementById('user-email-display');
-    var roleEl  = document.getElementById('user-role-display');
-    var badge   = document.getElementById('user-badge');
-    if (emailEl) emailEl.textContent = currentUser.email;
-    if (roleEl)  roleEl.textContent  = currentProfile.role === 'admin' ? 'Admin — all access' : 'Manager — ' + (currentProfile.departments||[]).join(', ');
-    if (badge)   badge.style.display = 'block';
-    applyRoleRestrictions();
-  } else {
-    console.warn('No profile found for user', currentUser.id);
-    hideAuthOverlay();
-  }
+  // Always hide the auth overlay regardless of profile load success
+  hideAuthOverlay();
+  bankLoad();
+  actLoad();
 }
 
 function applyRoleRestrictions() {
