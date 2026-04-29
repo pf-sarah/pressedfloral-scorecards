@@ -880,7 +880,7 @@ async function loadUserProfile() {
     if (emailEl) emailEl.textContent = currentUser.email;
     if (r && r.data) {
       currentProfile = r.data;
-      if (roleEl) roleEl.textContent = currentProfile.role === 'admin' ? 'Admin — all access' : 'Manager — ' + (currentProfile.departments||[]).join(', ');
+      updateUserBadge();
       applyRoleRestrictions();
     } else {
       if (roleEl) roleEl.textContent = currentUser.email;
@@ -889,8 +889,8 @@ async function loadUserProfile() {
     console.warn('Profile load failed:', e.message);
   }
   // Always update badge with email even if profile didn't load
-  var emailEl = document.getElementById('user-email-display');
-  if (emailEl && currentUser) emailEl.textContent = currentUser.email;
+  // Always update badge
+  updateUserBadge();
   // Always hide the auth overlay and apply restrictions
   hideAuthOverlay();
   applyRoleRestrictions();
@@ -898,13 +898,32 @@ async function loadUserProfile() {
   actLoad();
 }
 
+function updateUserBadge() {
+  var emailEl = document.getElementById('user-email-display');
+  var roleEl  = document.getElementById('user-role-display');
+  if (emailEl && currentUser) emailEl.textContent = currentUser.email;
+  if (roleEl) {
+    if (currentProfile) {
+      roleEl.textContent = currentProfile.role === 'admin'
+        ? 'Admin — full access'
+        : 'Manager — ' + (currentProfile.departments||[]).join(', ');
+    } else if (currentUser) {
+      roleEl.textContent = 'Signed in';
+    }
+  }
+}
+
 function applyRoleRestrictions() {
-  var isAdmin = !currentProfile || currentProfile.role === 'admin'; // default to showing if profile not loaded
   var isExplicitlyNotAdmin = currentProfile && currentProfile.role !== 'admin';
-  // Only hide Goal Bank editing if explicitly a non-admin
+  // Only hide Goal Bank add button for non-admins
   document.querySelectorAll('.add-goal-btn').forEach(function(btn) {
     btn.style.display = isExplicitlyNotAdmin ? 'none' : '';
   });
+  // Hide Rippling Data nav item for non-admins (upload is admin-only)
+  var ripplingNav = document.getElementById('nav-item-rippling');
+  if (ripplingNav) ripplingNav.style.display = isExplicitlyNotAdmin ? 'none' : '';
+  // If currently on rippling screen and not admin, redirect home
+  if (isExplicitlyNotAdmin && currentMode === 'rippling') switchMode('landing');
 }
 
 function showAuthOverlay() {
@@ -3728,9 +3747,11 @@ async function getRipplingEmployees(month) {
       var mgDepts = currentProfile.departments || [];
       var mgLocs  = currentProfile.locations  || [];
       employees = employees.filter(function(e) {
-        var deptMatch = !e.department || mgDepts.indexOf(e.department) !== -1;
-        var locMatch  = !e.location  || mgLocs.indexOf(e.location)   !== -1;
-        return deptMatch && locMatch;
+        // Employee matches if BOTH dept and location fall within manager's scope
+        // If manager has no dept restriction, show all depts; same for location
+        var deptOk = mgDepts.length === 0 || !e.department || mgDepts.indexOf(e.department) !== -1;
+        var locOk  = mgLocs.length  === 0 || !e.location   || mgLocs.indexOf(normalizeLocation(e.location))  !== -1;
+        return deptOk && locOk;
       });
     }
     return employees;
@@ -4927,9 +4948,10 @@ async function bankLoad() {
           bankGoals = allGoals.filter(function(g) {
             var tier = g.goalTier || inferTier(g);
             if (tier === 'company') return true; // everyone sees company goals
-            var deptMatch = !g.department || mgDepts.indexOf(g.department) !== -1;
-            var locMatch  = !g.location  || mgLocs.indexOf(g.location)   !== -1;
-            return deptMatch && locMatch;
+            // Goal matches if dept matches AND (no location set OR location matches)
+            var deptOk = mgDepts.length === 0 || !g.department || mgDepts.indexOf(g.department) !== -1;
+            var locOk  = mgLocs.length  === 0 || !g.location   || mgLocs.indexOf(g.location)   !== -1;
+            return deptOk && locOk;
           });
         } else {
           bankGoals = allGoals;
