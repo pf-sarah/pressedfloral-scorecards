@@ -901,13 +901,20 @@ async function loadUserProfile() {
 function updateUserBadge() {
   var emailEl = document.getElementById('user-email-display');
   var roleEl  = document.getElementById('user-role-display');
-  if (emailEl && currentUser) emailEl.textContent = currentUser.email;
+  // Persist to localStorage so badge survives page reload
+  if (currentUser) {
+    localStorage.setItem('pf-current-email', currentUser.email);
+    if (currentProfile) localStorage.setItem('pf-current-role', JSON.stringify(currentProfile));
+  }
+  var email = (currentUser && currentUser.email) || localStorage.getItem('pf-current-email') || 'Not signed in';
+  if (emailEl) emailEl.textContent = email;
   if (roleEl) {
-    if (currentProfile) {
-      roleEl.textContent = currentProfile.role === 'admin'
+    var profile = currentProfile || (function(){ try { return JSON.parse(localStorage.getItem('pf-current-role')||'null'); } catch(e){ return null; } })();
+    if (profile) {
+      roleEl.textContent = profile.role === 'admin'
         ? 'Admin — full access'
-        : 'Manager — ' + (currentProfile.departments||[]).join(', ');
-    } else if (currentUser) {
+        : 'Manager — ' + (profile.departments||[]).join(', ');
+    } else if (email !== 'Not signed in') {
       roleEl.textContent = 'Signed in';
     }
   }
@@ -965,6 +972,10 @@ async function authSignIn() {
 }
 
 async function authSignOut() {
+  localStorage.removeItem('pf-current-email');
+  localStorage.removeItem('pf-current-role');
+  currentProfile = null;
+  currentUser = null;
   if (sb) await sb.auth.signOut();
 }
 
@@ -6421,6 +6432,8 @@ window.onload = function() { try {
   setMonth('sc-month', monthStr, monthStr, minStr);
   // Init Supabase then load data
   initSupabase();
+  // Show any cached badge immediately
+  updateUserBadge();
   // Data loads are triggered by auth state change — also load locally if no auth yet
   bankLoad();
   actLoad();
