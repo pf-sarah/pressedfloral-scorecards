@@ -5418,19 +5418,30 @@ async function bankSaveInline(){
       var msg = 'A similar goal already exists:\n\n' + lines.join('\n') + '\n\nSave anyway?';
       if(!confirm(msg)) return;
     }
-  }
+  }  // Capture editIdx and sbId BEFORE any mutations
+  var editingIdx2 = bankEditIdx;
+  var sbId2 = (editingIdx2!==null && bankGoals[editingIdx2]) ? bankGoals[editingIdx2]._sbId : null;
 
-  if(bankEditIdx!==null){
-    goal.createdAt=bankGoals[bankEditIdx].createdAt||goal.createdAt;
-    goal.active=bankGoals[bankEditIdx].active!==false;
-    bankGoals[bankEditIdx]=goal;
-  } else {
-    bankGoals.push(goal);
-  }
-  // Save month target/min if provided
+  // Save month target/min
   var monthVal2 = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
   var mtEl = document.getElementById('banki-month-target');
   var mmEl = document.getElementById('banki-month-min');
+
+  if (sb && currentUser) {
+    var sbResult = await sbSaveGoal(goal, sbId2);
+    if (sbResult && sbResult.error) { showToast('Error saving: ' + sbResult.error.message, 'error'); return; }
+    if (sbResult && sbResult.data && sbResult.data.id) goal._sbId = sbResult.data.id;
+  } else {
+    if(editingIdx2!==null){
+      goal.createdAt=bankGoals[editingIdx2].createdAt||goal.createdAt;
+      goal.active=bankGoals[editingIdx2].active!==false;
+      bankGoals[editingIdx2]=goal;
+    } else {
+      bankGoals.push(goal);
+    }
+    await bankSave();
+  }
+
   if (monthVal2 && (mtEl || mmEl)) {
     var mKey2 = ((goal._sbId || goal.name) + '|' + (goal.goalTier||''));
     var targets2 = bankGetMonthTargets(monthVal2);
@@ -5439,17 +5450,7 @@ async function bankSaveInline(){
     if (mmEl && mmEl.value !== '') targets2[mKey2].min    = parseFloat(mmEl.value);
     bankSaveMonthTargets(monthVal2, targets2);
   }
-  // Capture sbId and editIdx BEFORE clearing them
-  var editingIdx = bankEditIdx;
-  var sbId = (editingIdx!==null && bankGoals[editingIdx]) ? bankGoals[editingIdx]._sbId : null;
 
-  if (sb && currentUser) {
-    var sbResult = await sbSaveGoal(goal, sbId);
-    if (sbResult && sbResult.error) { showToast('Error saving: ' + sbResult.error.message, 'error'); return; }
-    if (sbResult && sbResult.data && sbResult.data.id) goal._sbId = sbResult.data.id;
-  } else {
-    await bankSave();
-  }
   showToast('Goal saved to bank!','success');
   bankCancelInline(true);
   bankEditIdx=null;
@@ -5634,8 +5635,12 @@ function actRender() {
       '<td style="padding:3px 5px;'+border+colAct+'">'+
         (function(){
           var isAdmin = !currentProfile || currentProfile.role === 'admin';
-          var isCompany = (g.goalTier||inferTier(g)) === 'company';
-          var noTargetMin = (!g.goalValue && g.goalValue !== 0) || (!g.minValue && g.minValue !== 0);
+          var tier = g.goalTier||inferTier(g);
+          var isCompany = tier === 'company';
+          // Use month-specific target/min if available, fall back to goal defaults
+          var tv = (r.target!==undefined&&r.target!==null&&r.target!=='') ? r.target : g.goalValue;
+          var mv = (r.min!==undefined&&r.min!==null&&r.min!=='') ? r.min : g.minValue;
+          var noTargetMin = (tv===undefined||tv===null||tv==='') || (mv===undefined||mv===null||mv==='');
           if (noTargetMin) return '<span style="font-size:10px;color:var(--text-muted);font-family:var(--mono);padding:2px 4px;background:var(--surface2);border-radius:3px;display:inline-block;" title="Set Target and Minimum in Goal Bank first">No target/min set</span>';
           if (isCompany && !isAdmin) return '<span style="font-size:11px;font-family:var(--mono);color:var(--text);">'+(r.actual!==null&&r.actual!==''?r.actual:'—')+'</span>';
           return '<input type="number" step="any" value="'+escAttr(String(r.actual))+'" data-key="'+escAttr(r.key)+'" data-month="'+escAttr(r.month)+'" oninput="actMarkDirty()" style="width:100%;padding:3px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid var(--brick);border-radius:4px;background:#fff;">';
