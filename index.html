@@ -357,6 +357,10 @@
         </table>
       </div>
       <div id="bank-empty" style="display:none;padding:20px 16px;font-size:13px;color:var(--text-muted);font-family:var(--mono);">No goals match the current filter</div>
+      <div id="bank-save-bar" style="padding:10px 16px;border-top:1.5px solid var(--border);display:flex;align-items:center;gap:12px;">
+        <button onclick="bankSaveMonthTargetsAll()" id="bank-save-btn" disabled style="padding:8px 22px;background:var(--surface2);color:var(--text-muted);border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:13px;font-weight:600;cursor:not-allowed;transition:all 0.15s;">Save Targets</button>
+        <span id="bank-save-hint" style="font-size:12px;color:var(--text-muted);font-family:var(--mono);">Enter targets or minimums to enable saving</span>
+      </div>
       <div style="padding:12px 16px;">
         <button onclick="bankOpenAdd()" class="add-goal-btn" style="width:100%;">+ Add Goal to Bank</button>
       </div>
@@ -884,6 +888,9 @@ async function loadUserProfile() {
   } catch(e) {
     console.warn('Profile load failed:', e.message);
   }
+  // Always update badge with email even if profile didn't load
+  var emailEl = document.getElementById('user-email-display');
+  if (emailEl && currentUser) emailEl.textContent = currentUser.email;
   // Always hide the auth overlay and apply restrictions
   hideAuthOverlay();
   applyRoleRestrictions();
@@ -3706,12 +3713,27 @@ async function saveRipplingData() {
 
 async function getRipplingEmployees(month) {
   try {
-    // Check localStorage first (most reliable, has latest fields)
-    var local = localStorage.getItem(ripplingKey(month));
-    if (local) return JSON.parse(local);
-    // Fallback to window.storage
-    var r = await storageGet(ripplingKey(month));
-    return r ? JSON.parse(r) : [];
+    var employees = [];
+    // Try Supabase first
+    if (sb && currentUser) {
+      employees = await sbLoadRippling(month);
+    }
+    // Fallback to localStorage
+    if (!employees.length) {
+      var local = localStorage.getItem(ripplingKey(month));
+      if (local) employees = JSON.parse(local);
+    }
+    // Scope to manager's dept/location if not admin
+    if (currentProfile && currentProfile.role !== 'admin' && employees.length) {
+      var mgDepts = currentProfile.departments || [];
+      var mgLocs  = currentProfile.locations  || [];
+      employees = employees.filter(function(e) {
+        var deptMatch = !e.department || mgDepts.indexOf(e.department) !== -1;
+        var locMatch  = !e.location  || mgLocs.indexOf(e.location)   !== -1;
+        return deptMatch && locMatch;
+      });
+    }
+    return employees;
   } catch(e) { return []; }
 }
 
@@ -4840,6 +4862,19 @@ var bankGoals = []; // all goals in the bank
 var bankEditIdx = null;
 var BANK_KEY = 'goal-bank-v1';
 
+function bankResetSaveBar() {
+  var saveBtn = document.getElementById('bank-save-btn');
+  var saveHint = document.getElementById('bank-save-hint');
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.style.background = 'var(--surface2)';
+    saveBtn.style.color = 'var(--text-muted)';
+    saveBtn.style.borderColor = 'var(--border)';
+    saveBtn.style.cursor = 'not-allowed';
+  }
+  if (saveHint) saveHint.textContent = 'Enter targets or minimums to enable saving';
+}
+
 async function bankPopulateMonths() {
   var sel = document.getElementById('bank-month');
   if (!sel) return;
@@ -4871,12 +4906,13 @@ function bankSaveMonthTargets(monthVal, data) {
 
 async function bankLoad() {
   await bankPopulateMonths();
+  bankResetSaveBar();
   try {
     if (sb && currentUser) {
       // Load from Supabase
       var data = await sbLoadGoalBank();
       if (data) {
-        bankGoals = data.map(function(r) {
+        var allGoals = data.map(function(r) {
           return {
             _sbId: r.id, goalTier: r.goal_tier, location: r.location||'', department: r.department||'',
             role: r.role||'', name: r.name, goalValue: r.goal_value, minValue: r.min_value,
@@ -4884,6 +4920,20 @@ async function bankLoad() {
             active: r.active, createdAt: r.created_at
           };
         });
+        // Scope to manager's departments/locations if not admin
+        if (currentProfile && currentProfile.role !== 'admin') {
+          var mgDepts = currentProfile.departments || [];
+          var mgLocs  = currentProfile.locations  || [];
+          bankGoals = allGoals.filter(function(g) {
+            var tier = g.goalTier || inferTier(g);
+            if (tier === 'company') return true; // everyone sees company goals
+            var deptMatch = !g.department || mgDepts.indexOf(g.department) !== -1;
+            var locMatch  = !g.location  || mgLocs.indexOf(g.location)   !== -1;
+            return deptMatch && locMatch;
+          });
+        } else {
+          bankGoals = allGoals;
+        }
         // Also cache locally
         localStorage.setItem(BANK_KEY, JSON.stringify(bankGoals));
         bankRender();
@@ -4998,7 +5048,7 @@ function bankRender() {
     '<th style="'+thS+colGoal+'">Capped</th>'+
     (monthVal ? '<th style="'+thS+'background:#f5f8f3;">Target</th><th style="'+thS+'background:#f5f8f3;">Minimum</th>' : '')+
     '<th style="'+thS+'background:#fff;">Status</th>'+
-    (monthVal && !isPastMonth ? '<th id="bank-save-th" style="'+thS+'background:#fff;"><button onclick="bankSaveMonthTargetsAll()" style="padding:2px 10px;background:var(--brick);color:#fff;border:none;border-radius:var(--radius-sm);font-size:10px;font-family:var(--sans);cursor:pointer;display:none;" id="bank-save-btn">Save</button></th>' : '<th style="'+thS+'background:#fff;"></th>')+
+    '<th style="'+thS+'background:#fff;"></th>'+
   '</tr>';
 
   if (filtered.length===0){tbody.innerHTML='';empty.style.display='block';return;}
@@ -5013,8 +5063,9 @@ function bankRender() {
     var mKey = (g._sbId || g.name) + '|' + (g.goalTier||'');
     var mData = monthTargets[mKey] || {};
     var mTarget = mData.target !== undefined ? mData.target : '';
-    var mMin = mData.min !== undefined ? mData.min : '';
-    var inpStyle = 'width:100%;padding:2px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid '+(isPastMonth?'var(--border)':'var(--brick)')+';border-radius:3px;background:'+(isPastMonth?'var(--surface2)':'#fff')+';';
+    var mMin    = mData.min    !== undefined ? mData.min    : '';
+    var isEditing = (bankEditIdx === g._idx);
+    var inpStyle = 'width:100%;padding:2px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid var(--brick);border-radius:3px;background:#fff;';
 
     return '<tr data-idx="'+g._idx+'" style="'+rowStyle+'">'+
       '<td style="padding:5px 6px;'+border+colCtx+'"><span style="font-size:9px;padding:1px 5px;border-radius:99px;background:'+(tierColors[tier]||'#eee')+';color:'+(tierText[tier]||'#333')+';font-weight:700;">'+(tier==='individual'?'Indiv':tier==='department'?'Dept':'Co')+'</span></td>'+
@@ -5024,21 +5075,21 @@ function bankRender() {
       td(g.capped==='yes'?'Yes ('+g.capPct+'%)':'No',colGoal)+
       (monthVal ?
         '<td style="padding:3px 5px;'+border+'background:#f5f8f3;">'+
-          (isPastMonth
-            ? '<span style="font-size:11px;color:var(--text-muted);">'+(mTarget!==''?mTarget:'—')+'</span>'
-            : '<input type="number" step="any" value="'+escAttr(String(mTarget))+'" data-mkey="'+escAttr(mKey)+'" data-field="target" oninput="bankMonthTargetChange(this)" style="'+inpStyle+'">')+
+          (!isPastMonth && isEditing
+            ? '<input type="number" step="any" value="'+escAttr(String(mTarget))+'" data-mkey="'+escAttr(mKey)+'" data-field="target" oninput="bankMonthTargetChange(this)" style="'+inpStyle+'">'
+            : '<span style="font-size:11px;color:var(--text);">'+(mTarget!==''?mTarget:'—')+'</span>')+
         '</td>'+
         '<td style="padding:3px 5px;'+border+'background:#f5f8f3;">'+
-          (isPastMonth
-            ? '<span style="font-size:11px;color:var(--text-muted);">'+(mMin!==''?mMin:'—')+'</span>'
-            : '<input type="number" step="any" value="'+escAttr(String(mMin))+'" data-mkey="'+escAttr(mKey)+'" data-field="min" oninput="bankMonthTargetChange(this)" style="'+inpStyle+'">')+
+          (!isPastMonth && isEditing
+            ? '<input type="number" step="any" value="'+escAttr(String(mMin))+'" data-mkey="'+escAttr(mKey)+'" data-field="min" oninput="bankMonthTargetChange(this)" style="'+inpStyle+'">'
+            : '<span style="font-size:11px;color:var(--text);">'+(mMin!==''?mMin:'—')+'</span>')+
         '</td>'
       : '')+
       '<td style="padding:5px 6px;'+border+'background:#fff;">'+
         '<span style="font-size:9px;padding:1px 6px;border-radius:99px;font-weight:600;background:'+(inactive?'#f0ece6':'#eef5ec')+';color:'+(inactive?'#7a7268':'#1a5c1a')+'">'+(inactive?'Inactive':'Active')+'</span>'+
       '</td>'+
       '<td style="padding:5px 6px;'+border+'background:#fff;">'+
-        (!isPastMonth ? '<button onclick="bankToggleRowMenu('+g._idx+',this)" style="padding:2px 4px;border:none;background:none;font-size:14px;cursor:pointer;color:var(--text-muted);line-height:1;letter-spacing:1px;">&#8942;</button>' : '')+
+        '<button onclick="bankToggleRowMenu('+g._idx+',this)" style="padding:2px 4px;border:none;background:none;font-size:14px;cursor:pointer;color:var(--text-muted);line-height:1;letter-spacing:1px;">&#8942;</button>'+
       '</td>'+
     '</tr>';
   }).join('');
@@ -5058,18 +5109,34 @@ function bankMonthTargetChange(inp) {
   if (val !== undefined) targets[mKey][field] = val;
   else delete targets[mKey][field];
   bankSaveMonthTargets(monthVal, targets);
-  // Show save button
+  // Enable save button
   var saveBtn = document.getElementById('bank-save-btn');
-  if (saveBtn) saveBtn.style.display = 'inline-block';
+  var saveHint = document.getElementById('bank-save-hint');
+  if (saveBtn) {
+    saveBtn.disabled = false;
+    saveBtn.style.background = 'var(--brick)';
+    saveBtn.style.color = '#fff';
+    saveBtn.style.borderColor = 'var(--brick)';
+    saveBtn.style.cursor = 'pointer';
+  }
+  if (saveHint) saveHint.textContent = 'You have unsaved changes';
 }
 
 function bankSaveMonthTargetsAll() {
-  var monthVal = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
-  if (!monthVal) return;
-  // Already saving on each input change — just confirm and hide button
+  var monthEl = document.getElementById('bank-month');
+  if (!monthEl || !monthEl.value) return;
+  var label = monthEl.options[monthEl.selectedIndex] ? monthEl.options[monthEl.selectedIndex].text : monthEl.value;
   var saveBtn = document.getElementById('bank-save-btn');
-  if (saveBtn) saveBtn.style.display = 'none';
-  showToast('Targets & minimums saved for ' + document.getElementById('bank-month').options[document.getElementById('bank-month').selectedIndex].text, 'success');
+  var saveHint = document.getElementById('bank-save-hint');
+  if (saveBtn) {
+    saveBtn.disabled = true;
+    saveBtn.style.background = 'var(--surface2)';
+    saveBtn.style.color = 'var(--text-muted)';
+    saveBtn.style.borderColor = 'var(--border)';
+    saveBtn.style.cursor = 'not-allowed';
+  }
+  if (saveHint) saveHint.textContent = 'All changes saved';
+  showToast('Targets & minimums saved for ' + label, 'success');
 }
 
 // ── Bank row menu ───────────────────────────────────────────────
@@ -5129,11 +5196,29 @@ async function bankDelete(idx){
 
 // ── Bank inline row ─────────────────────────────────────────────
 function bankOpenAdd(){bankEditIdx=null;bankShowInlineRow(null);}
-function bankOpenEdit(idx){bankEditIdx=idx;bankShowInlineRow(bankGoals[idx]);}
+function bankEditDone(){
+  bankEditIdx=null;
+  bankRender();
+}
 
-function bankShowInlineRow(g){
+function bankOpenEdit(idx){
+  bankCancelInline(true);
+  bankEditIdx=idx;
+  // Don't re-render — find the existing row by data-idx and insert after it
+  var tbody = document.getElementById('bank-tbody');
+  var targetRow = tbody ? tbody.querySelector('tr[data-idx="'+idx+'"]') : null;
+  bankShowInlineRow(bankGoals[idx], targetRow);
+}
+
+function bankShowInlineRow(g, targetRow){
   bankCancelInline(true);
   var tier=g?g.goalTier||inferTier(g):'';
+  var monthVal = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
+  var monthTargets = bankGetMonthTargets(monthVal);
+  var mKey = g ? ((g._sbId || g.name) + '|' + (g.goalTier||'')) : '';
+  var mData = mKey ? (monthTargets[mKey] || {}) : {};
+  var mTarget = mData.target !== undefined ? mData.target : '';
+  var mMin    = mData.min    !== undefined ? mData.min    : '';
   var inputS='width:100%;padding:3px 4px;font-size:11px;font-family:var(--sans);border:1.5px solid var(--brick);border-radius:4px;';
   var labelS='font-size:9px;color:var(--text-muted);font-family:var(--mono);display:block;margin-bottom:2px;';
   var bg='background:#fffbe6;';
@@ -5153,6 +5238,8 @@ function bankShowInlineRow(g){
       '<div id="banki-dept-wrap"><span style="'+labelS+'">Department</span><select id="banki-dept" onchange="bankInlineDeptChange()" style="'+inputS+'">'+deptOpts+'</select></div>'+
       '<div id="banki-role-wrap"><span style="'+labelS+'">Role</span><select id="banki-role" style="'+inputS+'"><option value="">Select role</option></select></div>'+
       '<div style="grid-column:1/-1;"><span style="'+labelS+'">Goal name</span><input type="text" id="banki-name" value="'+escAttr(g?g.name||'':'')+'" placeholder="e.g. Individual Ratio" style="'+inputS+'"></div>'+
+      '<div><span style="'+labelS+'">Target</span><input type="number" step="any" id="banki-month-target" value="'+escAttr(String(mTarget))+'" placeholder="e.g. 1.6" style="'+inputS+'"></div>'+
+      '<div><span style="'+labelS+'">Minimum</span><input type="number" step="any" id="banki-month-min" value="'+escAttr(String(mMin))+'" placeholder="e.g. 1.2" style="'+inputS+'"></div>'+
       '<div><span style="'+labelS+'">Lower is better?</span><select id="banki-lower" style="'+inputS+'">'+lowerOpts+'</select></div>'+
       '<div><span style="'+labelS+'">Capped?</span><select id="banki-capped" onchange="bankInlineCappedChange()" style="'+inputS+'">'+cappedOpts+'</select></div>'+
       '<div id="banki-cappct-wrap" style="'+(g&&g.capped==='yes'?'':'display:none;')+'"><span style="'+labelS+'">Cap %</span><input type="number" id="banki-cappct" value="'+escAttr(String(g?g.capPct||100:100))+'" style="'+inputS+'"></div>'+
@@ -5164,7 +5251,9 @@ function bankShowInlineRow(g){
   '</td></tr>';
 
   var tbody=document.getElementById('bank-tbody');
-  if(bankEditIdx!==null){
+  if(targetRow){
+    targetRow.insertAdjacentHTML('afterend',rowHTML);
+  } else if(bankEditIdx!==null){
     var rows=tbody.querySelectorAll('tr[data-idx="'+bankEditIdx+'"]');
     if(rows.length){rows[0].insertAdjacentHTML('afterend',rowHTML);}
     else{tbody.insertAdjacentHTML('beforeend',rowHTML);}
@@ -5205,6 +5294,8 @@ function bankInlineCappedChange(){
 function bankCancelInline(silent){
   var row=document.getElementById('bank-inline-row');
   if(row) row.remove();
+  bankEditIdx=null;
+  if(!silent) bankRender();
   // Clean up extra delete option from menu
   var extra=document.getElementById('gs2-row-menu-harddelete');
   if(extra) extra.remove();
@@ -5272,6 +5363,19 @@ async function bankSaveInline(){
   } else {
     bankGoals.push(goal);
   }
+  // Save month target/min if provided
+  var monthVal2 = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
+  var mtEl = document.getElementById('banki-month-target');
+  var mmEl = document.getElementById('banki-month-min');
+  if (monthVal2 && (mtEl || mmEl)) {
+    var mKey2 = ((goal._sbId || goal.name) + '|' + (goal.goalTier||''));
+    var targets2 = bankGetMonthTargets(monthVal2);
+    if (!targets2[mKey2]) targets2[mKey2] = {};
+    if (mtEl && mtEl.value !== '') targets2[mKey2].target = parseFloat(mtEl.value);
+    if (mmEl && mmEl.value !== '') targets2[mKey2].min    = parseFloat(mmEl.value);
+    bankSaveMonthTargets(monthVal2, targets2);
+  }
+  bankEditIdx=null;
 
   if (sb && currentUser) {
     var sbResult = await sbSaveGoal(goal, bankEditIdx!==null ? (bankGoals[bankEditIdx]&&bankGoals[bankEditIdx]._sbId) : null);
