@@ -930,9 +930,9 @@ function updateUserBadge() {
 
 function applyRoleRestrictions() {
   var isExplicitlyNotAdmin = currentProfile && currentProfile.role !== 'admin';
-  // Only hide Goal Bank add button for non-admins
+  // Add Goal button visible for all authenticated users
   document.querySelectorAll('.add-goal-btn').forEach(function(btn) {
-    btn.style.display = isExplicitlyNotAdmin ? 'none' : '';
+    btn.style.display = '';
   });
   // Hide Rippling Data nav item for non-admins (upload is admin-only)
   var ripplingNav = document.getElementById('nav-item-rippling');
@@ -4134,6 +4134,9 @@ function gs2ToggleRowMenu(idx, btn) {
   menu.style.left = Math.min(rect.right - 130, window.innerWidth - 140) + 'px';
   document.getElementById('gs2-row-menu-edit').onclick = function() { menu.style.display='none'; _gs2ActiveMenuIdx=null; gs2OpenEdit(idx); };
   document.getElementById('gs2-row-menu-delete').onclick = function() { menu.style.display='none'; _gs2ActiveMenuIdx=null; gs2DeleteGoal(idx); };
+  // Show/hide deactivate + delete based on role
+  var isAdminMenu = !currentProfile || currentProfile.role === 'admin';
+  document.getElementById('gs2-row-menu-delete').style.display = isAdminMenu ? '' : 'none';
 }
 function gs2CloseRowMenus() {
   var menu = document.getElementById('gs2-row-menu');
@@ -5130,7 +5133,7 @@ function bankRender() {
         '<span style="font-size:9px;padding:1px 6px;border-radius:99px;font-weight:600;background:'+(inactive?'#f0ece6':'#eef5ec')+';color:'+(inactive?'#7a7268':'#1a5c1a')+'">'+(inactive?'Inactive':'Active')+'</span>'+
       '</td>'+
       '<td style="padding:5px 6px;'+border+'background:#fff;">'+
-        '<button onclick="bankToggleRowMenu('+g._idx+',this)" style="padding:2px 4px;border:none;background:none;font-size:14px;cursor:pointer;color:var(--text-muted);line-height:1;letter-spacing:1px;">&#8942;</button>'+
+        (bankCanEditGoal(g) ? '<button onclick="bankToggleRowMenu('+g._idx+',this)" style="padding:2px 4px;border:none;background:none;font-size:14px;cursor:pointer;color:var(--text-muted);line-height:1;letter-spacing:1px;">&#8942;</button>' : '')+
       '</td>'+
     '</tr>';
   }).join('');
@@ -5182,6 +5185,17 @@ function bankSaveMonthTargetsAll() {
 
 // ── Bank row menu ───────────────────────────────────────────────
 var _bankActiveMenuIdx=null;
+function bankCanEditGoal(g) {
+  // Admins can edit any goal
+  if (!currentProfile || currentProfile.role === 'admin') return true;
+  // Managers cannot edit company goals or deactivate
+  var tier = g ? (g.goalTier || inferTier(g)) : '';
+  if (tier === 'company') return false;
+  // Managers can only edit goals in their own departments
+  var mgDepts = currentProfile.departments || [];
+  return !g.department || mgDepts.indexOf(g.department) !== -1;
+}
+
 function bankToggleRowMenu(idx,btn){
   event.stopPropagation();
   var menu=document.getElementById('gs2-row-menu');
@@ -5264,9 +5278,15 @@ function bankShowInlineRow(g, targetRow){
   var labelS='font-size:9px;color:var(--text-muted);font-family:var(--mono);display:block;margin-bottom:2px;';
   var bg='background:#fffbe6;';
 
-  var typeOpts='<option value="">Type</option><option value="company"'+(tier==='company'?' selected':'')+'>Company</option><option value="department"'+(tier==='department'?' selected':'')+'>Department</option><option value="individual"'+(tier==='individual'?' selected':'')+'>Individual</option>';
+  var isAdminUser2 = !currentProfile || currentProfile.role === 'admin';
+  var typeOpts='<option value="">Type</option>'+(isAdminUser2?'<option value="company"'+(tier==='company'?' selected':'')+'>Company</option>':'')+
+    '<option value="department"'+(tier==='department'?' selected':'')+'>Department</option>'+
+    '<option value="individual"'+(tier==='individual'?' selected':'')+'>Individual</option>';
   var locOpts='<option value="">Location</option><option value="Utah"'+(g&&g.location==='Utah'?' selected':'')+'>Utah</option><option value="Georgia"'+(g&&g.location==='Georgia'?' selected':'')+'>Georgia</option><option value="Remote"'+(g&&g.location==='Remote'?' selected':'')+'>Remote</option>';
-  var deptOpts='<option value="">Department</option>'+['Client Care','Design','Experience','Fulfillment','General & Administrative','Growth','Marketing','Operations','Preservation','Recreation','Resin'].map(function(d){return '<option value="'+escAttr(d)+'"'+(g&&g.department===d?' selected':'')+'>'+escAttr(d)+'</option>';}).join('');
+  var allDepts2 = ['Client Care','Design','Experience','Fulfillment','General & Administrative','Growth','Marketing','Operations','Preservation','Recreation','Resin'];
+  var allowedDepts2 = (currentProfile && currentProfile.role !== 'admin' && (currentProfile.departments||[]).length)
+    ? currentProfile.departments : allDepts2;
+  var deptOpts='<option value="">Department</option>'+allowedDepts2.map(function(d){return '<option value="'+escAttr(d)+'"'+(g&&g.department===d?' selected':'')+'>'+escAttr(d)+'</option>';}).join('');
   var lowerOpts='<option value="true"'+(!g||g.lowerBetter!==false?' selected':'')+'>Yes</option><option value="false"'+(g&&g.lowerBetter===false?' selected':'')+'>No</option>';
   var cappedOpts='<option value="no"'+(!g||g.capped!=='yes'?' selected':'')+'>No</option><option value="yes"'+(g&&g.capped==='yes'?' selected':'')+'>Yes</option>';
 
@@ -5357,6 +5377,9 @@ async function bankSaveInline(){
 
   if(!type){showToast('Select a goal type','error');return;}
   if(!name){showToast('Goal name is required','error');return;}
+  if(type==='company' && currentProfile && currentProfile.role !== 'admin') {
+    showToast('Only admins can create company goals','error'); return;
+  }
 
   if((type==='department'||type==='individual')&&!dept){showToast('Department is required','error');return;}
   if(type==='individual'&&!role){showToast('Role is required','error');return;}
@@ -5416,11 +5439,14 @@ async function bankSaveInline(){
     if (mmEl && mmEl.value !== '') targets2[mKey2].min    = parseFloat(mmEl.value);
     bankSaveMonthTargets(monthVal2, targets2);
   }
-  bankEditIdx=null;
+  // Capture sbId and editIdx BEFORE clearing them
+  var editingIdx = bankEditIdx;
+  var sbId = (editingIdx!==null && bankGoals[editingIdx]) ? bankGoals[editingIdx]._sbId : null;
 
   if (sb && currentUser) {
-    var sbResult = await sbSaveGoal(goal, bankEditIdx!==null ? (bankGoals[bankEditIdx]&&bankGoals[bankEditIdx]._sbId) : null);
+    var sbResult = await sbSaveGoal(goal, sbId);
     if (sbResult && sbResult.error) { showToast('Error saving: ' + sbResult.error.message, 'error'); return; }
+    if (sbResult && sbResult.data && sbResult.data.id) goal._sbId = sbResult.data.id;
   } else {
     await bankSave();
   }
