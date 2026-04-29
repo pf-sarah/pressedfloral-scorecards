@@ -861,8 +861,9 @@ function initSupabase() {
         currentUser = session.user;
         updateUserBadge();
       } else if (event === 'SIGNED_OUT') {
-        // Only clear if this was an explicit sign-out (not a token refresh blip)
-        if (!currentUser) return;
+        // Verify session is truly gone before showing auth overlay
+        var check = await sb.auth.getSession();
+        if (check.data && check.data.session) return; // still have a session, ignore
         currentUser = null;
         currentProfile = null;
         localStorage.removeItem('pf-current-email');
@@ -3213,6 +3214,7 @@ function renderHistory() {
     '<th style="'+thS+colGoal+'">Min</th>'+
     '<th style="'+thS+colAct+'">Actual</th>'+
     '<th style="'+thS+colAct+'">Achieve%</th>'+
+    '<th style="'+thS+'background:#fff;width:30px;"></th>'+
     '<th style="'+thS+colPay+'">Base Earnings</th>'+
     '<th style="'+thS+colPay+'">Bonus $</th>'+
     '</tr></thead>';
@@ -4137,6 +4139,11 @@ function gs2ToggleRowMenu(idx, btn) {
   // Show/hide deactivate + delete based on role
   var isAdminMenu = !currentProfile || currentProfile.role === 'admin';
   document.getElementById('gs2-row-menu-delete').style.display = isAdminMenu ? '' : 'none';
+  var deactivateBtn = document.getElementById('gs2-row-menu-delete');
+  // Also hide deactivate option for non-admins
+  if (deactivateBtn && deactivateBtn.previousElementSibling) {
+    deactivateBtn.previousElementSibling.style.display = isAdminMenu ? '' : 'none';
+  }
 }
 function gs2CloseRowMenus() {
   var menu = document.getElementById('gs2-row-menu');
@@ -4980,6 +4987,7 @@ async function bankLoad() {
         }
         // Also cache locally
         localStorage.setItem(BANK_KEY, JSON.stringify(bankGoals));
+        actGoals = bankGoals; // keep actuals in sync
         bankRender();
         var title = document.getElementById('bank-table-title');
         if (title) title.textContent = 'Goal Bank (' + bankGoals.filter(function(g){return g.active!==false;}).length + ' active)';
@@ -5257,12 +5265,14 @@ function bankEditDone(){
 }
 
 function bankOpenEdit(idx){
+  var g = bankGoals[idx];
+  if (!g) return;
   bankCancelInline(true);
   bankEditIdx=idx;
-  // Don't re-render — find the existing row by data-idx and insert after it
+  bankEditSbId = g._sbId || null; // store sbId separately so it survives re-renders
   var tbody = document.getElementById('bank-tbody');
   var targetRow = tbody ? tbody.querySelector('tr[data-idx="'+idx+'"]') : null;
-  bankShowInlineRow(bankGoals[idx], targetRow);
+  bankShowInlineRow(g, targetRow);
 }
 
 function bankShowInlineRow(g, targetRow){
@@ -5418,9 +5428,9 @@ async function bankSaveInline(){
       var msg = 'A similar goal already exists:\n\n' + lines.join('\n') + '\n\nSave anyway?';
       if(!confirm(msg)) return;
     }
-  }  // Capture editIdx and sbId BEFORE any mutations
+  }  // Use stored sbId for edits (more reliable than array lookup)
   var editingIdx2 = bankEditIdx;
-  var sbId2 = (editingIdx2!==null && bankGoals[editingIdx2]) ? bankGoals[editingIdx2]._sbId : null;
+  var sbId2 = bankEditSbId || ((editingIdx2!==null && bankGoals[editingIdx2]) ? bankGoals[editingIdx2]._sbId : null);
 
   // Save month target/min
   var monthVal2 = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
@@ -5454,12 +5464,14 @@ async function bankSaveInline(){
   showToast('Goal saved to bank!','success');
   bankCancelInline(true);
   bankEditIdx=null;
+  bankEditSbId=null;
   await bankLoad();
 }
 
 // ── Actuals (Company + Dept) ────────────────────────────────────
 var actGoals = [];
 var actAllActuals = {};  // {monthKey: {goalKey: value}}
+var actEditKey = null;   // 'key|month' of row currently being edited
 var ACT_ACTUALS_PREFIX = 'actuals-v1:';
 
 function actGoalKey(g) {
@@ -5499,8 +5511,10 @@ function actPopulateMonthFilter() {
 }
 
 async function actLoad() {
-  // Load goals from Supabase or localStorage
-  if (sb && currentUser) {
+  // Always use bankGoals if already loaded (avoids double fetch)
+  if (bankGoals && bankGoals.length > 0) {
+    actGoals = bankGoals;
+  } else if (sb && currentUser) {
     var data = await sbLoadGoalBank();
     if (data) {
       actGoals = data.map(function(r) {
@@ -5582,6 +5596,7 @@ function actRender() {
     '<th style="'+thS+colAct+'">Month</th>'+
     '<th style="'+thS+colAct+'">Actual</th>'+
     '<th style="'+thS+colAct+'">Achieve%</th>'+
+    '<th style="'+thS+'background:#fff;width:30px;"></th>'+
     
   '</tr>';
 
@@ -5650,12 +5665,32 @@ function actRender() {
           var noTargetMin = (tv===undefined||tv===null||tv==='') || (mv===undefined||mv===null||mv==='');
           if (noTargetMin) return '<span style="font-size:10px;color:var(--text-muted);font-family:var(--mono);padding:2px 4px;background:var(--surface2);border-radius:3px;display:inline-block;" title="Set Target and Minimum in Goal Bank first">No target/min set</span>';
           if (isCompany && !isAdmin) return '<span style="font-size:11px;font-family:var(--mono);color:var(--text);">'+(r.actual!==null&&r.actual!==''?r.actual:'—')+'</span>';
-          return '<input type="number" step="any" value="'+escAttr(String(r.actual))+'" data-key="'+escAttr(r.key)+'" data-month="'+escAttr(r.month)+'" oninput="actMarkDirty()" style="width:100%;padding:3px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid var(--brick);border-radius:4px;background:#fff;">';
+          var isEditing = actEditKey === (r.key+'|'+r.month);
+          if (!isEditing) return '<span style="font-size:11px;font-family:var(--mono);color:var(--text);cursor:default;">'+(r.actual!==null&&r.actual!==''?r.actual:'—')+'</span>';
+          return '<input type="number" step="any" value="'+escAttr(String(r.actual))+'" data-key="'+escAttr(r.key)+'" data-month="'+escAttr(r.month)+'" oninput="actMarkDirty()" style="width:100%;padding:3px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid var(--brick);border-radius:4px;background:#fff;" autofocus>';
         })()+
       '</td>'+
       '<td style="padding:5px 6px;'+border+colAct+r.achColor+'">'+r.ach+'</td>'+
+      '<td style="padding:3px 4px;'+border+'background:#fff;">'+
+        ((!isCompany || isAdmin) ?
+          '<button onclick="actOpenEdit(this)" data-editkey="'+escAttr(r.key)+'|'+escAttr(r.month)+'" style="padding:2px 4px;border:none;background:none;font-size:14px;cursor:pointer;color:var(--text-muted);line-height:1;letter-spacing:1px;">&#8942;</button>'
+          : '') +
+      '</td>'+
     '</tr>';
   }).join('');
+}
+
+function actOpenEdit(btn) {
+  var keyMonth = btn.dataset ? btn.dataset.editkey : btn;
+  actEditKey = actEditKey === keyMonth ? null : keyMonth;
+  actRender();
+  // Focus input if opened
+  if (actEditKey) {
+    setTimeout(function() {
+      var inp = document.querySelector('#act-tbody input[type="number"]');
+      if (inp) inp.focus();
+    }, 50);
+  }
 }
 
 function actMarkDirty() {
@@ -5685,6 +5720,7 @@ async function actSaveAll() {
   }
   var bar = document.getElementById('act-save-bar');
   if (bar) bar.style.display = 'none';
+  actEditKey = null;
   showToast('Actuals saved!', 'success');
   actRender();
 }
