@@ -5607,11 +5607,18 @@ function actRender() {
       var ach='—', achColor='color:var(--text-muted);';
       if (actual!=='') {
         var lb=g.lowerBetter!==false;
-        var pct=lb?(parseFloat(g.goalValue)/parseFloat(actual))*100:(parseFloat(actual)/parseFloat(g.goalValue))*100;
+        var mKeyAct0=(g._sbId||g.name)+'|'+(g.goalTier||'');
+        var mdAct0=monthTargets2[mKeyAct0]||{};
+        var tvAct0=mdAct0.target!==undefined?mdAct0.target:g.goalValue;
+        var pct=lb?(parseFloat(tvAct0)/parseFloat(actual))*100:(parseFloat(actual)/parseFloat(tvAct0))*100;
         if(g.capped==='yes') pct=Math.min(pct,parseFloat(g.capPct)||100);
         ach=pct.toFixed(1)+'%'; achColor=pct>=100?'color:#2D6B1A;font-weight:700;':'color:#703c2e;font-weight:700;';
       }
-      rows.push({g:g,tier:tier,key:key,month:month,actual:actual,ach:ach,achColor:achColor});
+      var mKeyAct=(g._sbId||g.name)+'|'+(g.goalTier||'');
+      var mdAct=monthTargets2[mKeyAct]||{};
+      var tvAct=mdAct.target!==undefined?mdAct.target:g.goalValue;
+      var mvAct=mdAct.min!==undefined?mdAct.min:g.minValue;
+      rows.push({g:g,tier:tier,key:key,month:month,actual:actual,ach:ach,achColor:achColor,target:tvAct,min:mvAct});
     });
   });
 
