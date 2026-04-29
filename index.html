@@ -952,6 +952,7 @@ function showAuthOverlay() {
 function hideAuthOverlay() {
   var overlay = document.getElementById('auth-overlay');
   if (overlay) overlay.style.display = 'none';
+  updateUserBadge();
 }
 
 async function authSignIn() {
@@ -5215,22 +5216,28 @@ function bankToggleRowMenu(idx,btn){
   menu.style.left=Math.min(rect.right-130,window.innerWidth-140)+'px';
   var g=bankGoals[idx];
   var isInactive=g&&g.active===false;
+  var isAdminUser3 = !currentProfile || currentProfile.role === 'admin';
   document.getElementById('gs2-row-menu-edit').innerHTML='&#9998;&nbsp; Edit';
   document.getElementById('gs2-row-menu-edit').onclick=function(){menu.style.display='none';_bankActiveMenuIdx=null;bankOpenEdit(idx);};
-  document.getElementById('gs2-row-menu-delete').innerHTML=(isInactive?'&#9654;&nbsp; Activate':'&#9646;&#9646;&nbsp; Deactivate');
-  document.getElementById('gs2-row-menu-delete').style.color=isInactive?'#1a5c1a':'var(--text-muted)';
-  document.getElementById('gs2-row-menu-delete').onclick=function(){menu.style.display='none';_bankActiveMenuIdx=null;bankToggleActive(idx);};
-  // Add delete option
+  // Deactivate — admin only
+  var deactEl = document.getElementById('gs2-row-menu-delete');
+  deactEl.style.display = isAdminUser3 ? '' : 'none';
+  deactEl.innerHTML=(isInactive?'&#9654;&nbsp; Activate':'&#9646;&#9646;&nbsp; Deactivate');
+  deactEl.style.color=isInactive?'#1a5c1a':'var(--text-muted)';
+  deactEl.onclick=function(){menu.style.display='none';_bankActiveMenuIdx=null;bankToggleActive(idx);};
+  // Delete — admin only
   var existing=document.getElementById('gs2-row-menu-harddelete');
   if(existing) existing.remove();
-  var delDiv=document.createElement('div');
-  delDiv.id='gs2-row-menu-harddelete';
-  delDiv.innerHTML='&#128465;&nbsp; Delete';
-  delDiv.style.cssText='display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;font-size:12px;font-family:var(--sans);color:var(--brick);border-radius:4px;border-top:1px solid var(--border);margin-top:4px;';
-  delDiv.onmouseover=function(){this.style.background='var(--surface2)';};
-  delDiv.onmouseout=function(){this.style.background='none';};
-  delDiv.onclick=function(){menu.style.display='none';_bankActiveMenuIdx=null;bankDelete(idx);};
-  menu.appendChild(delDiv);
+  if (isAdminUser3) {
+    var delDiv=document.createElement('div');
+    delDiv.id='gs2-row-menu-harddelete';
+    delDiv.innerHTML='&#128465;&nbsp; Delete';
+    delDiv.style.cssText='display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;font-size:12px;font-family:var(--sans);color:var(--brick);border-radius:4px;border-top:1px solid var(--border);margin-top:4px;';
+    delDiv.onmouseover=function(){this.style.background='var(--surface2)';};
+    delDiv.onmouseout=function(){this.style.background='none';};
+    delDiv.onclick=function(){menu.style.display='none';_bankActiveMenuIdx=null;bankDelete(idx);};
+    menu.appendChild(delDiv);
+  }
 }
 
 async function bankToggleActive(idx){
