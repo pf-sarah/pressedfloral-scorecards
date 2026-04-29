@@ -857,9 +857,16 @@ function initSupabase() {
       if (event === 'SIGNED_IN' && session && session.user) {
         currentUser = session.user;
         await loadUserProfile();
+      } else if (event === 'TOKEN_REFRESHED' && session && session.user) {
+        currentUser = session.user;
+        updateUserBadge();
       } else if (event === 'SIGNED_OUT') {
+        // Only clear if this was an explicit sign-out (not a token refresh blip)
+        if (!currentUser) return;
         currentUser = null;
         currentProfile = null;
+        localStorage.removeItem('pf-current-email');
+        localStorage.removeItem('pf-current-role');
         showAuthOverlay();
       }
     });
@@ -901,23 +908,24 @@ async function loadUserProfile() {
 function updateUserBadge() {
   var emailEl = document.getElementById('user-email-display');
   var roleEl  = document.getElementById('user-role-display');
-  // Persist to localStorage so badge survives page reload
-  if (currentUser) {
-    localStorage.setItem('pf-current-email', currentUser.email);
-    if (currentProfile) localStorage.setItem('pf-current-role', JSON.stringify(currentProfile));
+  // Always persist whatever we have
+  if (currentUser && currentUser.email) localStorage.setItem('pf-current-email', currentUser.email);
+  if (currentProfile) localStorage.setItem('pf-current-role', JSON.stringify(currentProfile));
+  // Use live data first, fall back to cache — badge never clears unless explicit sign-out
+  var cachedProfile = null;
+  try { cachedProfile = JSON.parse(localStorage.getItem('pf-current-role')||'null'); } catch(e) {}
+  var profile = currentProfile || cachedProfile;
+  var email   = (currentUser && currentUser.email) || localStorage.getItem('pf-current-email') || '';
+  if (emailEl && email) emailEl.textContent = email;
+  if (roleEl && profile) {
+    roleEl.textContent = profile.role === 'admin'
+      ? 'Admin — full access'
+      : 'Manager — ' + (profile.departments||[]).join(', ');
+  } else if (roleEl && email) {
+    roleEl.textContent = 'Signed in';
   }
-  var email = (currentUser && currentUser.email) || localStorage.getItem('pf-current-email') || 'Not signed in';
-  if (emailEl) emailEl.textContent = email;
-  if (roleEl) {
-    var profile = currentProfile || (function(){ try { return JSON.parse(localStorage.getItem('pf-current-role')||'null'); } catch(e){ return null; } })();
-    if (profile) {
-      roleEl.textContent = profile.role === 'admin'
-        ? 'Admin — full access'
-        : 'Manager — ' + (profile.departments||[]).join(', ');
-    } else if (email !== 'Not signed in') {
-      roleEl.textContent = 'Signed in';
-    }
-  }
+  // Restore currentProfile from cache if missing (e.g. after token refresh)
+  if (!currentProfile && cachedProfile) currentProfile = cachedProfile;
 }
 
 function applyRoleRestrictions() {
@@ -5497,6 +5505,10 @@ function actRender() {
   var monthVal2 = monthF; // e.g. '2026-04'
   var monthTargets2 = monthVal2 ? bankGetMonthTargets(monthVal2) : {};
 
+  // Scope actuals to manager's departments/locations
+  var mgDepts = (currentProfile && currentProfile.role !== 'admin') ? (currentProfile.departments||[]) : [];
+  var mgLocs  = (currentProfile && currentProfile.role !== 'admin') ? (currentProfile.locations||[])  : [];
+
   var filtered = actGoals.filter(function(g) {
     if (g.active === false) return false;
     var tier = g.goalTier || inferTier(g);
@@ -5504,6 +5516,12 @@ function actRender() {
     if (typeF && tier !== typeF) return false;
     if (deptF && g.department && g.department !== deptF) return false;
     if (locF  && g.location   && g.location   !== locF)  return false;
+    // Scope: company goals show for everyone; dept goals scoped to manager's dept/loc
+    if (tier === 'department') {
+      var deptOk = mgDepts.length === 0 || !g.department || mgDepts.indexOf(g.department) !== -1;
+      var locOk  = mgLocs.length  === 0 || !g.location   || mgLocs.indexOf(g.location)   !== -1;
+      if (!deptOk || !locOk) return false;
+    }
     return true;
   });
 
@@ -5588,12 +5606,14 @@ function actRender() {
       td(g.lowerBetter!==false?'Yes':'No',colGoal)+td(g.capped==='yes'?'Yes':'No',colGoal)+
       '<td style="padding:5px 6px;'+border+colAct+'font-size:10px;color:var(--text-muted);">'+escAttr(formatMonthLabel(r.month))+'</td>'+
       '<td style="padding:3px 5px;'+border+colAct+'">'+
-        ((!g.goalValue && g.goalValue !== 0) || (!g.minValue && g.minValue !== 0)
-          ? '<span style="font-size:10px;color:var(--text-muted);font-family:var(--mono);padding:2px 4px;background:var(--surface2);border-radius:3px;display:inline-block;" title="Set Target and Minimum in Goal Bank first">No target/min set</span>'
-          : '<input type="number" step="any" value="'+escAttr(String(r.actual))+'" data-key="'+escAttr(r.key)+'" data-month="'+escAttr(r.month)+'" '+
-            'oninput="actMarkDirty()" '+
-            'style="width:100%;padding:3px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid var(--brick);border-radius:4px;background:#fff;">'
-        )+
+        (function(){
+          var isAdmin = !currentProfile || currentProfile.role === 'admin';
+          var isCompany = (g.goalTier||inferTier(g)) === 'company';
+          var noTargetMin = (!g.goalValue && g.goalValue !== 0) || (!g.minValue && g.minValue !== 0);
+          if (noTargetMin) return '<span style="font-size:10px;color:var(--text-muted);font-family:var(--mono);padding:2px 4px;background:var(--surface2);border-radius:3px;display:inline-block;" title="Set Target and Minimum in Goal Bank first">No target/min set</span>';
+          if (isCompany && !isAdmin) return '<span style="font-size:11px;font-family:var(--mono);color:var(--text);">'+(r.actual!==null&&r.actual!==''?r.actual:'—')+'</span>';
+          return '<input type="number" step="any" value="'+escAttr(String(r.actual))+'" data-key="'+escAttr(r.key)+'" data-month="'+escAttr(r.month)+'" oninput="actMarkDirty()" style="width:100%;padding:3px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid var(--brick);border-radius:4px;background:#fff;">';
+        })()+
       '</td>'+
       '<td style="padding:5px 6px;'+border+colAct+r.achColor+'">'+r.ach+'</td>'+
     '</tr>';
@@ -6041,8 +6061,8 @@ function scRender() {
       '<td style="padding:4px 4px;'+border+colCtx+'">'+(g.isMisc?'':escAttr(g.role||'—'))+'</td>'+
       '<td style="padding:4px 4px;'+border+colGoal+'">'+(g.isMisc?'<input id="sc-'+i+'-name" type="text" value="'+escAttr(g.name||'')+'" placeholder="Goal name" onblur="scGoals['+i+'].name=this.value" style="width:100%;padding:2px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid var(--border);border-radius:3px;">':'<strong>'+escAttr(g.name)+'</strong>')+'</td>'+
       '<td style="padding:4px 4px;'+border+colGoal+'"><input id="sc-'+i+'-weight" type="number" step="any" value="'+escAttr(String(g.scWeight||''))+'" placeholder="%" onblur="scGoals['+i+'].scWeight=this.value;scRender()" style="width:100%;padding:2px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid '+(weightOk?'var(--border)':'#e0a0a0')+';border-radius:3px;"></td>'+
-      '<td style="padding:4px 4px;'+border+colGoal+'"><input id="sc-'+i+'-target" type="number" step="any" value="'+escAttr(String(g.scTarget||''))+'" onblur="scGoals['+i+'].scTarget=this.value;scRender()" style="width:100%;padding:2px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid var(--border);border-radius:3px;"></td>'+
-      '<td style="padding:4px 4px;'+border+colGoal+'"><input id="sc-'+i+'-min" type="number" step="any" value="'+escAttr(String(g.minValue||''))+'" onblur="scGoals['+i+'].minValue=this.value" style="width:100%;padding:2px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid var(--border);border-radius:3px;"></td>'+
+      '<td style="padding:4px 4px;'+border+colGoal+'"><span style="font-size:11px;font-family:var(--mono);color:var(--text);">'+(g.scTarget!==undefined&&g.scTarget!==''?g.scTarget:'—')+'</span></td>'+
+      '<td style="padding:4px 4px;'+border+colGoal+'"><span style="font-size:11px;font-family:var(--mono);color:var(--text);">'+(g.minValue!==undefined&&g.minValue!==''?g.minValue:'—')+'</span></td>'+
       '<td style="padding:4px 4px;'+border+colGoal+'"><select id="sc-'+i+'-lower" onchange="scGoals['+i+'].lowerBetter=(this.value===\'true\');scRender()" style="width:100%;padding:2px 3px;font-size:11px;font-family:var(--sans);border:1.5px solid var(--border);border-radius:3px;">'+lowerOpts+'</select></td>'+
       '<td style="padding:4px 4px;'+border+colAct+'">'+
         (isDeptOrCo
