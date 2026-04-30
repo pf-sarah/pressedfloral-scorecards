@@ -5372,7 +5372,7 @@ function bankInlineCappedChange(){
 function bankCancelInline(silent){
   var row=document.getElementById('bank-inline-row');
   if(row) row.remove();
-  bankEditIdx=null;
+  if(!silent) { bankEditIdx=null; bankEditSbId=null; }
   if(!silent) bankRender();
   // Clean up extra delete option from menu
   var extra=document.getElementById('gs2-row-menu-harddelete');
@@ -5413,6 +5413,8 @@ async function bankSaveInline(){
     var nameLower = name.toLowerCase().replace(/[^a-z0-9]/g,'');
     var similar = bankGoals.filter(function(g) {
       if(g.active===false) return false;
+      // Skip the goal being edited
+      if(g._sbId && bankEditSbId && g._sbId===bankEditSbId) return false;
       // Must be same tier
       if((g.goalTier||inferTier(g))!==type) return false;
       // For dept/individual goals, must match dept and loc
@@ -5544,11 +5546,21 @@ function actResetFilters() {
   actRender();
 }
 
-function actRender() {
+async function actRender() {
   var monthF = document.getElementById('act-month') ? document.getElementById('act-month').value : '';
   var typeF  = document.getElementById('act-type')  ? document.getElementById('act-type').value  : '';
   var deptF  = document.getElementById('act-dept')  ? document.getElementById('act-dept').value  : '';
   var locF   = document.getElementById('act-loc')   ? document.getElementById('act-loc').value   : '';
+
+  // Load actuals from Supabase for this month and merge into actAllActuals
+  if (sb && currentUser && monthF) {
+    var period = formatMonthLabel(monthF); // e.g. 'April 2026'
+    var sbActuals = await sbLoadActuals(period);
+    if (sbActuals && Object.keys(sbActuals).length) {
+      if (!actAllActuals[monthF]) actAllActuals[monthF] = {};
+      Object.assign(actAllActuals[monthF], sbActuals);
+    }
+  }
 
   var monthVal2 = monthF; // e.g. '2026-04'
   var monthTargets2 = monthVal2 ? bankGetMonthTargets(monthVal2) : {};
@@ -5721,7 +5733,11 @@ async function actSaveAll() {
     inputs.forEach(function(inp) {
       var key = inp.dataset.key, month = inp.dataset.month;
       var val = inp.value !== '' ? parseFloat(inp.value) : null;
-      if (key && month && val !== null) saves.push(sbSaveActual(month, key, val));
+      if (key && month && val !== null) {
+        // Save to Supabase using formatted period like 'April 2026'
+        var period = formatMonthLabel(month) || month;
+        saves.push(sbSaveActual(period, key, val));
+      }
     });
     await Promise.all(saves);
   }
