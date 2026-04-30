@@ -178,10 +178,7 @@
     </div>
     <div style="font-size:9px;font-weight:700;color:var(--text-faint);letter-spacing:0.8px;padding:12px 10px 4px;font-family:var(--mono);">MANAGE</div>
     <div onclick="switchMode('setup')" class="nav-item" id="nav-item-setup">
-      <span class="nav-icon">&#9776;</span> Goal Bank
-    </div>
-    <div onclick="switchMode('actuals')" class="nav-item" id="nav-item-actuals">
-      <span class="nav-icon">&#10003;</span> Enter Actuals
+      <span class="nav-icon">&#9776;</span> Goals & Actuals
     </div>
     <div onclick="switchMode('scorecard')" class="nav-item" id="nav-item-scorecard">
       <span class="nav-icon">&#9998;</span> Build Scorecard
@@ -228,13 +225,11 @@
       <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
         <div onclick="switchMode('setup')" style="background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:24px 20px;cursor:pointer;transition:all 0.15s;min-height:160px;" onmouseover="this.style.borderColor='var(--brick)';this.style.background='var(--surface2)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--surface)'">
           <div style="font-size:22px;margin-bottom:12px;">&#9776;</div>
-          <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;">Goal Bank</div>
-          <div style="font-size:11px;color:var(--text-muted);line-height:1.5;">Manage your persistent library of goals used to build scorecards.</div>
+          <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;">Goals & Actuals</div>
+          <div style="font-size:11px;color:var(--text-muted);line-height:1.5;">Manage goals and enter monthly actuals in one place.</div>
         </div>
         <div onclick="switchMode('actuals')" style="background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:24px 20px;cursor:pointer;transition:all 0.15s;min-height:160px;" onmouseover="this.style.borderColor='var(--brick)';this.style.background='var(--surface2)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--surface)'">
-          <div style="font-size:22px;margin-bottom:12px;">&#10003;</div>
-          <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;">Enter Actuals</div>
-          <div style="font-size:11px;color:var(--text-muted);line-height:1.5;">Enter monthly actuals for company and department goals.</div>
+
         </div>
         <div onclick="switchMode('scorecard')" style="background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:24px 20px;cursor:pointer;transition:all 0.15s;min-height:160px;" onmouseover="this.style.borderColor='var(--brick)';this.style.background='var(--surface2)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--surface)'">
           <div style="font-size:22px;margin-bottom:12px;">&#9998;</div>
@@ -271,11 +266,11 @@
 
   <div class="screen" id="screen-setup">
 
-    <!-- Filter bar -->
+    <!-- Mode toggle + Filter bar -->
     <section style="padding:14px 16px;">
       <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
         <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
-          <div class="section-title" id="bank-table-title" style="margin:0;">Goal Bank</div>
+          <div class="section-title" id="bank-table-title" style="margin:0;">Goals & Actuals</div>
           <select id="bank-month" onchange="bankLoad()" style="padding:5px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;background:var(--surface);">
             <option value="">No month selected</option>
           </select>
@@ -333,6 +328,11 @@
         </select>
         <button onclick="bankResetFilters()" style="padding:7px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:none;font-family:var(--sans);font-size:12px;cursor:pointer;color:var(--text-muted);">Reset</button>
       </div>
+      <!-- Mode toggle -->
+      <div style="display:flex;gap:8px;margin-top:12px;">
+        <button id="bank-mode-goals" onclick="setBankMode('goals')" style="padding:6px 16px;border:1.5px solid var(--brick);border-radius:var(--radius-sm);background:var(--brick);color:#fff;font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;">Edit Goals</button>
+        <button id="bank-mode-actuals" onclick="setBankMode('actuals')" style="padding:6px 16px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:none;color:var(--text-muted);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;">Add Actuals</button>
+      </div>
     </section>
 
     <!-- Goals table -->
@@ -364,96 +364,6 @@
       <div style="padding:12px 16px;">
         <button onclick="bankOpenAdd()" class="add-goal-btn" style="width:100%;">+ Add Goal to Bank</button>
       </div>
-    </section>
-
-  </div>
-
-  <div class="screen" id="screen-actuals">
-
-    <!-- Filter bar -->
-    <section style="padding:14px 16px;">
-      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
-        <div class="field" style="flex:1;min-width:130px;margin:0;">
-          <label style="font-size:9px;font-weight:700;color:var(--text-muted);font-family:var(--mono);letter-spacing:0.3px;display:block;margin-bottom:4px;">MONTH</label>
-          <select id="act-month" onchange="actRender()" style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;background:var(--surface);">
-            <option value="">All months</option>
-          </select>
-        </div>
-        <div class="field" style="flex:1;min-width:130px;margin:0;">
-          <label style="font-size:9px;font-weight:700;color:var(--text-muted);font-family:var(--mono);letter-spacing:0.3px;display:block;margin-bottom:4px;">TYPE</label>
-          <select id="act-type" onchange="actRender()" style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;background:var(--surface);">
-            <option value="">Company &amp; Department</option>
-            <option value="company">Company only</option>
-            <option value="department">Department only</option>
-          </select>
-        </div>
-        <div class="field" style="flex:1;min-width:130px;margin:0;">
-          <label style="font-size:9px;font-weight:700;color:var(--text-muted);font-family:var(--mono);letter-spacing:0.3px;display:block;margin-bottom:4px;">DEPARTMENT</label>
-          <select id="act-dept" onchange="actRender()" style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;background:var(--surface);">
-            <option value="">All departments</option>
-            <option value="Client Care">Client Care</option>
-            <option value="Design">Design</option>
-            <option value="Experience">Experience</option>
-            <option value="Fulfillment">Fulfillment</option>
-            <option value="General &amp; Administrative">General &amp; Administrative</option>
-            <option value="Growth">Growth</option>
-            <option value="Marketing">Marketing</option>
-            <option value="Operations">Operations</option>
-            <option value="Preservation">Preservation</option>
-            <option value="Recreation">Recreation</option>
-            <option value="Resin">Resin</option>
-          </select>
-        </div>
-        <div class="field" style="flex:1;min-width:110px;margin:0;">
-          <label style="font-size:9px;font-weight:700;color:var(--text-muted);font-family:var(--mono);letter-spacing:0.3px;display:block;margin-bottom:4px;">LOCATION</label>
-          <select id="act-loc" onchange="actRender()" style="width:100%;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;background:var(--surface);">
-            <option value="">All locations</option>
-            <option value="Utah">Utah</option>
-            <option value="Georgia">Georgia</option>
-            <option value="Remote">Remote</option>
-          </select>
-        </div>
-        <div style="align-self:flex-end;">
-          <button onclick="actResetFilters()" style="padding:7px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:none;font-family:var(--sans);font-size:12px;cursor:pointer;color:var(--text-muted);">Reset</button>
-        </div>
-      </div>
-    </section>
-
-    <!-- Goals table -->
-    <section style="padding:0;">
-      <div style="padding:10px 16px 8px;display:flex;align-items:center;justify-content:space-between;">
-        <div class="section-title" id="act-table-title" style="margin:0;">Goals</div>
-      </div>
-      <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;font-size:11px;font-family:var(--mono);table-layout:fixed;">
-          <colgroup>
-            <col style="width:52px">   <!-- Type -->
-            <col style="width:60px">   <!-- Location -->
-            <col style="width:95px">   <!-- Department -->
-            <col style="width:120px">  <!-- Goal Name -->
-            <col style="width:50px">   <!-- Default Target -->
-            <col style="width:50px">   <!-- Min -->
-            <col style="width:66px">   <!-- Lower Better -->
-            <col style="width:58px">   <!-- Capped -->
-            <col style="width:75px">   <!-- Month -->
-            <col style="width:90px">   <!-- Actual -->
-            <col style="width:62px">   <!-- Achieve% -->
-
-          </colgroup>
-          <thead id="act-thead"></thead>
-          <tbody id="act-tbody"></tbody>
-        </table>
-      </div>
-      <div id="act-empty" style="display:none;padding:20px 16px;font-size:13px;color:var(--text-muted);font-family:var(--mono);">No company or department goals found in the Goal Bank.</div>
-      <div id="act-save-bar" style="display:none;padding:12px 16px;border-top:1.5px solid var(--border);background:var(--brick-light);">
-        <button onclick="actSaveAll()" style="padding:10px 24px;background:var(--brick);color:#fff;border:none;border-radius:var(--radius-sm);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;">&#10003; Save Actuals</button>
-        <span style="font-size:12px;color:var(--text-muted);font-family:var(--mono);margin-left:12px;">You have unsaved changes</span>
-      </div>
-    </section>
-
-    <section style="background:var(--surface2);border-style:dashed;">
-      <div class="section-title">Export</div>
-      <button onclick="actExportCSV()" style="width:100%;padding:10px;border:1.5px solid var(--border-strong);border-radius:var(--radius-sm);background:none;font-family:var(--sans);font-size:13px;font-weight:500;cursor:pointer;color:var(--text);">&#8595; Export Actuals CSV</button>
     </section>
 
   </div>
@@ -1453,18 +1363,18 @@ function updateHeaderLabel() {
 
 function switchMode(mode) {
   currentMode = mode;
-  ['landing','setup','actuals','history','rippling','guide','scorecard','migrate'].forEach(function(m) {
+  ['landing','setup','history','rippling','guide','scorecard','migrate'].forEach(function(m) {
     var screen = document.getElementById('screen-' + m);
     if (screen) screen.className = 'screen' + (m === mode ? ' active' : '');
     var navItem = document.getElementById('nav-item-' + m);
     if (navItem) navItem.className = 'nav-item' + (m === mode ? ' active' : '');
   });
   // Update header label
-  var labels = { setup:'Goal Bank', actuals:'Enter Actuals', history:'Historical Data', rippling:'Rippling Data', guide:'How To Use', scorecard:'Build Scorecard', landing:'Home' };
+  var labels = { setup:'Goals & Actuals', history:'Historical Data', rippling:'Rippling Data', guide:'How To Use', scorecard:'Build Scorecard', landing:'Home' };
   var label = document.getElementById('current-page-label');
   if (label) label.textContent = labels[mode] || 'Home';
-  if (mode === 'setup') bankLoad();
-  if (mode === 'actuals') actLoad();
+  if (mode === 'setup') { bankLoad(); }
+  
   if (mode === 'history') { _historyAll = []; _historyFiltered = []; var hrs = document.getElementById('history-results-section'); if(hrs) hrs.style.display='none'; var hes = document.getElementById('history-empty-section'); if(hes) hes.style.display='none'; }
   if (mode === 'rippling') loadRipplingSaved();
 }
@@ -4913,6 +4823,18 @@ var bankGoals = []; // all goals in the bank
 var bankEditIdx = null;
 var BANK_KEY = 'goal-bank-v1';
 
+var bankViewMode = 'goals'; // 'goals' or 'actuals'
+
+function setBankMode(mode) {
+  bankViewMode = mode;
+  var gBtn = document.getElementById('bank-mode-goals');
+  var aBtn = document.getElementById('bank-mode-actuals');
+  if (gBtn) { gBtn.style.background = mode==='goals'?'var(--brick)':'none'; gBtn.style.color = mode==='goals'?'#fff':'var(--text-muted)'; gBtn.style.borderColor = mode==='goals'?'var(--brick)':'var(--border)'; }
+  if (aBtn) { aBtn.style.background = mode==='actuals'?'var(--brick)':'none'; aBtn.style.color = mode==='actuals'?'#fff':'var(--text-muted)'; aBtn.style.borderColor = mode==='actuals'?'var(--brick)':'var(--border)'; }
+
+  bankRender();
+}
+
 function bankResetSaveBar() {
   var saveBtn = document.getElementById('bank-save-btn');
   var saveHint = document.getElementById('bank-save-hint');
@@ -4989,6 +4911,7 @@ async function bankLoad() {
         // Also cache locally
         localStorage.setItem(BANK_KEY, JSON.stringify(bankGoals));
         actGoals = bankGoals; // keep actuals in sync
+        actLoadAllActuals(); // refresh local actuals
         bankRender();
         var title = document.getElementById('bank-table-title');
         if (title) title.textContent = 'Goal Bank (' + bankGoals.filter(function(g){return g.active!==false;}).length + ' active)';
@@ -5100,6 +5023,7 @@ function bankRender() {
     '<th style="'+thS+colGoal+'">Lower Better</th>'+
     '<th style="'+thS+colGoal+'">Capped</th>'+
     (monthVal ? '<th style="'+thS+'background:#f5f8f3;">Target</th><th style="'+thS+'background:#f5f8f3;">Minimum</th>' : '')+
+    (monthVal && bankViewMode==='actuals' ? '<th style="'+thS+'background:#eef5ec;">Actual</th><th style="'+thS+'background:#eef5ec;">Achieve%</th>' : '')+
     '<th style="'+thS+'background:#fff;">Status</th>'+
     '<th style="'+thS+'background:#fff;"></th>'+
   '</tr>';
@@ -5138,6 +5062,28 @@ function bankRender() {
             : '<span style="font-size:11px;color:var(--text);">'+(mMin!==''?mMin:'—')+'</span>')+
         '</td>'
       : '')+
+      (monthVal && bankViewMode==='actuals' ? (function(){
+        var tier2 = g.goalTier||inferTier(g);
+        var isCompanyGoal = tier2 === 'company';
+        var isAdminUser4 = !currentProfile || currentProfile.role === 'admin';
+        var canEdit = !isCompanyGoal || isAdminUser4;
+        var actKey = [tier2, g.location||'', g.department||'', g.name].join('|');
+        var actVal = (actAllActuals[monthVal]||{})[actKey];
+        actVal = actVal !== undefined ? actVal : '';
+        var isActEditing = bankActEditKey === actKey;
+        var ach = '—';
+        if (actVal !== '') {
+          var lb = g.lowerBetter !== false;
+          var tv = mTarget !== '' ? parseFloat(mTarget) : g.goalValue;
+          if (tv) { var pct = lb ? (tv/parseFloat(actVal))*100 : (parseFloat(actVal)/tv)*100; ach = pct.toFixed(1)+'%'; }
+        }
+        return '<td style="padding:3px 5px;'+border+'background:#eef5ec;">'+
+          (!canEdit ? '<span style="font-size:11px;color:var(--text-muted);">'+(actVal!==''?actVal:'—')+'</span>' :
+           !isActEditing ? '<span style="font-size:11px;color:var(--text);cursor:pointer;" data-actsetkey="'+escAttr(actKey)+'" onclick="bankSetActEdit(this.dataset.actsetkey)">'+(actVal!==''?actVal:'click to enter')+'</span>' :
+           '<input type="number" step="any" value="'+escAttr(String(actVal))+'" data-actkey="'+escAttr(actKey)+'" data-actmonth="'+escAttr(monthVal)+'" oninput="bankActChange(this)" style="width:100%;padding:2px 4px;font-size:11px;border:1.5px solid var(--brick);border-radius:3px;background:#fff;" autofocus>')+
+        '</td>'+
+        '<td style="padding:3px 5px;'+border+'background:#eef5ec;font-size:10px;font-family:var(--mono);">'+ach+'</td>';
+      })() : '')+
       '<td style="padding:5px 6px;'+border+'background:#fff;">'+
         '<span style="font-size:9px;padding:1px 6px;border-radius:99px;font-weight:600;background:'+(inactive?'#f0ece6':'#eef5ec')+';color:'+(inactive?'#7a7268':'#1a5c1a')+'">'+(inactive?'Inactive':'Active')+'</span>'+
       '</td>'+
@@ -5149,6 +5095,41 @@ function bankRender() {
 
   var title=document.getElementById('bank-table-title');
   if(title) title.textContent='Goal Bank ('+bankGoals.filter(function(g){return g.active!==false;}).length+' active)';
+}
+
+var bankActEditKey = null;
+var bankActAllActuals = {}; // month -> key -> value (mirrors actAllActuals)
+
+function bankSetActEdit(key) {
+  bankActEditKey = bankActEditKey === key ? null : key;
+  bankRender();
+  if (bankActEditKey) {
+    setTimeout(function() {
+      var inp = document.querySelector('#bank-tbody input[data-actkey]');
+      if (inp) inp.focus();
+    }, 50);
+  }
+}
+
+async function bankActChange(inp) {
+  var actKey = inp.dataset.actkey;
+  var month  = inp.dataset.actmonth;
+  if (!actKey || !month) return;
+  var val = inp.value !== '' ? parseFloat(inp.value) : null;
+  if (!actAllActuals[month]) actAllActuals[month] = {};
+  if (val !== null) actAllActuals[month][actKey] = val;
+  else delete actAllActuals[month][actKey];
+  // Save to localStorage
+  localStorage.setItem(ACT_ACTUALS_PREFIX + month, JSON.stringify(actAllActuals[month]));
+  // Save to Supabase
+  if (sb && currentUser && val !== null) {
+    var period = formatMonthLabel(month) || month;
+    await sbSaveActual(period, actKey, val);
+  }
+  // Show save confirmation
+  showToast('Actual saved!', 'success');
+  bankActEditKey = null;
+  bankRender();
 }
 
 function bankMonthTargetChange(inp) {
