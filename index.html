@@ -5113,7 +5113,7 @@ function bankRender() {
     var tier=g.goalTier||inferTier(g);
     var inactive=g.active===false;
     var rowStyle=inactive?'opacity:0.45;':'';
-    var mKey = (g._sbId || g.name) + '|' + (g.goalTier||'');
+    var mKey = g.name + '|' + (g.goalTier||'');
     var mData = monthTargets[mKey] || {};
     var mTarget = mData.target !== undefined ? mData.target : '';
     var mMin    = mData.min    !== undefined ? mData.min    : '';
@@ -5462,7 +5462,7 @@ async function bankSaveInline(){
   }
 
   if (monthVal2 && (mtEl || mmEl)) {
-    var mKey2 = ((goal._sbId || goal.name) + '|' + (goal.goalTier||''));
+    var mKey2 = (goal.name + '|' + (goal.goalTier||''));
     var targets2 = bankGetMonthTargets(monthVal2);
     if (!targets2[mKey2]) targets2[mKey2] = {};
     if (mtEl && mtEl.value !== '') targets2[mKey2].target = parseFloat(mtEl.value);
@@ -5537,7 +5537,7 @@ async function actLoad() {
   }
   actLoadAllActuals();
   actPopulateMonthFilter();
-  actRender();
+  await actRender();
 }
 
 function actResetFilters() {
@@ -5641,14 +5641,14 @@ async function actRender() {
       var ach='—', achColor='color:var(--text-muted);';
       if (actual!=='') {
         var lb=g.lowerBetter!==false;
-        var mKeyAct0=(g._sbId||g.name)+'|'+(g.goalTier||'');
+        var mKeyAct0=g.name+'|'+(g.goalTier||'');
         var mdAct0=monthTargets2[mKeyAct0]||{};
         var tvAct0=mdAct0.target!==undefined?mdAct0.target:g.goalValue;
         var pct=lb?(parseFloat(tvAct0)/parseFloat(actual))*100:(parseFloat(actual)/parseFloat(tvAct0))*100;
         if(g.capped==='yes') pct=Math.min(pct,parseFloat(g.capPct)||100);
         ach=pct.toFixed(1)+'%'; achColor=pct>=100?'color:#2D6B1A;font-weight:700;':'color:#703c2e;font-weight:700;';
       }
-      var mKeyAct=(g._sbId||g.name)+'|'+(g.goalTier||'');
+      var mKeyAct=g.name+'|'+(g.goalTier||'');
       var mdAct=monthTargets2[mKeyAct]||{};
       var tvAct=mdAct.target!==undefined?mdAct.target:g.goalValue;
       var mvAct=mdAct.min!==undefined?mdAct.min:g.minValue;
