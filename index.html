@@ -5535,6 +5535,7 @@ async function actLoad() {
   } else {
     try { var raw = localStorage.getItem(BANK_KEY); actGoals = raw ? JSON.parse(raw) : []; } catch(e) { actGoals = []; }
   }
+  console.log('actLoad done: actGoals=', actGoals.length);
   actLoadAllActuals();
   actPopulateMonthFilter();
   await actRender();
@@ -5569,6 +5570,7 @@ async function actRender() {
   var mgDepts = (currentProfile && currentProfile.role !== 'admin') ? (currentProfile.departments||[]) : [];
   var mgLocs  = (currentProfile && currentProfile.role !== 'admin') ? (currentProfile.locations||[])  : [];
 
+  console.log('actRender: actGoals=', actGoals.length, 'monthF=', monthF);
   var filtered = actGoals.filter(function(g) {
     if (g.active === false) return false;
     var tier = g.goalTier || inferTier(g);
@@ -5656,6 +5658,7 @@ async function actRender() {
     });
   });
 
+  console.log('actRender: filtered=', filtered.length, 'rows=', rows.length, 'monthsToShow=', monthsToShow);
   if(title) title.textContent='Goals ('+filtered.length+')';
 
   tbody.innerHTML=rows.map(function(r) {
