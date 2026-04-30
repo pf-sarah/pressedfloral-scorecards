@@ -5162,6 +5162,12 @@ function bankMonthTargetChange(inp) {
   if (val !== undefined) targets[mKey][field] = val;
   else delete targets[mKey][field];
   bankSaveMonthTargets(monthVal, targets);
+  // Save to Supabase too
+  if (sb && currentUser && val !== undefined) {
+    var period = formatMonthLabel(monthVal) || monthVal;
+    var sbKey = (field === 'target' ? '__target__' : '__min__') + mKey;
+    sbSaveActual(period, sbKey, val);
+  }
   // Enable save button
   var saveBtn = document.getElementById('bank-save-btn');
   var saveHint = document.getElementById('bank-save-hint');
@@ -5468,6 +5474,14 @@ async function bankSaveInline(){
     if (mtEl && mtEl.value !== '') targets2[mKey2].target = parseFloat(mtEl.value);
     if (mmEl && mmEl.value !== '') targets2[mKey2].min    = parseFloat(mmEl.value);
     bankSaveMonthTargets(monthVal2, targets2);
+    // Also save to Supabase so all users see updated targets
+    if (sb && currentUser) {
+      var period2 = formatMonthLabel(monthVal2) || monthVal2;
+      var targetKey = '__target__' + mKey2;
+      var minKey    = '__min__'    + mKey2;
+      if (mtEl && mtEl.value !== '') await sbSaveActual(period2, targetKey, parseFloat(mtEl.value));
+      if (mmEl && mmEl.value !== '') await sbSaveActual(period2, minKey,    parseFloat(mmEl.value));
+    }
   }
 
   showToast('Goal saved to bank!','success');
@@ -5552,13 +5566,35 @@ async function actRender() {
   var deptF  = document.getElementById('act-dept')  ? document.getElementById('act-dept').value  : '';
   var locF   = document.getElementById('act-loc')   ? document.getElementById('act-loc').value   : '';
 
-  // Load actuals from Supabase for this month and merge into actAllActuals
+  // Load actuals AND targets from Supabase for this month
   if (sb && currentUser && monthF) {
     var period = formatMonthLabel(monthF); // e.g. 'April 2026'
     var sbActuals = await sbLoadActuals(period);
     if (sbActuals && Object.keys(sbActuals).length) {
       if (!actAllActuals[monthF]) actAllActuals[monthF] = {};
-      Object.assign(actAllActuals[monthF], sbActuals);
+      // Separate targets/mins from actuals
+      var sbTargets = {};
+      Object.keys(sbActuals).forEach(function(k) {
+        if (k.indexOf('__target__') === 0) {
+          sbTargets[k.replace('__target__','')] = { target: sbActuals[k] };
+        } else if (k.indexOf('__min__') === 0) {
+          var baseKey = k.replace('__min__','');
+          if (!sbTargets[baseKey]) sbTargets[baseKey] = {};
+          sbTargets[baseKey].min = sbActuals[k];
+        } else {
+          actAllActuals[monthF][k] = sbActuals[k];
+        }
+      });
+      // Merge Supabase targets into localStorage targets
+      if (Object.keys(sbTargets).length) {
+        var localTargets = bankGetMonthTargets(monthF);
+        Object.keys(sbTargets).forEach(function(k) {
+          if (!localTargets[k]) localTargets[k] = {};
+          if (sbTargets[k].target !== undefined) localTargets[k].target = sbTargets[k].target;
+          if (sbTargets[k].min    !== undefined) localTargets[k].min    = sbTargets[k].min;
+        });
+        bankSaveMonthTargets(monthF, localTargets);
+      }
     }
   }
 
@@ -5943,6 +5979,28 @@ async function scLoadGoals() {
   try { var raw = localStorage.getItem(BANK_KEY); bank = raw ? JSON.parse(raw) : []; } catch(e) {}
 
   // Auto-load: company goals + individual goals matching role only
+  // Load month targets for this scorecard period
+  var scMonthVal = document.getElementById('sc-month') ? document.getElementById('sc-month').value : '';
+  var scMonthTargets = scMonthVal ? bankGetMonthTargets(scMonthVal) : {};
+  // Also try to load from Supabase
+  if (sb && currentUser && scMonthVal) {
+    var scPeriod = formatMonthLabel(scMonthVal);
+    var scSbActuals = await sbLoadActuals(scPeriod);
+    if (scSbActuals) {
+      Object.keys(scSbActuals).forEach(function(k) {
+        if (k.indexOf('__target__') === 0) {
+          var bk = k.replace('__target__','');
+          if (!scMonthTargets[bk]) scMonthTargets[bk] = {};
+          scMonthTargets[bk].target = scSbActuals[k];
+        } else if (k.indexOf('__min__') === 0) {
+          var bk2 = k.replace('__min__','');
+          if (!scMonthTargets[bk2]) scMonthTargets[bk2] = {};
+          scMonthTargets[bk2].min = scSbActuals[k];
+        }
+      });
+    }
+  }
+
   scGoals = bank.filter(function(g) {
     if (g.active === false) return false;
     var tier = g.goalTier || inferTier(g);
@@ -5950,9 +6008,12 @@ async function scLoadGoals() {
     if (tier === 'individual') return (!g.role || g.role === role) && (!g.department || g.department === dept);
     return false;
   }).map(function(g) {
+    var mKeyG = g.name + '|' + (g.goalTier||inferTier(g));
+    var mdG = scMonthTargets[mKeyG] || {};
     return Object.assign({}, g, {
       scWeight: g.defaultWeight || '',
-      scTarget: g.goalValue,
+      scTarget: mdG.target !== undefined ? mdG.target : g.goalValue,
+      minValue: mdG.min    !== undefined ? mdG.min    : g.minValue,
       scActual: ''
     });
   });
@@ -5962,6 +6023,13 @@ async function scLoadGoals() {
     if (g.active === false) return false;
     var tier = g.goalTier || inferTier(g);
     return tier === 'department' && (!g.department || g.department === dept) && (!g.location || g.location === loc);
+  }).map(function(g) {
+    var mKeyD = g.name + '|' + (g.goalTier||inferTier(g));
+    var mdD = scMonthTargets[mKeyD] || {};
+    return Object.assign({}, g, {
+      scTarget: mdD.target !== undefined ? mdD.target : g.goalValue,
+      minValue: mdD.min    !== undefined ? mdD.min    : g.minValue
+    });
   });
 
   await scLoadActuals();
