@@ -5014,15 +5014,31 @@ function bankRender() {
     else statusEl.textContent = '○ Future month';
   }
 
-  thead.innerHTML='<tr>'+
+  // Build colgroup dynamically based on visible columns
+  var cols = [
+    'width:46px',   // Type
+    'width:50px',   // Loc
+    'width:90px',   // Department
+    'width:100px',  // Role
+    'width:auto',   // Goal Name (fills space)
+    'width:62px',   // Lower Better
+    'width:52px',   // Capped
+  ];
+  if (monthVal) { cols.push('width:60px'); cols.push('width:60px'); } // Target, Min
+  if (monthVal && bankViewMode==='actuals') { cols.push('width:70px'); cols.push('width:62px'); } // Actual, Achieve%
+  cols.push('width:55px'); // Status
+  cols.push('width:28px'); // Actions
+  var colgroup = '<colgroup>'+cols.map(function(c){return '<col style="'+c+'">';}).join('')+'</colgroup>';
+
+  thead.innerHTML = colgroup + '<tr>'+
     '<th style="'+thS+colCtx+'">Type</th>'+
     '<th style="'+thS+colCtx+'">Loc</th>'+
-    '<th style="'+thS+colCtx+'">Department</th>'+
+    '<th style="'+thS+colCtx+'">Dept</th>'+
     '<th style="'+thS+colCtx+'">Role</th>'+
     '<th style="'+thS+colGoal+'">Goal Name</th>'+
     '<th style="'+thS+colGoal+'">Lower Better</th>'+
     '<th style="'+thS+colGoal+'">Capped</th>'+
-    (monthVal ? '<th style="'+thS+'background:#f5f8f3;">Target</th><th style="'+thS+'background:#f5f8f3;">Minimum</th>' : '')+
+    (monthVal ? '<th style="'+thS+'background:#f5f8f3;">Target</th><th style="'+thS+'background:#f5f8f3;">Min</th>' : '')+
     (monthVal && bankViewMode==='actuals' ? '<th style="'+thS+'background:#eef5ec;">Actual</th><th style="'+thS+'background:#eef5ec;">Achieve%</th>' : '')+
     '<th style="'+thS+'background:#fff;">Status</th>'+
     '<th style="'+thS+'background:#fff;"></th>'+
