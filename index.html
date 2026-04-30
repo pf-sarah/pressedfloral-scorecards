@@ -5535,7 +5535,6 @@ async function actLoad() {
   } else {
     try { var raw = localStorage.getItem(BANK_KEY); actGoals = raw ? JSON.parse(raw) : []; } catch(e) { actGoals = []; }
   }
-  console.log('actLoad done: actGoals=', actGoals.length);
   actLoadAllActuals();
   actPopulateMonthFilter();
   await actRender();
@@ -5570,7 +5569,6 @@ async function actRender() {
   var mgDepts = (currentProfile && currentProfile.role !== 'admin') ? (currentProfile.departments||[]) : [];
   var mgLocs  = (currentProfile && currentProfile.role !== 'admin') ? (currentProfile.locations||[])  : [];
 
-  console.log('actRender: actGoals=', actGoals.length, 'monthF=', monthF);
   var filtered = actGoals.filter(function(g) {
     if (g.active === false) return false;
     var tier = g.goalTier || inferTier(g);
@@ -5658,7 +5656,6 @@ async function actRender() {
     });
   });
 
-  console.log('actRender: filtered=', filtered.length, 'rows=', rows.length, 'monthsToShow=', monthsToShow);
   if(title) title.textContent='Goals ('+filtered.length+')';
 
   tbody.innerHTML=rows.map(function(r) {
@@ -5678,15 +5675,15 @@ async function actRender() {
       '<td style="padding:5px 6px;'+border+colAct+'font-size:10px;color:var(--text-muted);">'+escAttr(formatMonthLabel(r.month))+'</td>'+
       '<td style="padding:3px 5px;'+border+colAct+'">'+
         (function(){
-          var isAdmin = !currentProfile || currentProfile.role === 'admin';
-          var tier = g.goalTier||inferTier(g);
-          var isCompany = tier === 'company';
+          var isAdmin2 = !currentProfile || currentProfile.role === 'admin';
+          var tier2 = g.goalTier||inferTier(g);
+          var isCompany2 = tier2 === 'company';
           // Use month-specific target/min if available, fall back to goal defaults
           var tv = (r.target!==undefined&&r.target!==null&&r.target!=='') ? r.target : g.goalValue;
           var mv = (r.min!==undefined&&r.min!==null&&r.min!=='') ? r.min : g.minValue;
           var noTargetMin = (tv===undefined||tv===null||tv==='') || (mv===undefined||mv===null||mv==='');
           if (noTargetMin) return '<span style="font-size:10px;color:var(--text-muted);font-family:var(--mono);padding:2px 4px;background:var(--surface2);border-radius:3px;display:inline-block;" title="Set Target and Minimum in Goal Bank first">No target/min set</span>';
-          if (isCompany && !isAdmin) return '<span style="font-size:11px;font-family:var(--mono);color:var(--text);">'+(r.actual!==null&&r.actual!==''?r.actual:'—')+'</span>';
+          if (isCompany2 && !isAdmin2) return '<span style="font-size:11px;font-family:var(--mono);color:var(--text);">'+(r.actual!==null&&r.actual!==''?r.actual:'—')+'</span>';
           var isEditing = actEditKey === (r.key+'|'+r.month);
           if (!isEditing) return '<span style="font-size:11px;font-family:var(--mono);color:var(--text);cursor:default;">'+(r.actual!==null&&r.actual!==''?r.actual:'—')+'</span>';
           return '<input type="number" step="any" value="'+escAttr(String(r.actual))+'" data-key="'+escAttr(r.key)+'" data-month="'+escAttr(r.month)+'" oninput="actMarkDirty()" style="width:100%;padding:3px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid var(--brick);border-radius:4px;background:#fff;" autofocus>';
@@ -5694,7 +5691,7 @@ async function actRender() {
       '</td>'+
       '<td style="padding:5px 6px;'+border+colAct+r.achColor+'">'+r.ach+'</td>'+
       '<td style="padding:3px 4px;'+border+'background:#fff;">'+
-        ((!isCompany || isAdmin) ?
+        ((r.tier!=='company' || !currentProfile || currentProfile.role==='admin') ?
           '<button onclick="actOpenEdit(this)" data-editkey="'+escAttr(r.key)+'|'+escAttr(r.month)+'" style="padding:2px 4px;border:none;background:none;font-size:14px;cursor:pointer;color:var(--text-muted);line-height:1;letter-spacing:1px;">&#8942;</button>'
           : '') +
       '</td>'+
