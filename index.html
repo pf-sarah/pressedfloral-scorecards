@@ -222,15 +222,13 @@
       <div style="font-size:13px;color:var(--text-muted);font-family:var(--mono);margin-bottom:24px;">Where would you like to go?</div>
 
       <div style="font-size:9px;font-weight:700;color:var(--text-faint);letter-spacing:0.8px;font-family:var(--mono);margin-bottom:10px;">MANAGE</div>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:24px;">
         <div onclick="switchMode('setup')" style="background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:24px 20px;cursor:pointer;transition:all 0.15s;min-height:160px;" onmouseover="this.style.borderColor='var(--brick)';this.style.background='var(--surface2)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--surface)'">
           <div style="font-size:22px;margin-bottom:12px;">&#9776;</div>
           <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;">Goals & Actuals</div>
           <div style="font-size:11px;color:var(--text-muted);line-height:1.5;">Manage goals and enter monthly actuals in one place.</div>
         </div>
-        <div onclick="switchMode('actuals')" style="background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:24px 20px;cursor:pointer;transition:all 0.15s;min-height:160px;" onmouseover="this.style.borderColor='var(--brick)';this.style.background='var(--surface2)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--surface)'">
-
-        </div>
+        
         <div onclick="switchMode('scorecard')" style="background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:24px 20px;cursor:pointer;transition:all 0.15s;min-height:160px;" onmouseover="this.style.borderColor='var(--brick)';this.style.background='var(--surface2)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--surface)'">
           <div style="font-size:22px;margin-bottom:12px;">&#9998;</div>
           <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;">Build Scorecard</div>
@@ -328,11 +326,7 @@
         </select>
         <button onclick="bankResetFilters()" style="padding:7px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:none;font-family:var(--sans);font-size:12px;cursor:pointer;color:var(--text-muted);">Reset</button>
       </div>
-      <!-- Mode toggle -->
-      <div style="display:flex;gap:8px;margin-top:12px;">
-        <button id="bank-mode-goals" onclick="setBankMode('goals')" style="padding:6px 16px;border:1.5px solid var(--brick);border-radius:var(--radius-sm);background:var(--brick);color:#fff;font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;">Edit Goals</button>
-        <button id="bank-mode-actuals" onclick="setBankMode('actuals')" style="padding:6px 16px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:none;color:var(--text-muted);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;">Add Actuals</button>
-      </div>
+
     </section>
 
     <!-- Goals table -->
@@ -896,7 +890,15 @@ async function authSignOut() {
   localStorage.removeItem('pf-current-role');
   currentProfile = null;
   currentUser = null;
-  if (sb) await sb.auth.signOut();
+  var emailEl = document.getElementById('user-email-display');
+  var roleEl  = document.getElementById('user-role-display');
+  if (emailEl) emailEl.textContent = 'Not signed in';
+  if (roleEl)  roleEl.textContent  = '';
+  if (sb) {
+    await sb.auth.signOut();
+  } else {
+    showAuthOverlay();
+  }
 }
 
 // ── Supabase Data Functions ──────────────────────────────────
@@ -4912,7 +4914,21 @@ async function bankLoad() {
         localStorage.setItem(BANK_KEY, JSON.stringify(bankGoals));
         actGoals = bankGoals; // keep actuals in sync
         actLoadAllActuals(); // refresh local actuals
-        bankRender();
+        // Also load actuals from Supabase for current month
+        var curMonth = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
+        if (sb && currentUser && curMonth) {
+          sbLoadActuals(formatMonthLabel(curMonth)).then(function(sbActs) {
+            if (sbActs && Object.keys(sbActs).length) {
+              if (!actAllActuals[curMonth]) actAllActuals[curMonth] = {};
+              Object.keys(sbActs).forEach(function(k) {
+                if (k.indexOf('__target__')!==0 && k.indexOf('__min__')!==0) actAllActuals[curMonth][k] = sbActs[k];
+              });
+            }
+            bankRender();
+          });
+        } else {
+          bankRender();
+        }
         var title = document.getElementById('bank-table-title');
         if (title) title.textContent = 'Goal Bank (' + bankGoals.filter(function(g){return g.active!==false;}).length + ' active)';
         return;
@@ -5014,34 +5030,36 @@ function bankRender() {
     else statusEl.textContent = '○ Future month';
   }
 
-  // Build colgroup dynamically based on visible columns
-  var cols = [
-    'width:46px',   // Type
-    'width:50px',   // Loc
-    'width:90px',   // Department
-    'width:100px',  // Role
-    'width:auto',   // Goal Name (fills space)
-    'width:62px',   // Lower Better
-    'width:52px',   // Capped
-  ];
-  if (monthVal) { cols.push('width:60px'); cols.push('width:60px'); } // Target, Min
-  if (monthVal && bankViewMode==='actuals') { cols.push('width:70px'); cols.push('width:62px'); } // Actual, Achieve%
-  cols.push('width:55px'); // Status
-  cols.push('width:28px'); // Actions
-  var colgroup = '<colgroup>'+cols.map(function(c){return '<col style="'+c+'">';}).join('')+'</colgroup>';
+  // Build colgroup and inject directly into table element
+  var tbl = document.getElementById('bank-table');
+  if (tbl) {
+    var oldCg = tbl.querySelector('colgroup');
+    if (oldCg) oldCg.remove();
+    var cg = document.createElement('colgroup');
+    // Fixed px widths
+    var colDefs = ['44px','50px','82px','95px','0','60px','52px'];
+    if (monthVal) { colDefs.push('60px'); colDefs.push('56px'); colDefs.push('70px'); } // Target, Min, Actual
+    colDefs.push('62px'); colDefs.push('36px');
+    // Goal Name gets remaining space (index 4)
+    var tblWidth = (document.getElementById('bank-table')||{offsetWidth:900}).offsetWidth || 900;
+    var used = colDefs.reduce(function(s,w){ return s + (w==='0'?0:parseInt(w)); }, 0);
+    colDefs[4] = Math.max(100, tblWidth - used - 20) + 'px';
+    colDefs.forEach(function(w){ var col=document.createElement('col'); col.setAttribute('style','width:'+w); cg.appendChild(col); });
+    tbl.insertBefore(cg, tbl.firstChild);
+  }
 
-  thead.innerHTML = colgroup + '<tr>'+
+  thead.innerHTML = '<tr>'+
     '<th style="'+thS+colCtx+'">Type</th>'+
     '<th style="'+thS+colCtx+'">Loc</th>'+
     '<th style="'+thS+colCtx+'">Dept</th>'+
     '<th style="'+thS+colCtx+'">Role</th>'+
     '<th style="'+thS+colGoal+'">Goal Name</th>'+
-    '<th style="'+thS+colGoal+'">Lower Better</th>'+
+    '<th style="'+thS+colGoal+'">Lower</th>'+
     '<th style="'+thS+colGoal+'">Capped</th>'+
     (monthVal ? '<th style="'+thS+'background:#f5f8f3;">Target</th><th style="'+thS+'background:#f5f8f3;">Min</th>' : '')+
-    (monthVal && bankViewMode==='actuals' ? '<th style="'+thS+'background:#eef5ec;">Actual</th><th style="'+thS+'background:#eef5ec;">Achieve%</th>' : '')+
+    (monthVal ? '<th style="'+thS+'background:#eef5ec;">Actual</th>' : '')+
     '<th style="'+thS+'background:#fff;">Status</th>'+
-    '<th style="'+thS+'background:#fff;"></th>'+
+    '<th style="'+thS+'background:#fff;width:36px;"></th>'+
   '</tr>';
 
   if (filtered.length===0){tbody.innerHTML='';empty.style.display='block';return;}
@@ -5063,7 +5081,7 @@ function bankRender() {
     return '<tr data-idx="'+g._idx+'" style="'+rowStyle+'">'+
       '<td style="padding:5px 6px;'+border+colCtx+'"><span style="font-size:9px;padding:1px 5px;border-radius:99px;background:'+(tierColors[tier]||'#eee')+';color:'+(tierText[tier]||'#333')+';font-weight:700;">'+(tier==='individual'?'Indiv':tier==='department'?'Dept':'Co')+'</span></td>'+
       td(g.location||'—',colCtx)+td(g.department||'—',colCtx)+td(g.role||'—',colCtx)+
-      '<td style="padding:5px 6px;'+border+colGoal+'font-weight:600;">'+escAttr(g.name||'')+'</td>'+
+      '<td style="padding:5px 6px;'+border+colGoal+'font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escAttr(g.name||'')+'</td>'+
       td(g.lowerBetter!==false?'Yes':'No',colGoal)+
       td(g.capped==='yes'?'Yes ('+g.capPct+'%)':'No',colGoal)+
       (monthVal ?
@@ -5078,33 +5096,19 @@ function bankRender() {
             : '<span style="font-size:11px;color:var(--text);">'+(mMin!==''?mMin:'—')+'</span>')+
         '</td>'
       : '')+
-      (monthVal && bankViewMode==='actuals' ? (function(){
-        var tier2 = g.goalTier||inferTier(g);
-        var isCompanyGoal = tier2 === 'company';
-        var isAdminUser4 = !currentProfile || currentProfile.role === 'admin';
-        var canEdit = !isCompanyGoal || isAdminUser4;
-        var actKey = [tier2, g.location||'', g.department||'', g.name].join('|');
-        var actVal = (actAllActuals[monthVal]||{})[actKey];
-        actVal = actVal !== undefined ? actVal : '';
-        var isActEditing = bankActEditKey === actKey;
-        var ach = '—';
-        if (actVal !== '') {
-          var lb = g.lowerBetter !== false;
-          var tv = mTarget !== '' ? parseFloat(mTarget) : g.goalValue;
-          if (tv) { var pct = lb ? (tv/parseFloat(actVal))*100 : (parseFloat(actVal)/tv)*100; ach = pct.toFixed(1)+'%'; }
-        }
-        return '<td style="padding:3px 5px;'+border+'background:#eef5ec;">'+
-          (!canEdit ? '<span style="font-size:11px;color:var(--text-muted);">'+(actVal!==''?actVal:'—')+'</span>' :
-           !isActEditing ? '<span style="font-size:11px;color:var(--text);cursor:pointer;" data-actsetkey="'+escAttr(actKey)+'" onclick="bankSetActEdit(this.dataset.actsetkey)">'+(actVal!==''?actVal:'click to enter')+'</span>' :
-           '<input type="number" step="any" value="'+escAttr(String(actVal))+'" data-actkey="'+escAttr(actKey)+'" data-actmonth="'+escAttr(monthVal)+'" oninput="bankActChange(this)" style="width:100%;padding:2px 4px;font-size:11px;border:1.5px solid var(--brick);border-radius:3px;background:#fff;" autofocus>')+
-        '</td>'+
-        '<td style="padding:3px 5px;'+border+'background:#eef5ec;font-size:10px;font-family:var(--mono);">'+ach+'</td>';
+
+      (monthVal ? (function(){
+        var tier4 = g.goalTier||inferTier(g);
+        var actKey4 = [tier4, g.location||'', g.department||'', g.name].join('|');
+        var actVal4 = (actAllActuals[monthVal]||{})[actKey4];
+        actVal4 = actVal4 !== undefined ? actVal4 : '';
+        return '<td style="padding:5px 6px;'+border+'background:#eef5ec;font-size:11px;font-family:var(--mono);">'+(actVal4!==''?actVal4:'—')+'</td>';
       })() : '')+
       '<td style="padding:5px 6px;'+border+'background:#fff;">'+
         '<span style="font-size:9px;padding:1px 6px;border-radius:99px;font-weight:600;background:'+(inactive?'#f0ece6':'#eef5ec')+';color:'+(inactive?'#7a7268':'#1a5c1a')+'">'+(inactive?'Inactive':'Active')+'</span>'+
       '</td>'+
-      '<td style="padding:5px 6px;'+border+'background:#fff;">'+
-        (bankCanEditGoal(g) ? '<button onclick="bankToggleRowMenu('+g._idx+',this)" style="padding:2px 4px;border:none;background:none;font-size:14px;cursor:pointer;color:var(--text-muted);line-height:1;letter-spacing:1px;">&#8942;</button>' : '')+
+      '<td style="padding:5px 14px 5px 14px;'+border+'background:#fff;text-align:center;">'+
+        (bankCanEditGoal(g) ? '<button onclick="bankToggleRowMenu('+g._idx+',this)" style="padding:2px 6px;border:none;background:none;font-size:14px;cursor:pointer;color:var(--text-muted);line-height:1;letter-spacing:1px;">&#8942;</button>' : '')+
       '</td>'+
     '</tr>';
   }).join('');
@@ -5115,6 +5119,81 @@ function bankRender() {
 
 var bankActEditKey = null;
 var bankActAllActuals = {}; // month -> key -> value (mirrors actAllActuals)
+
+function bankOpenActualEntry(idx) {
+  var g = bankGoals[idx];
+  if (!g) return;
+  var monthVal = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
+  if (!monthVal) { showToast('Select a month first', 'error'); return; }
+
+  // Remove any existing actual entry row
+  var existing = document.getElementById('bank-actual-row');
+  if (existing) existing.remove();
+
+  var tier = g.goalTier || inferTier(g);
+  var actKey = [tier, g.location||'', g.department||'', g.name].join('|');
+  var actVal = (actAllActuals[monthVal]||{})[actKey];
+  actVal = actVal !== undefined ? actVal : '';
+  var mKey = g.name+'|'+tier;
+  var mData = bankGetMonthTargets(monthVal)[mKey] || {};
+  var tv = mData.target !== undefined ? mData.target : (g.goalValue||'');
+  var mv = mData.min    !== undefined ? mData.min    : (g.minValue||'');
+  var period = formatMonthLabel(monthVal);
+
+  var bg = 'background:#f0f8f0;';
+  var row = document.createElement('tr');
+  row.id = 'bank-actual-row';
+  row.style.cssText = bg;
+  var numCols = document.querySelectorAll('#bank-thead th').length;
+  row.innerHTML = '<td colspan="'+numCols+'" style="padding:12px 16px;border-bottom:2px solid var(--brick);'+bg+'">' +
+    '<div style="display:flex;align-items:center;gap:16px;flex-wrap:wrap;">' +
+      '<div style="font-size:12px;font-weight:600;color:var(--text);">'+escAttr(g.name)+'</div>' +
+      '<div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);">'+period+' &nbsp;|&nbsp; Target: '+(tv||'—')+' &nbsp;|&nbsp; Min: '+(mv||'—')+'</div>' +
+      '<div style="display:flex;align-items:center;gap:8px;">' +
+        '<label style="font-size:11px;font-weight:600;color:var(--text);">Actual:</label>' +
+        '<input type="number" step="any" id="bank-actual-inp" value="'+escAttr(String(actVal))+'" placeholder="Enter value" style="width:100px;padding:4px 8px;font-size:12px;font-family:var(--mono);border:1.5px solid var(--brick);border-radius:var(--radius-sm);" autofocus>' +
+      '</div>' +
+      '<button onclick="bankSaveActual('+idx+')" style="padding:5px 16px;background:var(--brick);color:#fff;border:none;border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;">Save</button>' +
+      '<button onclick="bankCancelActual()" style="padding:5px 12px;border:1.5px solid var(--border);background:none;border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;cursor:pointer;color:var(--text-muted);">Cancel</button>' +
+    '</div>' +
+  '</td>';
+
+  // Insert after the goal's row
+  var tbody = document.getElementById('bank-tbody');
+  var goalRow = tbody ? tbody.querySelector('tr[data-idx="'+idx+'"]') : null;
+  if (goalRow) goalRow.insertAdjacentElement('afterend', row);
+  else if (tbody) tbody.insertAdjacentElement('afterbegin', row);
+
+  var inp = document.getElementById('bank-actual-inp');
+  if (inp) inp.focus();
+}
+
+async function bankSaveActual(idx) {
+  var g = bankGoals[idx];
+  if (!g) return;
+  var monthVal = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
+  var inp = document.getElementById('bank-actual-inp');
+  if (!inp || !monthVal) return;
+  var val = inp.value !== '' ? parseFloat(inp.value) : null;
+  var tier = g.goalTier || inferTier(g);
+  var actKey = [tier, g.location||'', g.department||'', g.name].join('|');
+  if (!actAllActuals[monthVal]) actAllActuals[monthVal] = {};
+  if (val !== null) actAllActuals[monthVal][actKey] = val;
+  else delete actAllActuals[monthVal][actKey];
+  localStorage.setItem(ACT_ACTUALS_PREFIX + monthVal, JSON.stringify(actAllActuals[monthVal]));
+  if (sb && currentUser && val !== null) {
+    var period = formatMonthLabel(monthVal) || monthVal;
+    await sbSaveActual(period, actKey, val);
+  }
+  var row = document.getElementById('bank-actual-row');
+  if (row) row.remove();
+  showToast('Actual saved!', 'success');
+}
+
+function bankCancelActual() {
+  var row = document.getElementById('bank-actual-row');
+  if (row) row.remove();
+}
 
 function bankSetActEdit(key) {
   bankActEditKey = bankActEditKey === key ? null : key;
@@ -5220,8 +5299,32 @@ function bankToggleRowMenu(idx,btn){
   var g=bankGoals[idx];
   var isInactive=g&&g.active===false;
   var isAdminUser3 = !currentProfile || currentProfile.role === 'admin';
-  document.getElementById('gs2-row-menu-edit').innerHTML='&#9998;&nbsp; Edit';
+  var tier3 = g ? (g.goalTier||inferTier(g)) : '';
+  var isAdminMenu2 = !currentProfile || currentProfile.role === 'admin';
+  var bankMonthVal = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
+  // Only company (admin only) and department goals can have actuals entered here
+  var canEnterActuals = bankMonthVal && tier3 !== 'individual' && (tier3 !== 'company' || isAdminMenu2);
+
+  document.getElementById('gs2-row-menu-edit').innerHTML='&#9998;&nbsp; Edit Goal';
   document.getElementById('gs2-row-menu-edit').onclick=function(){menu.style.display='none';_bankActiveMenuIdx=null;bankOpenEdit(idx);};
+
+  // Enter Actuals option
+  var existingAct = document.getElementById('gs2-row-menu-actuals');
+  if (existingAct) existingAct.remove();
+  if (canEnterActuals) {
+    var actDiv = document.createElement('div');
+    actDiv.id = 'gs2-row-menu-actuals';
+    actDiv.innerHTML = '&#10003;&nbsp; Enter Actual';
+    actDiv.style.cssText = 'display:flex;align-items:center;gap:8px;padding:7px 10px;cursor:pointer;font-size:12px;font-family:var(--sans);color:var(--text);border-radius:4px;';
+    actDiv.onmouseover = function(){this.style.background='var(--surface2)';};
+    actDiv.onmouseout  = function(){this.style.background='none';};
+    actDiv.onclick = function(){
+      menu.style.display='none'; _bankActiveMenuIdx=null;
+      bankOpenActualEntry(idx);
+    };
+    document.getElementById('gs2-row-menu-edit').insertAdjacentElement('afterend', actDiv);
+  }
+
   // Deactivate — admin only
   var deactEl = document.getElementById('gs2-row-menu-delete');
   deactEl.style.display = isAdminUser3 ? '' : 'none';
@@ -5643,7 +5746,7 @@ async function actRender() {
     '<th style="'+thS+colGoal+'">Goal Name</th>'+
     '<th style="'+thS+colGoal+'">Target</th>'+
     '<th style="'+thS+colGoal+'">Min</th>'+
-    '<th style="'+thS+colGoal+'">Lower Better</th>'+
+    '<th style="'+thS+colGoal+'">Lower</th>'+
     '<th style="'+thS+colGoal+'">Capped</th>'+
     '<th style="'+thS+colAct+'">Month</th>'+
     '<th style="'+thS+colAct+'">Actual</th>'+
@@ -6614,8 +6717,9 @@ window.onload = function() { try {
   setMonth('sc-month', monthStr, monthStr, minStr);
   // Init Supabase then load data
   initSupabase();
-  // Show any cached badge immediately
+  // Show any cached badge immediately on every load
   updateUserBadge();
+  setInterval(updateUserBadge, 3000); // keep badge fresh
   // Data loads are triggered by auth state change — also load locally if no auth yet
   bankLoad();
   actLoad();
