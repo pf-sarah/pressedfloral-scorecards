@@ -5030,14 +5030,24 @@ function bankRender() {
   var monthVal = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
   var now = new Date();
   var currentMonthVal = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
-  var isPastMonth = monthVal && monthVal < currentMonthVal;
+  // Calculate days since the end of the selected month
+  var isPastMonth = false;
+  var isEditableWithWarning = false;
+  if (monthVal && monthVal < currentMonthVal) {
+    var parts = monthVal.split('-');
+    var monthEnd = new Date(parseInt(parts[0]), parseInt(parts[1]), 0); // last day of month
+    var daysSince = Math.floor((now - monthEnd) / (1000*60*60*24));
+    isPastMonth = daysSince > 21;       // hard lock after 21 days
+    isEditableWithWarning = !isPastMonth; // editable with warning within 21 days
+  }
   var monthTargets = bankGetMonthTargets(monthVal);
 
   // Update month status label
   var statusEl = document.getElementById('bank-month-status');
   if (statusEl) {
     if (!monthVal) statusEl.textContent = '';
-    else if (isPastMonth) statusEl.textContent = '🔒 Past month — read only';
+    else if (isPastMonth) statusEl.textContent = '🔒 Past month — locked (21+ days)';
+    else if (isEditableWithWarning) statusEl.textContent = '⚠️ Past month — edits allowed for ' + (21 - Math.floor((now - new Date(parseInt(monthVal.split('-')[0]), parseInt(monthVal.split('-')[1]), 0)) / (1000*60*60*24))) + ' more days';
     else if (monthVal === currentMonthVal) statusEl.textContent = '● Current month';
     else statusEl.textContent = '○ Future month';
   }
@@ -5088,7 +5098,8 @@ function bankRender() {
     var mTarget = mData.target !== undefined ? mData.target : '';
     var mMin    = mData.min    !== undefined ? mData.min    : '';
     var isEditing = (bankEditIdx === g._idx);
-    var inpStyle = 'width:100%;padding:2px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid var(--brick);border-radius:3px;background:#fff;';
+    var canEdit = !isPastMonth;
+    var inpStyle = 'width:100%;padding:2px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid '+(canEdit?'var(--brick)':'var(--border)')+';border-radius:3px;background:'+(canEdit?'#fff':'var(--surface2)')+';';
 
     return '<tr data-idx="'+g._idx+'" style="'+rowStyle+'">'+
       '<td style="padding:5px 6px;'+border+colCtx+'"><span style="font-size:9px;padding:1px 5px;border-radius:99px;background:'+(tierColors[tier]||'#eee')+';color:'+(tierText[tier]||'#333')+';font-weight:700;">'+(tier==='individual'?'Indiv':tier==='department'?'Dept':'Co')+'</span></td>'+
@@ -5098,12 +5109,12 @@ function bankRender() {
       td(g.capped==='yes'?'Yes ('+g.capPct+'%)':'No',colGoal)+
       (monthVal ?
         '<td style="padding:3px 5px;'+border+'background:#f5f8f3;">'+
-          (!isPastMonth && isEditing
+          (canEdit && isEditing
             ? '<input type="number" step="any" value="'+escAttr(String(mTarget))+'" data-mkey="'+escAttr(mKey)+'" data-field="target" oninput="bankMonthTargetChange(this)" style="'+inpStyle+'">'
             : '<span style="font-size:11px;color:var(--text);">'+(mTarget!==''?mTarget:'—')+'</span>')+
         '</td>'+
         '<td style="padding:3px 5px;'+border+'background:#f5f8f3;">'+
-          (!isPastMonth && isEditing
+          (canEdit && isEditing
             ? '<input type="number" step="any" value="'+escAttr(String(mMin))+'" data-mkey="'+escAttr(mKey)+'" data-field="min" oninput="bankMonthTargetChange(this)" style="'+inpStyle+'">'
             : '<span style="font-size:11px;color:var(--text);">'+(mMin!==''?mMin:'—')+'</span>')+
         '</td>'
@@ -5137,6 +5148,16 @@ function bankOpenActualEntry(idx) {
   if (!g) return;
   var monthVal = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
   if (!monthVal) { showToast('Select a month first', 'error'); return; }
+  // Check 21-day rule for past months
+  var now = new Date();
+  var currentMonthVal = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  if (monthVal < currentMonthVal) {
+    var parts = monthVal.split('-');
+    var monthEnd = new Date(parseInt(parts[0]), parseInt(parts[1]), 0);
+    var daysSince = Math.floor((now - monthEnd) / (1000*60*60*24));
+    if (daysSince > 21) { showToast('This month is locked — more than 21 days have passed', 'error'); return; }
+    if (!confirm('Warning: Entering actuals for a past month. Continue?')) return;
+  }
 
   // Remove any existing actual entry row
   var existing = document.getElementById('bank-actual-row');
@@ -5392,9 +5413,23 @@ function bankEditDone(){
 function bankOpenEdit(idx){
   var g = bankGoals[idx];
   if (!g) return;
+  // Check if this is a past month within the 21-day warning window
+  var monthVal = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
+  var now = new Date();
+  var currentMonthVal = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  if (monthVal && monthVal < currentMonthVal) {
+    var parts = monthVal.split('-');
+    var monthEnd = new Date(parseInt(parts[0]), parseInt(parts[1]), 0);
+    var daysSince = Math.floor((now - monthEnd) / (1000*60*60*24));
+    if (daysSince > 21) {
+      showToast('This month is locked — more than 21 days have passed', 'error');
+      return;
+    }
+    if (!confirm('Warning: Editing a past month. Changes affect historical records. Continue?')) return;
+  }
   bankCancelInline(true);
   bankEditIdx=idx;
-  bankEditSbId = g._sbId || null; // store sbId separately so it survives re-renders
+  bankEditSbId = g._sbId || null;
   var tbody = document.getElementById('bank-tbody');
   var targetRow = tbody ? tbody.querySelector('tr[data-idx="'+idx+'"]') : null;
   bankShowInlineRow(g, targetRow);
