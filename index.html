@@ -942,19 +942,49 @@ async function sbLoadActuals(period) {
   var r = await sb.from('actuals').select('*').eq('period', period);
   var map = {};
   (r.data||[]).forEach(function(a) {
-    var key = [a.goal_tier, a.location||'', a.department||'', a.goal_name].join('|');
-    map[key] = a.actual_value;
+    var gn = a.goal_name || '';
+    if (gn.indexOf('__target__') === 0 || gn.indexOf('__min__') === 0) {
+      // Return as-is for target/min entries
+      map[gn] = a.actual_value;
+    } else {
+      var key = [a.goal_tier, a.location||'', a.department||'', gn].join('|');
+      map[key] = a.actual_value;
+    }
   });
   return map;
 }
 
 async function sbSaveActual(period, key, value) {
   if (!sb) return;
-  var parts = key.split('|');
-  var row = {
-    period: period, goal_tier: parts[0], location: parts[1]||null,
-    department: parts[2]||null, goal_name: parts[3], actual_value: value
-  };
+  var row;
+  if (key.indexOf('__target__') === 0 || key.indexOf('__min__') === 0) {
+    // Month target/min stored as special actuals
+    // key format: '__target__goalName|tier' or '__min__goalName|tier'
+    var isTarget = key.indexOf('__target__') === 0;
+    var inner = key.replace('__target__','').replace('__min__','');
+    var pipIdx = inner.lastIndexOf('|');
+    var goalName = pipIdx > -1 ? inner.substring(0, pipIdx) : inner;
+    var tier = pipIdx > -1 ? inner.substring(pipIdx+1) : '';
+    row = {
+      period: period,
+      goal_tier: tier || '__meta__',
+      location: null,
+      department: null,
+      goal_name: (isTarget ? '__target__' : '__min__') + goalName,
+      actual_value: value
+    };
+  } else {
+    // Regular actual: key format 'tier|location|department|goalName'
+    var parts = key.split('|');
+    row = {
+      period: period,
+      goal_tier: parts[0] || '',
+      location: parts[1] || null,
+      department: parts[2] || null,
+      goal_name: parts[3] || key,
+      actual_value: value
+    };
+  }
   return await sb.from('actuals').upsert(row, { onConflict: 'period,goal_tier,location,department,goal_name' });
 }
 
@@ -5725,11 +5755,24 @@ async function actRender() {
       var sbTargets = {};
       Object.keys(sbActuals).forEach(function(k) {
         if (k.indexOf('__target__') === 0) {
-          sbTargets[k.replace('__target__','')] = { target: sbActuals[k] };
+          // key is '__target__goalName' — match against actGoals
+          var inner3 = k.replace('__target__','');
+          actGoals.forEach(function(g) {
+            if (g.name === inner3) {
+              var bk3 = g.name + '|' + (g.goalTier||inferTier(g));
+              if (!sbTargets[bk3]) sbTargets[bk3] = {};
+              sbTargets[bk3].target = sbActuals[k];
+            }
+          });
         } else if (k.indexOf('__min__') === 0) {
-          var baseKey = k.replace('__min__','');
-          if (!sbTargets[baseKey]) sbTargets[baseKey] = {};
-          sbTargets[baseKey].min = sbActuals[k];
+          var inner4 = k.replace('__min__','');
+          actGoals.forEach(function(g) {
+            if (g.name === inner4) {
+              var bk4 = g.name + '|' + (g.goalTier||inferTier(g));
+              if (!sbTargets[bk4]) sbTargets[bk4] = {};
+              sbTargets[bk4].min = sbActuals[k];
+            }
+          });
         } else {
           actAllActuals[monthF][k] = sbActuals[k];
         }
@@ -6150,6 +6193,7 @@ async function scLoadGoals() {
     }
   }
 
+  console.log('scMonthTargets keys:', Object.keys(scMonthTargets));
   scGoals = bank.filter(function(g) {
     if (g.active === false) return false;
     var tier = g.goalTier || inferTier(g);
@@ -6159,6 +6203,7 @@ async function scLoadGoals() {
   }).map(function(g) {
     var mKeyG = g.name + '|' + (g.goalTier||inferTier(g));
     var mdG = scMonthTargets[mKeyG] || {};
+    console.log('goal:', g.name, 'mKeyG:', mKeyG, 'mdG:', JSON.stringify(mdG));
     return Object.assign({}, g, {
       scWeight: g.defaultWeight || '',
       scTarget: mdG.target !== undefined ? mdG.target : g.goalValue,
@@ -6175,9 +6220,13 @@ async function scLoadGoals() {
   }).map(function(g) {
     var mKeyD = g.name + '|' + (g.goalTier||inferTier(g));
     var mdD = scMonthTargets[mKeyD] || {};
+    var resolvedTarget = mdD.target !== undefined ? mdD.target : g.goalValue;
+    var resolvedMin    = mdD.min    !== undefined ? mdD.min    : g.minValue;
+    console.log('deptGoal:', g.name, 'mKeyD:', mKeyD, 'mdD:', JSON.stringify(mdD), 'target:', resolvedTarget);
     return Object.assign({}, g, {
-      scTarget: mdD.target !== undefined ? mdD.target : g.goalValue,
-      minValue: mdD.min    !== undefined ? mdD.min    : g.minValue
+      scTarget: resolvedTarget,
+      minValue: resolvedMin,
+      goalValue: resolvedTarget  // ensure goalValue is also updated
     });
   });
 
