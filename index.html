@@ -890,15 +890,16 @@ async function authSignOut() {
   localStorage.removeItem('pf-current-role');
   currentProfile = null;
   currentUser = null;
+  if (sb) await sb.auth.signOut();
+  showAuthOverlay();
+  // Clear badge
   var emailEl = document.getElementById('user-email-display');
   var roleEl  = document.getElementById('user-role-display');
   if (emailEl) emailEl.textContent = 'Not signed in';
   if (roleEl)  roleEl.textContent  = '';
-  if (sb) {
-    await sb.auth.signOut();
-  } else {
-    showAuthOverlay();
-  }
+  // Clear password field
+  var pwEl = document.getElementById('auth-password');
+  if (pwEl) pwEl.value = '';
 }
 
 // ── Supabase Data Functions ──────────────────────────────────
@@ -4871,7 +4872,18 @@ async function bankPopulateMonths() {
 
 function bankGetMonthTargets(monthVal) {
   if (!monthVal) return {};
-  try { return JSON.parse(localStorage.getItem('bank-month-targets:' + monthVal) || '{}'); } catch(e) { return {}; }
+  try {
+    // Try raw value first (e.g. '2026-04')
+    var raw = localStorage.getItem('bank-month-targets:' + monthVal);
+    if (raw) return JSON.parse(raw);
+    // Try formatted label (e.g. 'April 2026')
+    var label = formatMonthLabel(monthVal);
+    if (label) {
+      var labeled = localStorage.getItem('bank-month-targets:' + label);
+      if (labeled) return JSON.parse(labeled);
+    }
+    return {};
+  } catch(e) { return {}; }
 }
 
 function bankSaveMonthTargets(monthVal, data) {
@@ -5492,8 +5504,10 @@ async function bankSaveInline(){
   var dept   =document.getElementById('banki-dept')?document.getElementById('banki-dept').value:'';
   var role   =document.getElementById('banki-role')?document.getElementById('banki-role').value:'';
   var name   =document.getElementById('banki-name')?document.getElementById('banki-name').value.trim():'';
-  var target = '';
-  var min    = '';
+  // For edits, preserve existing goalValue/minValue; for new goals leave blank
+  var existingGoal = (bankEditIdx!==null && bankGoals[bankEditIdx]) ? bankGoals[bankEditIdx] : null;
+  var target = existingGoal ? (existingGoal.goalValue || '') : '';
+  var min    = existingGoal ? (existingGoal.minValue    || '') : '';
   var lower  =document.getElementById('banki-lower')?document.getElementById('banki-lower').value==='true':true;
   var capped =document.getElementById('banki-capped')?document.getElementById('banki-capped').value:'no';
   var capPct =document.getElementById('banki-cappct')?document.getElementById('banki-cappct').value:100;
@@ -6466,6 +6480,22 @@ async function scSubmit() {
   // Check all individual goals have names
   for (var i=0;i<scGoals.length;i++) {
     if (!scGoals[i].name) { showToast('All goals need a name', 'error'); return; }
+  }
+
+  // Check all actuals are filled in
+  var missingActuals = scGoals.filter(function(g) {
+    return g.scActual===''||g.scActual===null||g.scActual===undefined;
+  });
+  if (missingActuals.length > 0) {
+    showToast('Please enter actuals for all ' + missingActuals.length + ' goal(s) before submitting', 'error');
+    return;
+  }
+
+  // Check base earnings is set
+  var earningsEl = document.getElementById('sc-earnings');
+  if (!earningsEl || !earningsEl.value || parseFloat(earningsEl.value) <= 0) {
+    showToast('Please enter base earnings before submitting', 'error');
+    return;
   }
 
   var period = formatMonthLabel(month);
