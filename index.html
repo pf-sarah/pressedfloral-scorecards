@@ -143,7 +143,11 @@
     .multi-select-item { display:flex; align-items:center; gap:10px; padding:8px 14px; font-size:13px; font-family:var(--sans); color:var(--text); cursor:pointer; font-weight:400; white-space:nowrap; }
     .multi-select-item:hover { background:var(--surface2); }
     .multi-select-item input { flex-shrink:0; width:14px; height:14px; cursor:pointer; }
-  </style>
+  
+    .sc-goal-row .sc-del-btn { opacity: 0; transition: opacity 0.15s; }
+    .sc-goal-row:hover .sc-del-btn { opacity: 1; }
+    .sc-goal-row:hover { background: var(--surface2); }
+</style>
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 </head>
 <body>
@@ -181,7 +185,7 @@
       <span class="nav-icon">&#9776;</span> Goals & Actuals
     </div>
     <div onclick="switchMode('scorecard')" class="nav-item" id="nav-item-scorecard">
-      <span class="nav-icon">&#9998;</span> Build Scorecard
+      <span class="nav-icon">&#128101;</span> Team Scorecards
     </div>
     <div style="font-size:9px;font-weight:700;color:var(--text-faint);letter-spacing:0.8px;padding:12px 10px 4px;font-family:var(--mono);">REVIEW</div>
     <div onclick="switchMode('history')" class="nav-item" id="nav-item-history">
@@ -193,6 +197,9 @@
     <div style="border-top:1.5px solid var(--border);margin:12px 0 8px;"></div>
     <div onclick="switchMode('guide')" class="nav-item" id="nav-item-guide">
       <span class="nav-icon">&#9432;</span> How To Use
+    </div>
+    <div onclick="switchMode('todos')" class="nav-item" id="nav-item-todos">
+      <span class="nav-icon">&#9744;</span> To Do <span id="todo-badge" style="display:none;background:var(--brick);color:#fff;font-size:9px;padding:1px 5px;border-radius:99px;font-family:var(--mono);margin-left:4px;font-weight:700;"></span>
     </div>
     <div onclick="switchMode('migrate')" class="nav-item" id="nav-item-migrate" style="color:var(--brick);">
       <span class="nav-icon">&#8593;</span> Migrate Data
@@ -231,8 +238,8 @@
         
         <div onclick="switchMode('scorecard')" style="background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:24px 20px;cursor:pointer;transition:all 0.15s;min-height:160px;" onmouseover="this.style.borderColor='var(--brick)';this.style.background='var(--surface2)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--surface)'">
           <div style="font-size:22px;margin-bottom:12px;">&#9998;</div>
-          <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;">Build Scorecard</div>
-          <div style="font-size:11px;color:var(--text-muted);line-height:1.5;">Select an employee, choose goals, set weights, and submit their scorecard.</div>
+          <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;">Team Scorecards</div>
+          <div style="font-size:11px;color:var(--text-muted);line-height:1.5;">View live scorecards for your team based on goals, targets, and actuals.</div>
         </div>
       </div>
 
@@ -354,6 +361,7 @@
       <div id="bank-save-bar" style="padding:10px 16px;border-top:1.5px solid var(--border);display:flex;align-items:center;gap:12px;">
         <button onclick="bankSaveMonthTargetsAll()" id="bank-save-btn" disabled style="padding:8px 22px;background:var(--surface2);color:var(--text-muted);border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:13px;font-weight:600;cursor:not-allowed;transition:all 0.15s;">Save Targets</button>
         <span id="bank-save-hint" style="font-size:12px;color:var(--text-muted);font-family:var(--mono);">Enter targets or minimums to enable saving</span>
+        <button onclick="clearMonthTargets()" style="margin-left:auto;padding:7px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:none;font-family:var(--sans);font-size:12px;cursor:pointer;color:var(--text-muted);">Clear targets &amp; mins</button>
       </div>
       <div style="padding:12px 16px;">
         <button onclick="bankOpenAdd()" class="add-goal-btn" style="width:100%;">+ Add Goal to Bank</button>
@@ -363,143 +371,23 @@
   </div>
 
   <div class="screen" id="screen-scorecard">
-
-    <section>
-      <div class="section-title">Employee &amp; Period</div>
-      <!-- Row 1: Who -->
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px;">
-        <div class="field" style="margin:0;">
-          <label>Employee name</label>
-          <div style="position:relative;">
-            <input type="text" id="sc-name" placeholder="Start typing name..." autocomplete="off" oninput="scTypeahead(this.value)" style="width:100%;">
-            <div id="sc-suggestions" style="display:none;position:absolute;top:100%;left:0;right:0;background:var(--surface);border:1.5px solid var(--brick);border-top:none;border-radius:0 0 var(--radius-sm) var(--radius-sm);z-index:200;max-height:200px;overflow-y:auto;box-shadow:0 4px 12px rgba(0,0,0,0.1);"></div>
-          </div>
-        </div>
-        <div class="field" style="margin:0;">
-          <label>Role</label>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <input type="text" id="sc-role" placeholder="Auto-filled" readonly style="flex:1;background:var(--surface2);color:var(--text);border-color:var(--border);">
-            <button onclick="scUnlock('sc-role')" title="Edit" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:13px;padding:2px;" onmouseover="this.style.color='var(--brick)'" onmouseout="this.style.color='var(--text-muted)'">&#9998;</button>
-          </div>
-        </div>
-        <div class="field" style="margin:0;">
-          <label>Manager</label>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <input type="text" id="sc-manager" placeholder="Auto-filled" readonly style="flex:1;background:var(--surface2);color:var(--text);border-color:var(--border);">
-            <button onclick="scUnlock('sc-manager')" title="Edit" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:13px;padding:2px;" onmouseover="this.style.color='var(--brick)'" onmouseout="this.style.color='var(--text-muted)'">&#9998;</button>
-          </div>
-        </div>
-      </div>
-      <!-- Row 2: Where -->
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px;">
-        <div class="field" style="margin:0;">
-          <label>Department</label>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <input type="text" id="sc-dept" placeholder="Auto-filled" readonly style="flex:1;background:var(--surface2);color:var(--text);border-color:var(--border);">
-            <button onclick="scUnlock('sc-dept')" title="Edit" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:13px;padding:2px;" onmouseover="this.style.color='var(--brick)'" onmouseout="this.style.color='var(--text-muted)'">&#9998;</button>
-          </div>
-        </div>
-        <div class="field" style="margin:0;">
-          <label>Location</label>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <input type="text" id="sc-loc" placeholder="Auto-filled" readonly style="flex:1;background:var(--surface2);color:var(--text);border-color:var(--border);">
-            <button onclick="scUnlock('sc-loc')" title="Edit" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:13px;padding:2px;" onmouseover="this.style.color='var(--brick)'" onmouseout="this.style.color='var(--text-muted)'">&#9998;</button>
-          </div>
-        </div>
-        <div class="field" style="margin:0;">
-          <label>Pay type</label>
-          <input type="text" id="sc-paytype-display" readonly style="width:100%;background:var(--surface2);color:var(--text);border-color:var(--border);">
-          <input type="hidden" id="sc-paytype" value="hourly">
-        </div>
-      </div>
-      <!-- Row 3: When -->
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;margin-bottom:14px;">
-        <div class="field" style="margin:0;">
-          <label>Period type</label>
-          <div style="display:flex;gap:8px;margin-top:2px;">
-            <button class="period-btn active" id="sc-period-monthly" onclick="scSetPeriodType('monthly')">Monthly</button>
-            <button class="period-btn" id="sc-period-quarterly" onclick="scSetPeriodType('quarterly')">Quarterly</button>
-          </div>
-        </div>
-        <div class="field" style="margin:0;" id="sc-month-field">
-          <label>Month</label>
-          <input type="month" id="sc-month" onchange="scOnMonthChange()">
-        </div>
-        <div class="field" style="margin:0;display:none;" id="sc-quarter-field">
-          <label>Quarter</label>
-          <div style="display:flex;gap:6px;">
-            <select id="sc-quarter" style="flex:1;"><option value="Q1">Q1 (Jan–Mar)</option><option value="Q2">Q2 (Apr–Jun)</option><option value="Q3">Q3 (Jul–Sep)</option><option value="Q4">Q4 (Oct–Dec)</option></select>
-            <select id="sc-year" style="flex:1;"><option value="2025">2025</option><option value="2026" selected>2026</option><option value="2027">2027</option></select>
-          </div>
-        </div>
-      </div>
-      <!-- Row 4: Pay -->
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:14px;">
-        <div class="field" style="margin:0;" id="sc-rate-field">
-          <label id="sc-rate-label">Hourly rate ($)</label>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <input type="number" step="any" id="sc-rate" placeholder="0.00" readonly style="flex:1;background:var(--surface2);color:var(--text);border-color:var(--border);" oninput="scCalcEarnings()">
-            <button onclick="scUnlock('sc-rate')" title="Edit" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:13px;padding:2px;" onmouseover="this.style.color='var(--brick)'" onmouseout="this.style.color='var(--text-muted)'">&#9998;</button>
-          </div>
-        </div>
-        <div class="field" style="margin:0;" id="sc-hours-field">
-          <label>Hours worked</label>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <input type="number" step="any" id="sc-hours" placeholder="0" readonly style="flex:1;background:var(--surface2);color:var(--text);border-color:var(--border);">
-            <button onclick="scUnlock('sc-hours')" title="Edit" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:13px;padding:2px;" onmouseover="this.style.color='var(--brick)'" onmouseout="this.style.color='var(--text-muted)'">&#9998;</button>
-          </div>
-        </div>
-        <div class="field" style="margin:0;">
-          <label>Total Base Earnings ($)</label>
-          <div style="display:flex;align-items:center;gap:6px;">
-            <input type="number" step="any" id="sc-earnings" placeholder="Auto-filled from Rippling" readonly style="flex:1;background:var(--surface2);color:var(--text);border-color:var(--border);">
-            <button onclick="scUnlock('sc-earnings')" title="Edit" style="background:none;border:none;cursor:pointer;color:var(--text-muted);font-size:13px;padding:2px;" onmouseover="this.style.color='var(--brick)'" onmouseout="this.style.color='var(--text-muted)'">&#9998;</button>
-          </div>
-        </div>
-      </div>
-    </section>
-
-    <section id="sc-goals-section" style="display:none;padding:0;">
-      <div style="padding:14px 16px 10px;display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;">
+    <section style="padding:14px 16px;">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
         <div>
-          <div class="section-title" style="margin:0;">Scorecard Goals</div>
-          <div id="sc-weight-status" style="font-size:12px;margin-top:4px;color:var(--text-muted);font-family:var(--mono);"></div>
+          <label style="font-size:9px;font-weight:700;color:var(--text-muted);letter-spacing:0.5px;font-family:var(--mono);">MONTH</label>
+          <select id="team-sc-month" onchange="renderTeamScorecards()" style="display:block;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;background:var(--surface);margin-top:4px;"></select>
         </div>
-        <button onclick="scAddMiscGoal()" style="padding:7px 14px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:none;font-family:var(--sans);font-size:12px;cursor:pointer;color:var(--text);">+ Misc Goal</button>
+        <div id="team-sc-filter-dept" style="display:none;">
+          <label style="font-size:9px;font-weight:700;color:var(--text-muted);letter-spacing:0.5px;font-family:var(--mono);">DEPARTMENT</label>
+          <select id="team-sc-dept" onchange="renderTeamScorecards()" style="display:block;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;background:var(--surface);margin-top:4px;">
+            <option value="">All departments</option>
+          </select>
+        </div>
       </div>
-      <div style="overflow-x:auto;">
-        <table style="width:100%;border-collapse:collapse;font-size:11px;font-family:var(--mono);table-layout:fixed;">
-          <colgroup>
-            <col style="width:52px">
-            <col style="width:95px">
-            <col style="width:110px">
-            <col style="width:120px">
-            <col style="width:70px">
-            <col style="width:80px">
-            <col style="width:50px">
-            <col style="width:66px">
-            <col style="width:70px">
-            <col style="width:62px">
-            <col style="width:28px">
-          </colgroup>
-          <thead id="sc-thead"></thead>
-          <tbody id="sc-tbody"></tbody>
-        </table>
-      </div>
-      <div id="sc-goals-empty" style="display:none;padding:16px;font-size:13px;color:var(--text-muted);font-family:var(--mono);">No goals found in the bank for this role and department.</div>
     </section>
-
-    <section id="sc-add-goals-section" style="display:none;">
-      <div class="section-title">Department Goals</div>
-      <p style="font-size:12px;color:var(--text-muted);font-family:var(--mono);margin-bottom:10px;">Select which department goals apply to this employee's scorecard:</p>
-      <div id="sc-bank-picker" style="display:flex;flex-wrap:wrap;gap:8px;"></div>
+    <section>
+      <div id="team-sc-list" style="display:flex;flex-direction:column;gap:12px;"></div>
     </section>
-
-    <section id="sc-submit-section" style="display:none;">
-      <div id="sc-summary" style="font-size:13px;color:var(--text-muted);font-family:var(--mono);margin-bottom:14px;line-height:1.7;"></div>
-      <button onclick="scSubmit()" style="padding:12px 32px;background:var(--brick);color:#fff;border:none;border-radius:var(--radius-sm);font-family:var(--sans);font-size:14px;font-weight:600;cursor:pointer;">Submit Scorecard</button>
-    </section>
-
   </div>
 
   <div class="screen" id="screen-history">
@@ -538,6 +426,12 @@
             <option value="Preservation">Preservation</option>
             <option value="Recreation">Recreation</option>
             <option value="Resin">Resin</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Goal</label>
+          <select id="history-goal">
+            <option value="">All goals</option>
           </select>
         </div>
       </div>
@@ -727,6 +621,13 @@
     </section>
   </div>
 
+  <div class="screen" id="screen-todos">
+    <section>
+      <div class="section-title">To Do</div>
+      <div id="todo-list" style="display:flex;flex-direction:column;gap:12px;"></div>
+    </section>
+  </div>
+
   <!-- Global row action menu -->
   <div id="gs2-row-menu" style="display:none;position:fixed;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius-sm);box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:500;min-width:130px;padding:4px;">
     <div id="gs2-row-menu-edit" style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;font-size:13px;font-family:var(--sans);color:var(--text);border-radius:4px;" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='none'">&#9998;&nbsp; Edit</div>
@@ -737,6 +638,14 @@
 <div class="toast" id="toast"></div>
 
 <script>
+window.onerror = function(msg, src, line, col, err) {
+  console.error('GLOBAL ERROR:', msg, 'line:', line, 'col:', col);
+  var d = document.createElement('div');
+  d.style.cssText = 'position:fixed;top:0;left:0;right:0;background:#9B2C2C;color:#fff;padding:10px 16px;font-size:12px;font-family:monospace;z-index:99999;';
+  d.textContent = 'JS Error line ' + line + ': ' + msg;
+  document.body && document.body.appendChild(d);
+  return false;
+};
 // ── Supabase Init ────────────────────────────────────────────
 const SUPABASE_URL = 'https://mwwqeakjxmpticvbpinc.supabase.co';
 const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im13d3FlYWtqeG1wdGljdmJwaW5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5NjIxMjUsImV4cCI6MjA5MjUzODEyNX0.sqOElnGDRM2X2-TT1iMrnPBa_HK0ndDZ_31iP40jsiE';
@@ -1396,17 +1305,20 @@ function updateHeaderLabel() {
 
 function switchMode(mode) {
   currentMode = mode;
-  ['landing','setup','history','rippling','guide','scorecard','migrate'].forEach(function(m) {
+  ['landing','setup','history','rippling','guide','scorecard','migrate','todos'].forEach(function(m) {
     var screen = document.getElementById('screen-' + m);
     if (screen) screen.className = 'screen' + (m === mode ? ' active' : '');
     var navItem = document.getElementById('nav-item-' + m);
     if (navItem) navItem.className = 'nav-item' + (m === mode ? ' active' : '');
   });
   // Update header label
-  var labels = { setup:'Goals & Actuals', history:'Historical Data', rippling:'Rippling Data', guide:'How To Use', scorecard:'Build Scorecard', landing:'Home' };
+  var labels = { setup:'Goals & Actuals', history:'Historical Data', rippling:'Rippling Data', guide:'How To Use', scorecard:'Team Scorecards', landing:'Home' };
   var label = document.getElementById('current-page-label');
   if (label) label.textContent = labels[mode] || 'Home';
-  if (mode === 'setup') { bankLoad(); }
+  if (mode === 'setup') { bankLoad().catch(function(e){ console.error('bankLoad failed:', e); }); }
+  if (mode === 'history') { historyPopulateGoals(); }
+  if (mode === 'todos') { renderTodos(); }
+  if (mode === 'scorecard') { initTeamScorecards(); }
   
   if (mode === 'history') { _historyAll = []; _historyFiltered = []; var hrs = document.getElementById('history-results-section'); if(hrs) hrs.style.display='none'; var hes = document.getElementById('history-empty-section'); if(hes) hes.style.display='none'; }
   if (mode === 'rippling') loadRipplingSaved();
@@ -2280,10 +2192,12 @@ function setActualsPeriod(type) {
 }
 
 function formatMonthLabel(m) {
-  // Parse manually to avoid UTC/timezone offset shifting the date
+  if (!m || typeof m !== 'string') return '';
   var parts = m.split('-');
+  if (parts.length < 2) return m;
   var year = parseInt(parts[0]);
-  var month = parseInt(parts[1]) - 1; // 0-indexed
+  var month = parseInt(parts[1]) - 1;
+  if (isNaN(year) || isNaN(month)) return m;
   var d = new Date(year, month, 1);
   return d.toLocaleString('default', { month: 'long', year: 'numeric' });
 }
@@ -2999,6 +2913,17 @@ async function loadSubmittedScorecardsPreview() {
 var _historyAll = [];
 var _historyFiltered = [];
 
+function historyPopulateGoals() {
+  var sel = document.getElementById('history-goal');
+  if (!sel) return;
+  var goals = bankGoals.filter(function(g){ return g.active !== false; });
+  var names = [];
+  goals.forEach(function(g){ if (names.indexOf(g.name) === -1) names.push(g.name); });
+  names.sort();
+  sel.innerHTML = '<option value="">All goals</option>' +
+    names.map(function(n){ return '<option value="'+escAttr(n)+'">'+escAttr(n)+'</option>'; }).join('');
+}
+
 async function runHistorySearch() {
   // If Supabase is available, load from there
   if (sb && currentUser) {
@@ -3006,13 +2931,23 @@ async function runHistorySearch() {
     var searchEl  = document.getElementById('history-search');
     var locationEl = document.getElementById('history-location');
     var deptEl    = document.getElementById('history-dept');
+    var goalEl = document.getElementById('history-goal');
     var filters = {
       period:   periodEl   && periodEl.value   ? formatMonthLabel(periodEl.value)   : null,
       search:   searchEl   && searchEl.value   ? searchEl.value.toLowerCase()       : null,
       location: locationEl && locationEl.value ? locationEl.value                   : null,
-      department: deptEl   && deptEl.value     ? deptEl.value                       : null
+      department: deptEl   && deptEl.value     ? deptEl.value                       : null,
+      goal:     goalEl     && goalEl.value     ? goalEl.value                       : null
     };
     var data = await sbLoadScorecards(filters);
+    // Apply goal filter client-side if set
+    if (filters.goal) {
+      data = data.map(function(sc) {
+        var copy = Object.assign({}, sc);
+        if (copy.goals) copy.goals = copy.goals.filter(function(g){ return g.name === filters.goal; });
+        return copy;
+      }).filter(function(sc){ return !sc.goals || sc.goals.length > 0; });
+    }
     _historyAll      = data;
     _historyFiltered = data;
     var rs = document.getElementById('history-results-section');
@@ -3085,6 +3020,7 @@ function filterHistory() {
   var search = (document.getElementById('history-search').value || '').toLowerCase();
   var locFilter = document.getElementById('history-location').value;
   var deptFilter = document.getElementById('history-dept').value;
+  var goalFilter = document.getElementById('history-goal') ? document.getElementById('history-goal').value : '';
 
   _historyFiltered = _historyAll.filter(function(s) {
     if (locFilter && s.location !== locFilter) return false;
@@ -3095,6 +3031,15 @@ function filterHistory() {
     }
     return true;
   });
+
+  // If goal filter set, narrow goals within each scorecard and show comparison
+  if (goalFilter) {
+    _historyFiltered = _historyFiltered.map(function(s) {
+      var copy = Object.assign({}, s);
+      if (copy.goals) copy.goals = copy.goals.filter(function(g){ return g.name === goalFilter; });
+      return copy;
+    }).filter(function(s){ return !s.goals || s.goals.length > 0; });
+  }
 
   renderHistory();
 }
@@ -3115,6 +3060,67 @@ function renderHistory() {
   var emptySection = document.getElementById('history-empty-section');
   var list = document.getElementById('history-results-list');
   var title = document.getElementById('history-results-title');
+
+  // Goal comparison mode
+  var goalFilter = document.getElementById('history-goal') ? document.getElementById('history-goal').value : '';
+  if (goalFilter && _historyFiltered.length > 0) {
+    if (resultsSection) resultsSection.style.display = 'block';
+    if (emptySection) emptySection.style.display = 'none';
+    if (title) title.textContent = _historyFiltered.length + ' result(s) — "' + goalFilter + '" comparison';
+    if (list) {
+      // Build comparison table: Period | Employee | Dept | Location | Target | Actual | Achieve%
+      var thS = 'padding:7px 10px;text-align:left;font-size:10px;font-weight:700;color:var(--text-muted);background:var(--surface2);border-bottom:2px solid var(--border);white-space:nowrap;';
+      var rows = [];
+      _historyFiltered.forEach(function(sc) {
+        (sc.goals||[]).forEach(function(g) {
+          var ach = g.achievement !== undefined ? g.achievement : '—';
+          var achColor = typeof ach === 'number' ? (ach >= 100 ? '#2D6B1A' : '#703c2e') : 'var(--text-muted)';
+          rows.push({
+            period: sc._month || sc.scorecardMonth || '',
+            employee: sc.employeeName || '',
+            dept: sc.department || '',
+            location: sc.location || '',
+            target: g.goalValue !== undefined ? g.goalValue : '—',
+            actual: g.actualValue !== undefined ? g.actualValue : '—',
+            ach: ach,
+            achColor: achColor
+          });
+        });
+      });
+      // Sort by period then employee
+      rows.sort(function(a,b){ return (a.period+a.employee).localeCompare(b.period+b.employee); });
+
+      list.innerHTML = '<div style="overflow-x:auto;">'+
+        '<table style="width:100%;border-collapse:collapse;font-size:12px;">'+
+          '<thead><tr>'+
+            '<th style="'+thS+'">Period</th>'+
+            '<th style="'+thS+'">Employee</th>'+
+            '<th style="'+thS+'">Department</th>'+
+            '<th style="'+thS+'">Location</th>'+
+            '<th style="'+thS+'text-align:center;">Target</th>'+
+            '<th style="'+thS+'text-align:center;">Actual</th>'+
+            '<th style="'+thS+'text-align:center;">Achieve%</th>'+
+          '</tr></thead>'+
+          '<tbody>'+rows.map(function(r,i) {
+            var bg = i%2===0?'background:#fff;':'background:var(--surface2);';
+            var border = 'border-bottom:1px solid var(--border);';
+            var td = 'padding:7px 10px;'+border+bg;
+            return '<tr>'+
+              '<td style="'+td+'font-family:var(--mono);font-size:11px;">'+escAttr(r.period)+'</td>'+
+              '<td style="'+td+'font-weight:600;">'+escAttr(r.employee)+'</td>'+
+              '<td style="'+td+'">'+escAttr(r.dept)+'</td>'+
+              '<td style="'+td+'">'+escAttr(r.location)+'</td>'+
+              '<td style="'+td+'text-align:center;font-family:var(--mono);">'+escAttr(String(r.target))+'</td>'+
+              '<td style="'+td+'text-align:center;font-family:var(--mono);">'+escAttr(String(r.actual))+'</td>'+
+              '<td style="'+td+'text-align:center;font-family:var(--mono);font-weight:700;color:'+r.achColor+';">'+(typeof r.ach==='number'?r.ach.toFixed(1)+'%':escAttr(String(r.ach)))+'</td>'+
+            '</tr>';
+          }).join('')+
+          '</tbody>'+
+        '</table>'+
+      '</div>';
+    }
+    return;
+  }
 
   if (_historyFiltered.length === 0) {
     resultsSection.style.display = 'none';
@@ -4854,6 +4860,7 @@ async function act2DeleteScorecard(idx) {
 // ── Goal Bank ───────────────────────────────────────────────────
 var bankGoals = []; // all goals in the bank
 var bankEditIdx = null;
+var bankEditSbId = null;
 var BANK_KEY = 'goal-bank-v1';
 
 var bankViewMode = 'goals'; // 'goals' or 'actuals'
@@ -4898,6 +4905,12 @@ async function bankPopulateMonths() {
     if (val === current) opt.selected = true;
     sel.appendChild(opt);
   }
+}
+
+function goalMKey(g) {
+  var tier = g.goalTier || inferTier(g) || '';
+  var role = (tier === 'individual' && g.role) ? ('|' + g.role) : '';
+  return g.name + '|' + tier + role;
 }
 
 function bankGetMonthTargets(monthVal) {
@@ -4958,8 +4971,9 @@ async function bankLoad() {
         actLoadAllActuals(); // refresh local actuals
         // Also load actuals from Supabase for current month
         var curMonth = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
-        if (sb && currentUser && curMonth) {
-          sbLoadActuals(formatMonthLabel(curMonth)).then(function(sbActs) {
+        var curMonthLabel = curMonth ? formatMonthLabel(curMonth) : '';
+        if (sb && currentUser && curMonthLabel) {
+          sbLoadActuals(curMonthLabel).then(function(sbActs) {
             if (sbActs && Object.keys(sbActs).length) {
               if (!actAllActuals[curMonth]) actAllActuals[curMonth] = {};
               Object.keys(sbActs).forEach(function(k) {
@@ -4984,7 +4998,7 @@ async function bankLoad() {
       var r = await storageGet(BANK_KEY);
       bankGoals = r ? JSON.parse(r) : [];
     }
-  } catch(e) { bankGoals = []; }
+  } catch(e) { console.error("bankLoad error:", e); bankGoals = []; }
   bankRender();
   var title = document.getElementById('bank-table-title');
   if (title) title.textContent = 'Goal Bank (' + bankGoals.filter(function(g){return g.active!==false;}).length + ' active)';
@@ -5123,7 +5137,7 @@ function bankRender() {
     var tier=g.goalTier||inferTier(g);
     var inactive=g.active===false;
     var rowStyle=inactive?'opacity:0.45;':'';
-    var mKey = g.name + '|' + (g.goalTier||'');
+    var mKey = goalMKey(g);
     var mData = monthTargets[mKey] || {};
     var mTarget = mData.target !== undefined ? mData.target : '';
     var mMin    = mData.min    !== undefined ? mData.min    : '';
@@ -5253,6 +5267,729 @@ async function bankSaveActual(idx) {
   showToast('Actual saved!', 'success');
 }
 
+// ── To Do System ────────────────────────────────────────────
+
+function getTodoTasks() {
+  var now = new Date();
+  var tasks = [];
+
+  var currentYear  = now.getFullYear();
+  var currentMonth = now.getMonth();
+
+  // Next month
+  var nextMonth     = currentMonth === 11 ? 0 : currentMonth + 1;
+  var nextMonthYear = currentMonth === 11 ? currentYear + 1 : currentYear;
+  var nextMonthName = new Date(nextMonthYear, nextMonth, 1).toLocaleString('default', {month:'long', year:'numeric'});
+  var nextMonthVal  = nextMonthYear + '-' + String(nextMonth+1).padStart(2,'0');
+
+  // Previous month
+  var prevMonth     = currentMonth === 0 ? 11 : currentMonth - 1;
+  var prevMonthYear = currentMonth === 0 ? currentYear - 1 : currentYear;
+  var prevMonthName = new Date(prevMonthYear, prevMonth, 1).toLocaleString('default', {month:'long', year:'numeric'});
+  var prevMonthVal  = prevMonthYear + '-' + String(prevMonth+1).padStart(2,'0');
+
+  var isAdmin  = !currentProfile || currentProfile.role === 'admin';
+  var mgDepts  = (currentProfile && currentProfile.departments) || [];
+  var mgLocs   = (currentProfile && currentProfile.locations)  || [];
+
+  function scopedGoals(tierFilter) {
+    return bankGoals.filter(function(g) {
+      if (g.active === false) return false;
+      var tier = g.goalTier || inferTier(g);
+      if (tier === 'individual') return false;
+      if (tierFilter && tier !== tierFilter) return false;
+      // Company goal targets/actuals: admin only
+      if (tier === 'company') return isAdmin;
+      // Dept goals: only managers of that specific department AND location
+      if (!isAdmin) {
+        var dOk = mgDepts.length > 0 && g.department && mgDepts.indexOf(g.department) !== -1;
+        var lOk = mgLocs.length === 0 || !g.location || mgLocs.indexOf(g.location) !== -1;
+        return dOk && lOk;
+      }
+      return true;
+    });
+  }
+
+  // ── RIPPLING UPLOAD TASK (admin only, open 1st, due 7th) ──
+  if (isAdmin) {
+    var ripUploadDue  = new Date(currentYear, currentMonth, 7);
+    var ripUploadOpen = now >= new Date(currentYear, currentMonth, 1);
+    var ripUploadLock = new Date(nextMonthYear, nextMonth, 1);
+    if (ripUploadOpen && now < ripUploadLock) {
+      var currentPeriod = new Date(currentYear, currentMonth, 1).toLocaleString('default', {month:'long', year:'numeric'});
+      var ripKey = 'rippling:' + currentPeriod;
+      var ripploaded = !!localStorage.getItem(ripKey);
+      tasks.push({
+        id: 'rippling-' + currentYear + '-' + currentMonth,
+        group: 'admin',
+        groupLabel: 'Admin Tasks',
+        title: 'Upload ' + currentPeriod + ' employee data',
+        subtitle: 'Admin · Rippling',
+        detail: ripploaded ? 'Uploaded ✓' : 'Not yet uploaded',
+        status: ripploaded ? 'complete' : (now > ripUploadDue ? 'overdue' : 'open'),
+        due: 'Due ' + ripUploadDue.toLocaleDateString('default', {month:'short', day:'numeric'}),
+        daysLeft: ripploaded ? null : Math.ceil((ripUploadDue - now) / (1000*60*60*24)),
+        complete: ripploaded,
+        isRippling: true,
+        monthVal: new Date(currentYear, currentMonth, 1).toLocaleString('default', {month:'long', year:'numeric'})
+      });
+    }
+  }
+
+  // ── TARGET TASKS (open 1st, due 17th, locks 1st of next month) ──
+  var targetDue  = new Date(currentYear, currentMonth, 17);
+  var targetLock = new Date(nextMonthYear, nextMonth, 1);
+  var targetOpen = now >= new Date(currentYear, currentMonth, 1) && now < targetLock;
+
+  if (targetOpen) {
+    var targetIsOverdue = now > targetDue;
+    var targetDaysLeft  = Math.ceil((targetDue - now) / (1000*60*60*24));
+    var targets = bankGetMonthTargets(nextMonthVal);
+
+    scopedGoals().forEach(function(g) {
+      var mKey = goalMKey(g);
+      var md   = targets[mKey] || {};
+      var hasTarget = md.target !== undefined;
+      var hasMin    = md.min    !== undefined;
+      var complete  = hasTarget && hasMin;
+      var tier = g.goalTier || inferTier(g);
+      var label = tier === 'company' ? 'Co' : (g.department || 'Dept');
+      var missing = !hasTarget && !hasMin ? 'Missing target & minimum' : (!hasTarget ? 'Missing target' : 'Missing minimum');
+
+      tasks.push({
+        id: 'target-' + nextMonthVal + '-' + g.name,
+        group: 'targets',
+        groupLabel: nextMonthName + ' Targets',
+        title: g.name,
+        subtitle: label + (g.location ? ' · ' + g.location : ''),
+        detail: complete ? 'Target: ' + md.target + ' · Min: ' + md.min : missing,
+        status: targetLock <= now ? 'locked' : (complete ? 'complete' : (targetIsOverdue ? 'overdue' : 'open')),
+        due: 'Due ' + targetDue.toLocaleDateString('default', {month:'short', day:'numeric'}),
+        daysLeft: complete ? null : targetDaysLeft,
+        complete: complete,
+        goalName: g.name,
+        goalTier: g.goalTier||inferTier(g),
+        monthVal: nextMonthVal,
+        action: function() { switchMode('setup'); },
+        actionLabel: 'Set in Goals & Actuals'
+      });
+    });
+  }
+
+  // ── ACTUAL TASKS (open 1st, due 14th, locks 21st of current month) ──
+  var actualsOpenDate = new Date(currentYear, currentMonth, 1);
+  var actualsDue      = new Date(currentYear, currentMonth, 14);
+  var actualsLock     = new Date(currentYear, currentMonth, 22);
+
+  if (now >= actualsOpenDate && now < actualsLock) {
+    var actualsIsOverdue = now > actualsDue;
+    var actualsDaysLeft  = Math.ceil((actualsDue - now) / (1000*60*60*24));
+    var prevTargets      = bankGetMonthTargets(prevMonthVal);
+    var savedActuals     = actAllActuals[prevMonthVal] || {};
+
+    scopedGoals().forEach(function(g) {
+      var mKey2 = goalMKey(g);
+      var md2   = prevTargets[mKey2] || {};
+      if (md2.target === undefined && md2.min === undefined) return; // skip goals with no targets set
+      var tier2  = g.goalTier || inferTier(g);
+      var actKey = [tier2, g.location||'', g.department||'', g.name].join('|');
+      var actual = savedActuals[actKey];
+      var complete2 = actual !== undefined;
+      var label2 = tier2 === 'company' ? 'Co' : (g.department || 'Dept');
+
+      var mKeyAct = g.name+'|'+tier2;
+      var mdAct = prevTargets[mKeyAct]||{};
+      tasks.push({
+        id: 'actual-' + prevMonthVal + '-' + g.name,
+        group: 'actuals',
+        groupLabel: prevMonthName + ' Actuals',
+        title: g.name,
+        subtitle: label2 + (g.location ? ' · ' + g.location : ''),
+        detail: complete2 ? 'Actual: ' + actual : 'No actual entered yet',
+        status: complete2 ? 'complete' : (actualsIsOverdue ? 'overdue' : 'open'),
+        due: 'Due ' + actualsDue.toLocaleDateString('default', {month:'short', day:'numeric'}),
+        daysLeft: complete2 ? null : actualsDaysLeft,
+        complete: complete2,
+        goalName: g.name,
+        goalTier: tier2,
+        actKey: actKey,
+        monthVal: prevMonthVal,
+        target: mdAct.target,
+        min: mdAct.min,
+        action: function() { switchMode('setup'); },
+        actionLabel: 'Enter in Goals & Actuals'
+      });
+    });
+  }
+
+  // ── INDIVIDUAL GOAL ACTUAL TASKS (per employee, merged into actuals group) ──
+  if (now >= new Date(currentYear, currentMonth, 1) && now < new Date(currentYear, currentMonth, 22)) {
+    var indivIsOverdue2 = now > new Date(currentYear, currentMonth, 14);
+    var indivDaysLeft2  = Math.ceil((new Date(currentYear, currentMonth, 14) - now) / (1000*60*60*24));
+    var prevPeriod2 = formatMonthLabel(prevMonthVal);
+
+    // Load employees for prev month
+    var rKey2 = 'rippling:' + prevPeriod2;
+    var rData2 = localStorage.getItem(rKey2);
+    var employees2 = rData2 ? JSON.parse(rData2) : [];
+
+    // Scope to manager's depts/locations
+    if (!isAdmin) {
+      employees2 = employees2.filter(function(e) {
+        var dOk = mgDepts.length===0 || !e.department || mgDepts.indexOf(e.department) !== -1;
+        var lOk = mgLocs.length===0  || !e.location   || mgLocs.indexOf(e.location) !== -1;
+        return dOk && lOk;
+      });
+    }
+
+    // Get individual goals scoped to manager
+    var indivGoals2 = bankGoals.filter(function(g) {
+      if (g.active === false) return false;
+      var tier = g.goalTier || inferTier(g);
+      if (tier !== 'individual') return false;
+      if (!isAdmin) {
+        var dOk = mgDepts.length===0 || !g.department || mgDepts.indexOf(g.department) !== -1;
+        var lOk = mgLocs.length===0  || !g.location   || mgLocs.indexOf(g.location)   !== -1;
+        return dOk && lOk;
+      }
+      return true;
+    });
+
+    // One task per employee per matching individual goal
+    employees2.forEach(function(emp) {
+      var empRole = emp.role || '';
+      indivGoals2.filter(function(g){ return !g.role || g.role === empRole; }).forEach(function(g) {
+        var tier3 = 'individual';
+        // Individual actuals are keyed per employee: use emp location+dept+goal
+        var empLoc  = emp.location || '';
+        var empDept = emp.department || '';
+        var actKey3 = [tier3, empLoc, empDept, g.name, emp.name].join('|');
+        var savedActuals3 = actAllActuals[prevMonthVal] || {};
+        // Also try the standard key without emp name
+        var stdKey = [tier3, empLoc, empDept, g.name].join('|');
+        var actual3 = savedActuals3[actKey3] !== undefined ? savedActuals3[actKey3] : savedActuals3[stdKey];
+        var complete3 = actual3 !== undefined;
+
+        tasks.push({
+          id: 'indiv-' + prevMonthVal + '-' + emp.name + '-' + g.name,
+          group: 'actuals',  // merged into actuals group
+          groupLabel: prevMonthName + ' Actuals',
+          title: emp.name,
+          subtitle: (empRole||'') + ' · ' + (g.name||''),
+          detail: complete3 ? 'Actual: ' + actual3 : 'No actual entered',
+          status: complete3 ? 'complete' : (indivIsOverdue2 ? 'overdue' : 'open'),
+          due: 'Due ' + new Date(currentYear, currentMonth, 14).toLocaleDateString('default', {month:'short', day:'numeric'}),
+          daysLeft: complete3 ? null : indivDaysLeft2,
+          complete: complete3,
+          goalName: g.name,
+          goalTier: tier3,
+          actKey: actKey3,
+          altActKey: stdKey,
+          monthVal: prevMonthVal,
+          isIndivEmployee: true,
+          empName: emp.name,
+          target: (function(){
+            // Try prev month targets first, then current month, then goal default
+            var mk=goalMKey(g);
+            var md=bankGetMonthTargets(prevMonthVal)[mk]||{};
+            if (md.target!==undefined) return md.target;
+            var mdCur=bankGetMonthTargets(nextMonthVal)[mk]||{};
+            if (mdCur.target!==undefined) return mdCur.target;
+            return (g.goalValue!==null&&g.goalValue!==undefined&&!isNaN(g.goalValue))?g.goalValue:null;
+          })(),
+          min: (function(){
+            var mk=goalMKey(g);
+            var md=bankGetMonthTargets(prevMonthVal)[mk]||{};
+            if (md.min!==undefined) return md.min;
+            var mdCur=bankGetMonthTargets(nextMonthVal)[mk]||{};
+            if (mdCur.min!==undefined) return mdCur.min;
+            return (g.minValue!==null&&g.minValue!==undefined&&!isNaN(g.minValue))?g.minValue:null;
+          })()
+        });
+      });
+    });
+  }
+
+  return tasks;
+}
+
+function renderTodos() {
+  var list = document.getElementById('todo-list');
+  if (!list) return;
+
+  var tasks = getTodoTasks();
+  var openCount = tasks.filter(function(t){ return t.status==='open'||t.status==='overdue'; }).length;
+
+  // Update badge
+  var badge = document.getElementById('todo-badge');
+  if (badge) { badge.textContent = openCount; badge.style.display = openCount>0?'inline':'none'; }
+
+  if (!tasks.length) {
+    list.innerHTML = '<div style="padding:20px;font-size:13px;color:var(--text-muted);font-family:var(--mono);">No tasks right now — check back on the 1st of next month.</div>';
+    return;
+  }
+
+  var statusColors = {open:'#1a5c1a',overdue:'#9B2C2C',complete:'#525143',locked:'#999'};
+  var statusBg     = {open:'#eef5ec',overdue:'#fcebeb',complete:'#f5f5f0',locked:'#f5f5f5'};
+  var statusIcon   = {open:'○',overdue:'⚠',complete:'✓',locked:'🔒'};
+
+  // Group by group label
+  var groups = {};
+  var groupOrder = [];
+  tasks.forEach(function(t) {
+    if (!groups[t.group]) { groups[t.group] = {label:t.groupLabel, tasks:[], due:t.due}; groupOrder.push(t.group); }
+    groups[t.group].tasks.push(t);
+  });
+
+  list.innerHTML = groupOrder.map(function(gk) {
+    var grp = groups[gk];
+    var total = grp.tasks.length;
+    var done  = grp.tasks.filter(function(t){return t.complete;}).length;
+    var pct   = total ? Math.round((done/total)*100) : 0;
+    var allDone = done === total;
+    var anyOverdue = grp.tasks.some(function(t){return t.status==='overdue';});
+    var headerColor = allDone ? '#2D6B1A' : (anyOverdue ? '#9B2C2C' : 'var(--brick)');
+    var showCompletedId = 'show-complete-'+gk;
+    var showCompleted = document.getElementById(showCompletedId) ? document.getElementById(showCompletedId).checked : false;
+    var visibleTasks = grp.tasks.filter(function(t){ return !t.complete || showCompleted; });
+
+    var rows = visibleTasks.map(function(t) {
+      var col = statusColors[t.status]||'#333';
+      var ico = statusIcon[t.status]||'○';
+      var tid = 'todo-'+t.id.replace(/[^a-zA-Z0-9]/g,'-');
+      var rowBg = t.complete ? '' : '';
+
+      if (t.isRippling) {
+        return '<div id="'+tid+'" style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);">'+
+          '<span style="width:18px;text-align:center;font-size:12px;color:'+col+';">'+ico+'</span>'+
+          '<div style="flex:1;font-size:12px;font-weight:600;color:var(--text);">'+escAttr(t.title)+'</div>'+
+          '<span style="font-size:10px;color:var(--text-muted);font-family:var(--mono);">'+escAttr(t.subtitle)+'</span>'+
+          (!t.complete ?
+            '<button onclick="todoGoToRippling()" style="padding:3px 10px;border:1.5px solid var(--brick);border-radius:var(--radius-sm);background:none;font-family:var(--sans);font-size:11px;cursor:pointer;color:var(--brick);">Upload Now</button>'
+            : '<span style="font-size:10px;color:#2D6B1A;font-family:var(--mono);">✓ uploaded</span>')+
+          (!t.complete?'<span style="font-size:10px;color:'+col+';font-family:var(--mono);white-space:nowrap;">'+(t.daysLeft>0?t.daysLeft+'d':'past due')+'</span>':'')+
+        '</div>';
+      } else if (t.isIndivEmployee) {
+        // Individual goal per employee — editable actual input
+        var indivActuals = actAllActuals[t.monthVal]||{};
+        var iVal = indivActuals[t.actKey]!==undefined ? indivActuals[t.actKey] : '';
+        var iTgtInfo = '';
+        if (t.target!==undefined&&t.target!==null&&t.target!=='') iTgtInfo += 'Target: '+t.target;
+        if (t.min!==undefined&&t.min!==null&&t.min!=='') iTgtInfo += (iTgtInfo?' · ':'')+'Min: '+t.min;
+        return '<div id="'+tid+'" style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);'+(t.complete?'opacity:0.6;':'')+'">'+
+          '<span style="width:18px;text-align:center;font-size:12px;color:'+col+';">'+ico+'</span>'+
+          '<div style="flex:1;min-width:0;">'+
+            '<div style="font-size:12px;font-weight:600;color:var(--text);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+escAttr(t.title)+'</div>'+
+            '<div style="font-size:10px;color:var(--text-muted);font-family:var(--mono);">'+escAttr(t.subtitle)+(iTgtInfo?' · '+iTgtInfo:'')+'</div>'+
+          '</div>'+
+          '<input type="number" step="any" value="'+escAttr(String(iVal))+'" placeholder="Actual" data-todo-id="'+tid+'" data-actkey="'+escAttr(t.actKey)+'" data-monthval="'+escAttr(t.monthVal)+'" onchange="todoSaveActual(this)" style="width:90px;padding:3px 6px;font-size:11px;font-family:var(--mono);border:1.5px solid '+(iVal!==''?'var(--brick)':'var(--border)')+';border-radius:3px;">'+
+          (!t.complete?'<span style="font-size:10px;color:'+col+';font-family:var(--mono);white-space:nowrap;">'+(t.daysLeft>0?t.daysLeft+'d':'past due')+'</span>':'<span style="font-size:10px;color:#2D6B1A;font-family:var(--mono);">✓</span>')+
+        '</div>';
+      } else if (t.group === 'targets') {
+        // Show target + min inputs
+        var targets = bankGetMonthTargets(t.monthVal);
+        var mKey = t.goalName+'|'+t.goalTier;
+        var md = targets[mKey]||{};
+        var tVal = md.target!==undefined?md.target:'';
+        var mVal = md.min!==undefined?md.min:'';
+        return '<div id="'+tid+'" style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);'+(t.complete?'opacity:0.5;':'')+'">'+
+          '<span style="width:18px;text-align:center;font-size:12px;color:'+col+';">'+ico+'</span>'+
+          '<div style="flex:1;font-size:12px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+escAttr(t.title)+'</div>'+
+          '<span style="font-size:10px;color:var(--text-muted);font-family:var(--mono);white-space:nowrap;">'+escAttr(t.subtitle)+'</span>'+
+          '<input type="number" step="any" value="'+escAttr(String(tVal))+'" placeholder="Target" data-todo-id="'+tid+'" data-field="target" data-mkey="'+escAttr(mKey)+'" data-monthval="'+escAttr(t.monthVal)+'" onchange="todoSaveTarget(this)" style="width:70px;padding:3px 6px;font-size:11px;font-family:var(--mono);border:1.5px solid '+(tVal!==''?'var(--brick)':'var(--border)')+';border-radius:3px;">'+
+          '<input type="number" step="any" value="'+escAttr(String(mVal))+'" placeholder="Min" data-todo-id="'+tid+'" data-field="min" data-mkey="'+escAttr(mKey)+'" data-monthval="'+escAttr(t.monthVal)+'" onchange="todoSaveTarget(this)" style="width:70px;padding:3px 6px;font-size:11px;font-family:var(--mono);border:1.5px solid '+(mVal!==''?'var(--brick)':'var(--border)')+';border-radius:3px;">'+
+          (!t.complete?'<span style="font-size:10px;color:'+col+';font-family:var(--mono);white-space:nowrap;">'+(t.daysLeft>0?t.daysLeft+'d':'past due')+'</span>':'<span style="font-size:10px;color:#2D6B1A;font-family:var(--mono);">✓</span>')+
+        '</div>';
+      } else {
+        // Actual input — show target and min too
+        var savedActuals2 = actAllActuals[t.monthVal]||{};
+        var aVal = savedActuals2[t.actKey]!==undefined?savedActuals2[t.actKey]:'';
+        var tgtInfo = '';
+        if (t.target!==undefined&&t.target!==null&&t.target!=='') tgtInfo += 'Target: '+t.target;
+        if (t.min!==undefined&&t.min!==null&&t.min!=='') tgtInfo += (tgtInfo?' · ':'')+'Min: '+t.min;
+        return '<div id="'+tid+'" style="display:flex;align-items:center;gap:8px;padding:8px 0;border-bottom:1px solid var(--border);'+(t.complete?'opacity:0.5;':'')+'">'+
+          '<span style="width:18px;text-align:center;font-size:12px;color:'+col+';">'+ico+'</span>'+
+          '<div style="flex:1;min-width:0;">'+
+            '<div style="font-size:12px;font-weight:600;color:var(--text);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+escAttr(t.title)+'</div>'+
+            (tgtInfo?'<div style="font-size:10px;color:var(--text-muted);font-family:var(--mono);">'+tgtInfo+'</div>':'')+
+          '</div>'+
+          '<span style="font-size:10px;color:var(--text-muted);font-family:var(--mono);white-space:nowrap;">'+escAttr(t.subtitle)+'</span>'+
+          '<input type="number" step="any" value="'+escAttr(String(aVal))+'" placeholder="Actual" data-todo-id="'+tid+'" data-actkey="'+escAttr(t.actKey)+'" data-monthval="'+escAttr(t.monthVal)+'" onchange="todoSaveActual(this)" style="width:90px;padding:3px 6px;font-size:11px;font-family:var(--mono);border:1.5px solid '+(aVal!==''?'var(--brick)':'var(--border)')+';border-radius:3px;">'+
+          (!t.complete?'<span style="font-size:10px;color:'+col+';font-family:var(--mono);white-space:nowrap;">'+(t.daysLeft>0?t.daysLeft+'d':'past due')+'</span>':'<span style="font-size:10px;color:#2D6B1A;font-family:var(--mono);">✓</span>')+
+        '</div>';
+      }
+    }).join('');
+
+    return '<div style="border:1.5px solid var(--border);border-radius:var(--radius);background:var(--surface);overflow:hidden;">'+
+      '<div style="padding:14px 18px;border-bottom:1.5px solid var(--border);background:var(--surface2);">'+
+        '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:8px;">'+
+          '<div style="font-size:13px;font-weight:700;color:var(--text);">'+escAttr(grp.label)+'</div>'+
+          '<div style="display:flex;align-items:center;gap:10px;">'+
+            '<label style="display:flex;align-items:center;gap:5px;font-size:11px;color:var(--text-muted);cursor:pointer;">'+
+              '<input type="checkbox" id="show-complete-'+gk+'" '+(showCompleted?'checked':'')+' onchange="renderTodos()" style="accent-color:var(--brick);">'+
+              'Show completed'+
+            '</label>'+
+            '<span style="font-size:11px;color:var(--text-muted);font-family:var(--mono);">'+done+'/'+total+' done · '+escAttr(grp.due)+'</span>'+
+          '</div>'+
+        '</div>'+
+        '<div style="height:5px;background:var(--border);border-radius:3px;overflow:hidden;">'+
+          '<div style="height:100%;width:'+pct+'%;background:'+headerColor+';border-radius:3px;transition:width 0.4s;"></div>'+
+        '</div>'+
+      '</div>'+
+      '<div style="padding:0 18px;">'+(visibleTasks.length ? rows : '<div style="padding:12px 0;font-size:12px;color:var(--text-muted);font-family:var(--mono);">All tasks complete ✓</div>')+'</div>'+
+      (!allDone ?
+        '<div style="padding:12px 18px;border-top:1px solid var(--border);">'+
+          '<button onclick="switchMode(\'setup\')" style="padding:7px 18px;background:var(--brick);color:#fff;border:none;border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;">Go to Goals & Actuals →</button>'+
+        '</div>' : '')+
+    '</div>';
+  }).join('');
+}
+
+// Update todo badge on load - persistent count
+function updateTodoBadge() {
+  if (!bankGoals.length) return;
+  var tasks = getTodoTasks();
+  var openCount = tasks.filter(function(t) { return t.status === 'open' || t.status === 'overdue'; }).length;
+  var badge = document.getElementById('todo-badge');
+  if (badge) { badge.textContent = openCount; badge.style.display = openCount > 0 ? 'inline' : 'none'; }
+  // Persist to localStorage so badge shows on reload before data loads
+  localStorage.setItem('pf-todo-count', openCount);
+}
+
+// Show cached badge count immediately on page load
+(function() {
+  var cached = localStorage.getItem('pf-todo-count');
+  if (cached && parseInt(cached) > 0) {
+    // Badge element may not exist yet during early load - will be set by updateTodoBadge
+    window._cachedTodoCount = parseInt(cached);
+  }
+})();
+
+async function todoSaveTarget(inp) {
+  var mKey     = inp.dataset.mkey;
+  var field    = inp.dataset.field;
+  var monthVal = inp.dataset.monthval;
+  var val = inp.value !== '' ? parseFloat(inp.value) : undefined;
+  if (!monthVal || !mKey) return;
+  var targets = bankGetMonthTargets(monthVal);
+  if (!targets[mKey]) targets[mKey] = {};
+  if (val !== undefined) targets[mKey][field] = val;
+  else delete targets[mKey][field];
+  bankSaveMonthTargets(monthVal, targets);
+  // Save to Supabase
+  if (sb && currentUser && val !== undefined) {
+    var goalName = mKey.split('|')[0];
+    var period = formatMonthLabel(monthVal) || monthVal;
+    var sbKey = (field === 'target' ? '__target__' : '__min__') + goalName;
+    await sbSaveActual(period, sbKey, val);
+  }
+  inp.style.borderColor = val !== undefined ? 'var(--brick)' : 'var(--border)';
+  showToast('Saved!', 'success');
+  // Re-render todos to update status
+  setTimeout(renderTodos, 300);
+}
+
+async function todoSaveActual(inp) {
+  var actKey   = inp.dataset.actkey;
+  var monthVal = inp.dataset.monthval;
+  var val = inp.value !== '' ? parseFloat(inp.value) : null;
+  if (!actKey || !monthVal) return;
+  if (!actAllActuals[monthVal]) actAllActuals[monthVal] = {};
+  if (val !== null) actAllActuals[monthVal][actKey] = val;
+  else delete actAllActuals[monthVal][actKey];
+  localStorage.setItem(ACT_ACTUALS_PREFIX + monthVal, JSON.stringify(actAllActuals[monthVal]));
+  if (sb && currentUser && val !== null) {
+    var period = formatMonthLabel(monthVal) || monthVal;
+    await sbSaveActual(period, actKey, val);
+  }
+  inp.style.borderColor = val !== null ? 'var(--brick)' : 'var(--border)';
+  showToast('Saved!', 'success');
+  setTimeout(renderTodos, 300);
+}
+
+// ── Team Scorecards ─────────────────────────────────────────
+
+// Exclusion list: { 'period': { 'empName|goalName': true, '__all__|goalName': true } }
+var SC_EXCLUSIONS_KEY = 'sc-goal-exclusions';
+var _scExclusionsCache = {}; // in-memory cache
+
+function getExclusions(period) {
+  if (_scExclusionsCache[period]) return _scExclusionsCache[period];
+  try {
+    var data = JSON.parse(localStorage.getItem(SC_EXCLUSIONS_KEY+':'+period)||'{}');
+    _scExclusionsCache[period] = data;
+    return data;
+  } catch(e) { return {}; }
+}
+
+function saveExclusions(period, data) {
+  _scExclusionsCache[period] = data; // update cache immediately
+  localStorage.setItem(SC_EXCLUSIONS_KEY+':'+period, JSON.stringify(data));
+  if (sb && currentUser) {
+    sbSaveActual(period, '__exclusions__', JSON.stringify(data)).catch(function(){});
+  }
+}
+
+function isGoalExcluded(period, empName, goalName) {
+  var ex = getExclusions(period);
+  return ex['__all__|'+goalName] || ex[empName+'|'+goalName];
+}
+
+function deleteGoalFromScorecard(period, empName, goalName) {
+  var modal = document.getElementById('sc-delete-modal');
+  if (!modal) { console.error('modal not found'); return; }
+  document.getElementById('sc-delete-msg').textContent = 'Remove "' + goalName + '" from ' + empName + '\'s scorecard?';
+  document.getElementById('sc-delete-single').onclick = function() {
+    var ex = getExclusions(period);
+    ex[empName+'|'+goalName] = true;
+    saveExclusions(period, ex);
+    hideSCDeleteModal();
+    showToast('Removed from ' + empName + '\'s scorecard', 'success');
+    setTimeout(function(){ renderTeamScorecards(); }, 100);
+  };
+  document.getElementById('sc-delete-all').onclick = function() {
+    var ex = getExclusions(period);
+    ex['__all__|'+goalName] = true;
+    saveExclusions(period, ex);
+    hideSCDeleteModal();
+    showToast('Removed from all team scorecards for ' + period, 'success');
+    setTimeout(function(){ renderTeamScorecards(); }, 100);
+  };
+  modal.style.display = 'flex';
+}
+
+function hideSCDeleteModal() {
+  var modal = document.getElementById('sc-delete-modal');
+  if (modal) modal.style.display = 'none';
+}
+
+async function initTeamScorecards() {
+  // Populate month picker from Rippling months
+  var sel = document.getElementById('team-sc-month');
+  if (!sel) return;
+  var months = [];
+  try { months = JSON.parse(localStorage.getItem('rippling-months-index')||'[]'); } catch(e) {}
+  // Also try Supabase
+  if (sb && currentUser) {
+    var sbMonths = await sbLoadRipplingPeriods();
+    sbMonths.forEach(function(m) { if (months.indexOf(m)===-1) months.push(m); });
+  }
+  if (!months.length) {
+    var now = new Date();
+    months = [now.toLocaleString('default',{month:'long',year:'numeric'})];
+  }
+  var current = sel.value;
+  sel.innerHTML = months.map(function(m) {
+    return '<option value="'+escAttr(m)+'"'+(m===current?' selected':'')+'>'+escAttr(m)+'</option>';
+  }).join('');
+  if (!sel.value && months.length) sel.value = months[0];
+
+  // Show dept filter for admins
+  var deptFilter = document.getElementById('team-sc-filter-dept');
+  var deptSel = document.getElementById('team-sc-dept');
+  var isAdmin = !currentProfile || currentProfile.role === 'admin';
+  if (deptFilter) deptFilter.style.display = isAdmin ? '' : 'none';
+  if (isAdmin && deptSel) {
+    var allDepts = ['Client Care','Design','Experience','Fulfillment','General & Administrative','Growth','Marketing','Operations','Preservation','Recreation','Resin'];
+    deptSel.innerHTML = '<option value="">All departments</option>' +
+      allDepts.map(function(d){ return '<option value="'+d+'">'+d+'</option>'; }).join('');
+  }
+
+  renderTeamScorecards();
+}
+
+async function renderTeamScorecards() {
+  var list = document.getElementById('team-sc-list');
+  if (!list) return;
+  list.innerHTML = '<div style="padding:20px;font-size:12px;color:var(--text-muted);font-family:var(--mono);">Loading...</div>';
+
+  var period = document.getElementById('team-sc-month') ? document.getElementById('team-sc-month').value : '';
+  var deptF  = document.getElementById('team-sc-dept')  ? document.getElementById('team-sc-dept').value  : '';
+  if (!period) { list.innerHTML = '<div style="padding:20px;font-size:12px;color:var(--text-muted);">Select a month to view scorecards.</div>'; return; }
+
+  var isAdmin = !currentProfile || currentProfile.role === 'admin';
+  var mgDepts = (currentProfile && currentProfile.departments) || [];
+  var mgLocs  = (currentProfile && currentProfile.locations)  || [];
+
+  // Load employees for this period
+  var employees = await getRipplingEmployees(period);
+  if (!employees.length) {
+    list.innerHTML = '<div style="padding:20px;font-size:12px;color:var(--text-muted);">No employee data found for '+escAttr(period)+'. Upload Rippling data for this month first.</div>';
+    return;
+  }
+
+  // Filter by dept
+  if (deptF) employees = employees.filter(function(e){ return e.department === deptF; });
+
+  // Load goals, targets, actuals for period
+  var rawMonth = '';
+  // Convert period label to raw value for bankGetMonthTargets
+  var now2 = new Date();
+  for (var i=-6;i<=6;i++) {
+    var d2 = new Date(now2.getFullYear(), now2.getMonth()+i, 1);
+    var label2 = d2.toLocaleString('default',{month:'long',year:'numeric'});
+    if (label2 === period) { rawMonth = d2.getFullYear()+'-'+String(d2.getMonth()+1).padStart(2,'0'); break; }
+  }
+  var monthTargets = rawMonth ? bankGetMonthTargets(rawMonth) : {};
+  var savedActuals = rawMonth ? (actAllActuals[rawMonth]||{}) : {};
+
+  // Also load from Supabase
+  if (sb && currentUser) {
+    var sbActs = await sbLoadActuals(period);
+    if (sbActs) {
+      Object.keys(sbActs).forEach(function(k) {
+        if (k.indexOf('__target__')===0) {
+          var gn=k.replace('__target__','');
+          bankGoals.forEach(function(g){ if(g.name===gn){ var bk=goalMKey(g); if(!monthTargets[bk])monthTargets[bk]={}; monthTargets[bk].target=sbActs[k]; }});
+        } else if (k.indexOf('__min__')===0) {
+          var gn2=k.replace('__min__','');
+          bankGoals.forEach(function(g){ if(g.name===gn2){ var bk2=goalMKey(g); if(!monthTargets[bk2])monthTargets[bk2]={}; monthTargets[bk2].min=sbActs[k]; }});
+        } else {
+          savedActuals[k] = sbActs[k];
+        }
+      });
+    }
+  }
+
+  // Build scorecard for each employee
+  var cards = employees.map(function(emp) {
+    var dept = emp.department||'';
+    var loc  = normalizeLocation ? normalizeLocation(emp.location||'') : (emp.location||'');
+    var role = emp.role||'';
+
+    // Get goals for this employee (excluding deleted ones)
+    var ex = getExclusions(period);
+    var goals = bankGoals.filter(function(g) {
+      if (g.active===false) return false;
+      if (ex['__all__|'+g.name] || ex[emp.name+'|'+g.name]) return false;
+      var tier = g.goalTier||inferTier(g);
+      if (tier==='company') return true;
+      if (tier==='department') return (!g.department||g.department===dept) && (!g.location||g.location===loc);
+      if (tier==='individual') return (!g.role||g.role===role) && (!g.department||g.department===dept);
+      return false;
+    }).map(function(g) {
+      var tier = g.goalTier||inferTier(g);
+      var mKey = g.name+'|'+tier;
+      var md   = monthTargets[mKey]||{};
+      var target = md.target!==undefined ? md.target : g.goalValue;
+      var min    = md.min!==undefined    ? md.min    : g.minValue;
+      var actKey = [tier, g.location||'', g.department||'', g.name].join('|');
+      var empActKey = [tier, emp.location||'', emp.department||'', g.name, emp.name].join('|');
+      // For individual goals, check employee-specific key first (saved from To Do list)
+      var actual = savedActuals[empActKey] !== undefined ? savedActuals[empActKey] : savedActuals[actKey];
+      var ach = null;
+      if (actual!==undefined && actual!==null && target) {
+        var lb = g.lowerBetter!==false;
+        ach = lb ? (parseFloat(target)/parseFloat(actual))*100 : (parseFloat(actual)/parseFloat(target))*100;
+        if (min!==undefined && actual!==null) {
+          var metMin = lb ? parseFloat(actual)<=parseFloat(min) : parseFloat(actual)>=parseFloat(min);
+          if (!metMin) ach = 0;
+        }
+        if (g.capped==='yes') ach = Math.min(ach, g.capPct||100);
+      }
+      return { name:g.name, tier:tier, target:target, min:min, actual:actual, ach:ach, lowerBetter:g.lowerBetter!==false };
+    });
+
+    // Calculate weighted achievement (equal weights if not set)
+    var goalsWithAch = goals.filter(function(g){ return g.ach!==null; });
+    var weight = goals.length ? 100/goals.length : 0;
+    var weightedAch = goalsWithAch.length ? goalsWithAch.reduce(function(s,g){ return s+g.ach*(weight/100); },0) : null;
+    weightedAch = weightedAch !== null ? Math.min(weightedAch, 200) : null;
+
+    var base = emp.payType==='salary' ? (emp.annualPay/12) : (emp.grossEarnings||0);
+    var bonusAmt = weightedAch!==null ? base*(weightedAch/100)*0.10 : null;
+
+    return { emp:emp, goals:goals, weightedAch:weightedAch, base:base, bonusAmt:bonusAmt };
+  });
+
+  var tierColors={company:'#f5e6d3',department:'#d6e8d6',individual:'#d3e4f5'};
+  var tierText={company:'#7a3010',department:'#1a5c1a',individual:'#0a3d6b'};
+
+  list.innerHTML = cards.map(function(sc) {
+    var emp = sc.emp;
+    var achColor = sc.weightedAch===null?'var(--text-muted)':(sc.weightedAch>=100?'#2D6B1A':'#703c2e');
+    var goalsHtml = sc.goals.map(function(g) {
+      var achStr = g.ach===null?'—':(g.ach===0?'<span style="color:#9B2C2C;">Below min</span>':g.ach.toFixed(1)+'%');
+      var achCol = g.ach===null?'var(--text-muted)':(g.ach>=100?'#2D6B1A':'#703c2e');
+      var tColor = tierColors[g.tier]||'#eee', tText = tierText[g.tier]||'#333';
+      var tLabel = g.tier==='company'?'Co':g.tier==='department'?'Dept':'Indiv';
+      var delBtn = '<td style="padding:5px 4px;text-align:center;width:24px;">'+
+        '<button class="sc-del-btn" '+
+        'data-period="'+escAttr(period)+'" data-emp="'+escAttr(sc.emp.name)+'" data-goal="'+escAttr(g.name)+'" '+
+        'onclick="deleteGoalFromScorecard(this.dataset.period,this.dataset.emp,this.dataset.goal)" '+
+        'title="Remove goal from scorecard" style="border:none;background:none;color:#9B2C2C;font-size:16px;cursor:pointer;padding:0 2px;line-height:1;">✕</button>'+
+        '</td>';
+      return '<tr class="sc-goal-row" style="border-bottom:1px solid var(--border);">'+
+        '<td style="padding:5px 8px;"><span style="font-size:9px;padding:1px 5px;border-radius:99px;background:'+tColor+';color:'+tText+';font-weight:700;">'+tLabel+'</span></td>'+
+        '<td style="padding:5px 8px;font-size:11px;font-weight:600;">'+escAttr(g.name)+'</td>'+
+        '<td style="padding:5px 8px;font-size:11px;font-family:var(--mono);text-align:center;">'+(g.target!==undefined&&g.target!==null?g.target:'—')+'</td>'+
+        '<td style="padding:5px 8px;font-size:11px;font-family:var(--mono);text-align:center;">'+(g.actual!==undefined&&g.actual!==null?g.actual:'—')+'</td>'+
+        '<td style="padding:5px 8px;font-size:11px;font-family:var(--mono);text-align:center;color:'+achCol+';font-weight:700;">'+achStr+'</td>'+
+        delBtn+
+      '</tr>';
+    }).join('');
+
+    return '<div style="border:1.5px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--surface);">'+
+      '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--surface2);">'+
+        '<div>'+
+          '<div style="font-size:13px;font-weight:700;color:var(--text);">'+escAttr(emp.name)+'</div>'+
+          '<div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);margin-top:2px;">'+escAttr(emp.role||'')+(emp.department?' · '+escAttr(emp.department):'')+(emp.location?' · '+escAttr(emp.location):'')+'</div>'+
+        '</div>'+
+        '<div style="text-align:right;">'+
+          '<div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);">Achievement</div>'+
+          '<div style="font-size:18px;font-weight:700;color:'+achColor+';">'+(sc.weightedAch!==null?sc.weightedAch.toFixed(1)+'%':'Incomplete')+'</div>'+
+          (sc.bonusAmt!==null?'<div style="font-size:12px;color:var(--brick);font-family:var(--mono);">Bonus: $'+sc.bonusAmt.toFixed(2)+'</div>':'')+ 
+        '</div>'+
+      '</div>'+
+      '<table style="width:100%;border-collapse:collapse;">'+
+        '<thead><tr style="background:var(--surface);">'+
+          '<th style="padding:5px 8px;font-size:9px;font-weight:700;color:var(--text-muted);text-align:left;">Type</th>'+
+          '<th style="padding:5px 8px;font-size:9px;font-weight:700;color:var(--text-muted);text-align:left;">Goal</th>'+
+          '<th style="padding:5px 8px;font-size:9px;font-weight:700;color:var(--text-muted);text-align:center;">Target</th>'+
+          '<th style="padding:5px 8px;font-size:9px;font-weight:700;color:var(--text-muted);text-align:center;">Actual</th>'+
+          '<th style="padding:5px 8px;font-size:9px;font-weight:700;color:var(--text-muted);text-align:center;">Achieve%</th>'+
+          '<th style="width:24px;"></th>'+
+        '</tr></thead>'+
+        '<tbody>'+goalsHtml+'</tbody>'+
+      '</table>'+
+    '</div>';
+  }).join('');
+}
+
+async function clearMonthTargets() {
+  var monthVal = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
+  if (!monthVal) { showToast('Select a month first', 'error'); return; }
+
+  // Check if month is locked (more than 21 days past end of month)
+  var now = new Date();
+  var curMonthVal = now.getFullYear() + '-' + String(now.getMonth()+1).padStart(2,'0');
+  if (monthVal < curMonthVal) {
+    var parts = monthVal.split('-');
+    var monthEnd = new Date(parseInt(parts[0]), parseInt(parts[1]), 0);
+    var daysSince = Math.floor((now - monthEnd) / (1000*60*60*24));
+    if (daysSince > 21) {
+      showToast('This month is locked — targets cannot be cleared after 21 days', 'error');
+      return;
+    }
+    if (!confirm('Warning: Clearing targets for a past month affects historical records. Continue?')) return;
+  }
+
+  var monthLabel = formatMonthLabel(monthVal);
+  if (!confirm('Clear all targets & minimums for ' + monthLabel + '? This cannot be undone.')) return;
+
+  localStorage.removeItem('bank-month-targets:' + monthVal);
+  if (sb && currentUser) {
+    await sb.from('actuals').delete().eq('period', monthLabel).like('goal_name', '__target__%');
+    await sb.from('actuals').delete().eq('period', monthLabel).like('goal_name', '__min__%');
+  }
+  showToast('Targets & minimums cleared for ' + monthLabel, 'success');
+  bankRender();
+}
+
+function todoGoToRippling() { switchMode('rippling'); }
+function todoGoToScorecard() { switchMode('scorecard'); }
+function todoGoToGoals() { switchMode('setup'); }
+
 function bankCancelActual() {
   var row = document.getElementById('bank-actual-row');
   if (row) row.remove();
@@ -5365,8 +6102,11 @@ function bankToggleRowMenu(idx,btn){
   var tier3 = g ? (g.goalTier||inferTier(g)) : '';
   var isAdminMenu2 = !currentProfile || currentProfile.role === 'admin';
   var bankMonthVal = document.getElementById('bank-month') ? document.getElementById('bank-month').value : '';
-  // Only company (admin only) and department goals can have actuals entered here
-  var canEnterActuals = bankMonthVal && tier3 !== 'individual' && (tier3 !== 'company' || isAdminMenu2);
+  var now3 = new Date();
+  var curMonthVal3 = now3.getFullYear() + '-' + String(now3.getMonth()+1).padStart(2,'0');
+  // Actuals only for past months (not current or future), not individual goals, company = admin only
+  var isPastForActuals = bankMonthVal && bankMonthVal < curMonthVal3;
+  var canEnterActuals = isPastForActuals && tier3 !== 'individual' && (tier3 !== 'company' || isAdminMenu2);
 
   document.getElementById('gs2-row-menu-edit').innerHTML='&#9998;&nbsp; Edit Goal';
   document.getElementById('gs2-row-menu-edit').onclick=function(){menu.style.display='none';_bankActiveMenuIdx=null;bankOpenEdit(idx);};
@@ -5588,7 +6328,9 @@ async function bankSaveInline(){
 
   var goal={
     goalTier:type, location:loc, department:dept, role:role,
-    name:name, goalValue:parseFloat(target), minValue:parseFloat(min),
+    name:name,
+    goalValue: target!=='' ? parseFloat(target) : (existingGoal ? existingGoal.goalValue : null),
+    minValue:  min!==''    ? parseFloat(min)    : (existingGoal ? existingGoal.minValue  : null),
     lowerBetter:lower, capped:capped, capPct:parseInt(capPct)||100,
     active:true, createdAt:new Date().toISOString()
   };
@@ -5647,7 +6389,7 @@ async function bankSaveInline(){
   }
 
   if (monthVal2 && (mtEl || mmEl)) {
-    var mKey2 = (goal.name + '|' + (goal.goalTier||''));
+    var mKey2 = goalMKey(goal);
     var targets2 = bankGetMonthTargets(monthVal2);
     if (!targets2[mKey2]) targets2[mKey2] = {};
     if (mtEl && mtEl.value !== '') targets2[mKey2].target = parseFloat(mtEl.value);
@@ -5759,7 +6501,7 @@ async function actRender() {
           var inner3 = k.replace('__target__','');
           actGoals.forEach(function(g) {
             if (g.name === inner3) {
-              var bk3 = g.name + '|' + (g.goalTier||inferTier(g));
+              var bk3 = goalMKey(g);
               if (!sbTargets[bk3]) sbTargets[bk3] = {};
               sbTargets[bk3].target = sbActuals[k];
             }
@@ -5768,7 +6510,7 @@ async function actRender() {
           var inner4 = k.replace('__min__','');
           actGoals.forEach(function(g) {
             if (g.name === inner4) {
-              var bk4 = g.name + '|' + (g.goalTier||inferTier(g));
+              var bk4 = goalMKey(g);
               if (!sbTargets[bk4]) sbTargets[bk4] = {};
               sbTargets[bk4].min = sbActuals[k];
             }
@@ -5869,14 +6611,14 @@ async function actRender() {
       var ach='—', achColor='color:var(--text-muted);';
       if (actual!=='') {
         var lb=g.lowerBetter!==false;
-        var mKeyAct0=g.name+'|'+(g.goalTier||'');
+        var mKeyAct0=goalMKey(g);
         var mdAct0=monthTargets2[mKeyAct0]||{};
         var tvAct0=mdAct0.target!==undefined?mdAct0.target:g.goalValue;
         var pct=lb?(parseFloat(tvAct0)/parseFloat(actual))*100:(parseFloat(actual)/parseFloat(tvAct0))*100;
         if(g.capped==='yes') pct=Math.min(pct,parseFloat(g.capPct)||100);
         ach=pct.toFixed(1)+'%'; achColor=pct>=100?'color:#2D6B1A;font-weight:700;':'color:#703c2e;font-weight:700;';
       }
-      var mKeyAct=g.name+'|'+(g.goalTier||'');
+      var mKeyAct=goalMKey(g);
       var mdAct=monthTargets2[mKeyAct]||{};
       var tvAct=mdAct.target!==undefined?mdAct.target:g.goalValue;
       var mvAct=mdAct.min!==undefined?mdAct.min:g.minValue;
@@ -6166,34 +6908,63 @@ async function scLoadGoals() {
   var dept = scEmployee.department || '';
   var loc  = scEmployee.location || '';
 
-  // Load from bank
+  // Load from Supabase first, fall back to localStorage
   var bank = [];
-  try { var raw = localStorage.getItem(BANK_KEY); bank = raw ? JSON.parse(raw) : []; } catch(e) {}
+  if (sb && currentUser) {
+    var bankData = await sbLoadGoalBank();
+    if (bankData && bankData.length) {
+      bank = bankData.map(function(r) {
+        return { _sbId:r.id, goalTier:r.goal_tier, location:r.location||'', department:r.department||'',
+          role:r.role||'', name:r.name, goalValue:r.goal_value, minValue:r.min_value,
+          lowerBetter:r.lower_better, capped:r.capped, capPct:r.cap_pct, active:r.active };
+      });
+    }
+  }
+  if (!bank.length) {
+    try { var raw = localStorage.getItem(BANK_KEY); bank = raw ? JSON.parse(raw) : []; } catch(e) {}
+  }
 
-  // Auto-load: company goals + individual goals matching role only
   // Load month targets for this scorecard period
   var scMonthVal = document.getElementById('sc-month') ? document.getElementById('sc-month').value : '';
   var scMonthTargets = scMonthVal ? bankGetMonthTargets(scMonthVal) : {};
-  // Also try to load from Supabase
+
+  // Load targets AND actuals from Supabase for this month
   if (sb && currentUser && scMonthVal) {
     var scPeriod = formatMonthLabel(scMonthVal);
     var scSbActuals = await sbLoadActuals(scPeriod);
     if (scSbActuals) {
       Object.keys(scSbActuals).forEach(function(k) {
         if (k.indexOf('__target__') === 0) {
-          var bk = k.replace('__target__','');
-          if (!scMonthTargets[bk]) scMonthTargets[bk] = {};
-          scMonthTargets[bk].target = scSbActuals[k];
+          var goalName = k.replace('__target__','');
+          // Match against bank goals to build correct key
+          bank.forEach(function(g) {
+            if (g.name === goalName) {
+              var bk = g.name + '|' + (g.goalTier||inferTier(g));
+              if (!scMonthTargets[bk]) scMonthTargets[bk] = {};
+              scMonthTargets[bk].target = scSbActuals[k];
+            }
+          });
         } else if (k.indexOf('__min__') === 0) {
-          var bk2 = k.replace('__min__','');
-          if (!scMonthTargets[bk2]) scMonthTargets[bk2] = {};
-          scMonthTargets[bk2].min = scSbActuals[k];
+          var goalName2 = k.replace('__min__','');
+          bank.forEach(function(g) {
+            if (g.name === goalName2) {
+              var bk2 = g.name + '|' + (g.goalTier||inferTier(g));
+              if (!scMonthTargets[bk2]) scMonthTargets[bk2] = {};
+              scMonthTargets[bk2].min = scSbActuals[k];
+            }
+          });
+        }
+      });
+      // Also cache actuals for pre-filling
+      if (!actAllActuals[scMonthVal]) actAllActuals[scMonthVal] = {};
+      Object.keys(scSbActuals).forEach(function(k) {
+        if (k.indexOf('__target__') !== 0 && k.indexOf('__min__') !== 0) {
+          actAllActuals[scMonthVal][k] = scSbActuals[k];
         }
       });
     }
   }
 
-  console.log('scMonthTargets keys:', Object.keys(scMonthTargets));
   scGoals = bank.filter(function(g) {
     if (g.active === false) return false;
     var tier = g.goalTier || inferTier(g);
@@ -6201,9 +6972,8 @@ async function scLoadGoals() {
     if (tier === 'individual') return (!g.role || g.role === role) && (!g.department || g.department === dept);
     return false;
   }).map(function(g) {
-    var mKeyG = g.name + '|' + (g.goalTier||inferTier(g));
+    var mKeyG = goalMKey(g);
     var mdG = scMonthTargets[mKeyG] || {};
-    console.log('goal:', g.name, 'mKeyG:', mKeyG, 'mdG:', JSON.stringify(mdG));
     return Object.assign({}, g, {
       scWeight: g.defaultWeight || '',
       scTarget: mdG.target !== undefined ? mdG.target : g.goalValue,
@@ -6218,11 +6988,10 @@ async function scLoadGoals() {
     var tier = g.goalTier || inferTier(g);
     return tier === 'department' && (!g.department || g.department === dept) && (!g.location || g.location === loc);
   }).map(function(g) {
-    var mKeyD = g.name + '|' + (g.goalTier||inferTier(g));
+    var mKeyD = goalMKey(g);
     var mdD = scMonthTargets[mKeyD] || {};
     var resolvedTarget = mdD.target !== undefined ? mdD.target : g.goalValue;
     var resolvedMin    = mdD.min    !== undefined ? mdD.min    : g.minValue;
-    console.log('deptGoal:', g.name, 'mKeyD:', mKeyD, 'mdD:', JSON.stringify(mdD), 'target:', resolvedTarget);
     return Object.assign({}, g, {
       scTarget: resolvedTarget,
       minValue: resolvedMin,
@@ -6247,17 +7016,25 @@ async function scLoadGoals() {
 }
 
 async function scLoadActuals() {
-  var month = scGetPeriodLabel ? scGetPeriodLabel() : '';
-  if (!month) return;
-  // For actuals, try both the period label and the raw month key
   var rawMonth = document.getElementById('sc-month') ? document.getElementById('sc-month').value : '';
-  var saved = localStorage.getItem(ACT_ACTUALS_PREFIX + month) || localStorage.getItem(ACT_ACTUALS_PREFIX + rawMonth);
-  var actuals = saved ? JSON.parse(saved) : {};
+  if (!rawMonth) return;
+  var month = formatMonthLabel(rawMonth) || rawMonth;
+
+  // Get actuals from cache (already loaded from Supabase in scLoadGoals)
+  var actuals = actAllActuals[rawMonth] || {};
+
+  // Also check localStorage
+  var saved = localStorage.getItem(ACT_ACTUALS_PREFIX + rawMonth) || localStorage.getItem(ACT_ACTUALS_PREFIX + month);
+  if (saved) {
+    var localActuals = JSON.parse(saved);
+    Object.assign(actuals, localActuals);
+  }
+
   // Pre-fill actuals for company + dept goals
   scGoals.forEach(function(g) {
     var tier = g.goalTier || inferTier(g);
     if (tier === 'company' || tier === 'department') {
-      var key = actGoalKey(g);
+      var key = [tier, g.location||'', g.department||'', g.name].join('|');
       if (actuals[key] !== undefined) g.scActual = actuals[key];
     }
   });
@@ -6429,8 +7206,8 @@ function scRender() {
       '<td style="padding:4px 4px;'+border+colGoal+'"><select id="sc-'+i+'-lower" onchange="scGoals['+i+'].lowerBetter=(this.value===\'true\');scRender()" style="width:100%;padding:2px 3px;font-size:11px;font-family:var(--sans);border:1.5px solid var(--border);border-radius:3px;">'+lowerOpts+'</select></td>'+
       '<td style="padding:4px 4px;'+border+colAct+'">'+
         (isDeptOrCo
-          ? '<span style="font-size:11px;color:'+(actual!==''?'var(--text)':'var(--text-muted)')+';">'+(actual!==''?actual:'Pre-filled from actuals')+'</span>'
-          : '<input id="sc-'+i+'-actual" type="number" step="any" value="'+escAttr(String(g.scActual||''))+'" placeholder="Actual" onblur="scGoals['+i+'].scActual=this.value;scRender()" style="width:100%;padding:2px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid var(--brick);border-radius:3px;">')+
+          ? '<span style="font-size:11px;color:'+(actual!==''?'var(--text)':'var(--text-muted)')+';">'+(actual!==''?actual:'—')+'</span>'
+          : '<input id="sc-'+i+'-actual" type="number" step="any" value="'+escAttr(String(g.scActual||''))+'" placeholder="Actual" onblur="scGoals['+i+'].scActual=this.value;scRender()" style="width:100%;padding:2px 4px;font-size:11px;font-family:var(--mono);border:1.5px solid var(--border);border-radius:3px;">')+
       '</td>'+
       '<td style="padding:5px 6px;'+border+colAct+achColor+'">'+ach+'</td>'+
       '<td style="padding:5px 6px;'+border+'background:#fff;">'+
@@ -6855,5 +7632,17 @@ window.onload = function() { try {
 } catch(e) { console.error('onload error at:', e.message, e.stack); } };
 </script>
 </div>
+  <!-- Scorecard goal delete modal - outside all screens so it's always visible -->
+  <div id="sc-delete-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:var(--radius);padding:28px 28px 22px;max-width:380px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.18);">
+      <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:6px;">Remove goal from scorecard</div>
+      <div id="sc-delete-msg" style="font-size:12px;color:var(--text-muted);margin-bottom:20px;line-height:1.5;"></div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <button id="sc-delete-single" style="padding:10px 16px;background:var(--brick);color:#fff;border:none;border-radius:var(--radius-sm);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;text-align:left;">Remove from this employee only</button>
+        <button id="sc-delete-all" style="padding:10px 16px;background:var(--surface2);color:var(--text);border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;text-align:left;">Remove from all team scorecards this month</button>
+        <button onclick="hideSCDeleteModal()" style="padding:8px 16px;background:none;color:var(--text-muted);border:none;border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;cursor:pointer;text-align:left;">Cancel</button>
+      </div>
+    </div>
+  </div>
 </body>
 </html>
