@@ -5890,70 +5890,122 @@ async function renderTeamScorecards() {
       return { name:g.name, tier:tier, target:target, min:min, actual:actual, ach:ach, lowerBetter:g.lowerBetter!==false };
     });
 
-    // Calculate weighted achievement (equal weights if not set)
-    var goalsWithAch = goals.filter(function(g){ return g.ach!==null; });
+    // Calculate weighted achievement — only if ALL goals have targets AND actuals
     var weight = goals.length ? 100/goals.length : 0;
-    var weightedAch = goalsWithAch.length ? goalsWithAch.reduce(function(s,g){ return s+g.ach*(weight/100); },0) : null;
-    weightedAch = weightedAch !== null ? Math.min(weightedAch, 200) : null;
+    var allComplete = goals.length > 0 && goals.every(function(g) {
+      return g.target !== undefined && g.target !== null &&
+             g.actual !== undefined && g.actual !== null;
+    });
+    var weightedAch = null;
+    if (allComplete) {
+      var goalsWithAch = goals.filter(function(g){ return g.ach !== null; });
+      weightedAch = goalsWithAch.reduce(function(s,g){ return s+g.ach*(weight/100); }, 0);
+      weightedAch = Math.min(weightedAch, 200);
+    }
 
     var base = emp.payType==='salary' ? (emp.annualPay/12) : (emp.grossEarnings||0);
-    var bonusAmt = weightedAch!==null ? base*(weightedAch/100)*0.10 : null;
+    var bonusAmt = allComplete ? base*(weightedAch/100)*0.10 : null;
 
     return { emp:emp, goals:goals, weightedAch:weightedAch, base:base, bonusAmt:bonusAmt };
   });
 
   var tierColors={company:'#f5e6d3',department:'#d6e8d6',individual:'#d3e4f5'};
   var tierText={company:'#7a3010',department:'#1a5c1a',individual:'#0a3d6b'};
+  var thS='padding:6px 10px;font-size:9px;font-weight:700;color:var(--text-muted);text-align:left;border-bottom:1.5px solid var(--border);white-space:nowrap;background:var(--surface2);';
+  var thC='padding:6px 10px;font-size:9px;font-weight:700;color:var(--text-muted);text-align:center;border-bottom:1.5px solid var(--border);white-space:nowrap;background:var(--surface2);';
 
-  list.innerHTML = cards.map(function(sc) {
+  list.innerHTML = cards.map(function(sc, scIdx) {
     var emp = sc.emp;
     var achColor = sc.weightedAch===null?'var(--text-muted)':(sc.weightedAch>=100?'#2D6B1A':'#703c2e');
+    var achStr = sc.weightedAch===null ? 'Incomplete' : sc.weightedAch.toFixed(1)+'%';
+    var weight = sc.goals.length ? (100/sc.goals.length).toFixed(1) : 0;
+    var effectiveHourly = (emp.grossEarnings && emp.hoursWorked && emp.hoursWorked > 0 && sc.bonusAmt !== null)
+      ? ((emp.grossEarnings + sc.bonusAmt) / emp.hoursWorked).toFixed(2)
+      : (emp.grossEarnings && emp.hoursWorked && emp.hoursWorked > 0)
+        ? (emp.grossEarnings / emp.hoursWorked).toFixed(2) : null;
+    var cardId = 'sc-card-'+scIdx;
+
     var goalsHtml = sc.goals.map(function(g) {
-      var achStr = g.ach===null?'—':(g.ach===0?'<span style="color:#9B2C2C;">Below min</span>':g.ach.toFixed(1)+'%');
+      var achStr2 = g.ach===null?'—':(g.ach===0?'<span style="color:#9B2C2C;font-weight:700;">Below min</span>':g.ach.toFixed(1)+'%');
       var achCol = g.ach===null?'var(--text-muted)':(g.ach>=100?'#2D6B1A':'#703c2e');
       var tColor = tierColors[g.tier]||'#eee', tText = tierText[g.tier]||'#333';
       var tLabel = g.tier==='company'?'Co':g.tier==='department'?'Dept':'Indiv';
-      var delBtn = '<td style="padding:5px 4px;text-align:center;width:24px;">'+
-        '<button class="sc-del-btn" '+
-        'data-period="'+escAttr(period)+'" data-emp="'+escAttr(sc.emp.name)+'" data-goal="'+escAttr(g.name)+'" '+
-        'onclick="deleteGoalFromScorecard(this.dataset.period,this.dataset.emp,this.dataset.goal)" '+
-        'title="Remove goal from scorecard" style="border:none;background:none;color:#9B2C2C;font-size:16px;cursor:pointer;padding:0 2px;line-height:1;">✕</button>'+
-        '</td>';
+      var bonusContrib = (sc.bonusAmt!==null && g.ach!==null)
+        ? '$'+(sc.base*(g.ach/100)*(parseFloat(weight)/100)*0.10).toFixed(2) : '—';
       return '<tr class="sc-goal-row" style="border-bottom:1px solid var(--border);">'+
-        '<td style="padding:5px 8px;"><span style="font-size:9px;padding:1px 5px;border-radius:99px;background:'+tColor+';color:'+tText+';font-weight:700;">'+tLabel+'</span></td>'+
-        '<td style="padding:5px 8px;font-size:11px;font-weight:600;">'+escAttr(g.name)+'</td>'+
-        '<td style="padding:5px 8px;font-size:11px;font-family:var(--mono);text-align:center;">'+(g.target!==undefined&&g.target!==null?g.target:'—')+'</td>'+
-        '<td style="padding:5px 8px;font-size:11px;font-family:var(--mono);text-align:center;">'+(g.actual!==undefined&&g.actual!==null?g.actual:'—')+'</td>'+
-        '<td style="padding:5px 8px;font-size:11px;font-family:var(--mono);text-align:center;color:'+achCol+';font-weight:700;">'+achStr+'</td>'+
-        delBtn+
+        '<td style="padding:6px 10px;"><span style="font-size:9px;padding:1px 5px;border-radius:99px;background:'+tColor+';color:'+tText+';font-weight:700;">'+tLabel+'</span></td>'+
+        '<td style="padding:6px 10px;font-size:11px;font-weight:600;min-width:140px;">'+escAttr(g.name)+'</td>'+
+        '<td style="padding:6px 10px;font-size:11px;font-family:var(--mono);text-align:center;">'+(g.target!==undefined&&g.target!==null?g.target:'—')+'</td>'+
+        '<td style="padding:6px 10px;font-size:11px;font-family:var(--mono);text-align:center;">'+(g.min!==undefined&&g.min!==null?g.min:'—')+'</td>'+
+        '<td style="padding:6px 10px;font-size:11px;font-family:var(--mono);text-align:center;">'+weight+'%</td>'+
+        '<td style="padding:6px 10px;font-size:11px;font-family:var(--mono);text-align:center;">'+(g.actual!==undefined&&g.actual!==null?g.actual:'—')+'</td>'+
+        '<td style="padding:6px 10px;font-size:11px;font-family:var(--mono);text-align:center;color:'+achCol+';font-weight:700;">'+achStr2+'</td>'+
+        '<td style="padding:6px 10px;font-size:11px;font-family:var(--mono);text-align:center;">'+bonusContrib+'</td>'+
+        '<td style="padding:4px 6px;text-align:center;width:28px;">'+
+          '<button class="sc-del-btn" data-period="'+escAttr(period)+'" data-emp="'+escAttr(sc.emp.name)+'" data-goal="'+escAttr(g.name)+'" '+
+          'onclick="deleteGoalFromScorecard(this.dataset.period,this.dataset.emp,this.dataset.goal)" '+
+          'title="Remove goal" style="border:none;background:none;color:#9B2C2C;font-size:14px;cursor:pointer;padding:0;line-height:1;">✕</button>'+
+        '</td>'+
       '</tr>';
     }).join('');
 
-    return '<div style="border:1.5px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--surface);">'+
-      '<div style="display:flex;align-items:center;justify-content:space-between;padding:12px 16px;background:var(--surface2);">'+
-        '<div>'+
-          '<div style="font-size:13px;font-weight:700;color:var(--text);">'+escAttr(emp.name)+'</div>'+
-          '<div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);margin-top:2px;">'+escAttr(emp.role||'')+(emp.department?' · '+escAttr(emp.department):'')+(emp.location?' · '+escAttr(emp.location):'')+'</div>'+
-        '</div>'+
-        '<div style="text-align:right;">'+
-          '<div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);">Achievement</div>'+
-          '<div style="font-size:18px;font-weight:700;color:'+achColor+';">'+(sc.weightedAch!==null?sc.weightedAch.toFixed(1)+'%':'Incomplete')+'</div>'+
-          (sc.bonusAmt!==null?'<div style="font-size:12px;color:var(--brick);font-family:var(--mono);">Bonus: $'+sc.bonusAmt.toFixed(2)+'</div>':'')+ 
-        '</div>'+
+    var detailHtml = '<div id="'+cardId+'-detail" style="display:none;">'+
+      // Earnings summary row
+      '<div style="display:flex;gap:24px;padding:10px 16px;background:var(--surface2);border-top:1px solid var(--border);flex-wrap:wrap;">'+
+        '<div><div style="font-size:9px;color:var(--text-muted);font-weight:700;font-family:var(--mono);">MONTHLY EARNINGS</div><div style="font-size:13px;font-weight:700;color:var(--text);">'+(emp.grossEarnings?'$'+emp.grossEarnings.toFixed(2):'—')+'</div></div>'+
+        '<div><div style="font-size:9px;color:var(--text-muted);font-weight:700;font-family:var(--mono);">HOURS WORKED</div><div style="font-size:13px;font-weight:700;color:var(--text);">'+(emp.hoursWorked?emp.hoursWorked.toFixed(2):'—')+'</div></div>'+
+        (emp.hourlyRate?'<div><div style="font-size:9px;color:var(--text-muted);font-weight:700;font-family:var(--mono);">HOURLY RATE</div><div style="font-size:13px;font-weight:700;color:var(--text);">$'+parseFloat(emp.hourlyRate).toFixed(2)+'</div></div>':'')+
+        (effectiveHourly?'<div><div style="font-size:9px;color:var(--text-muted);font-weight:700;font-family:var(--mono);">EFFECTIVE HOURLY</div><div style="font-size:13px;font-weight:700;color:var(--text);">$'+effectiveHourly+'</div></div>':'')+
+        '<div><div style="font-size:9px;color:var(--text-muted);font-weight:700;font-family:var(--mono);">BONUS AMOUNT</div><div style="font-size:13px;font-weight:700;color:var(--brick);">'+(sc.bonusAmt!==null?'$'+sc.bonusAmt.toFixed(2):'—')+'</div></div>'+
       '</div>'+
-      '<table style="width:100%;border-collapse:collapse;">'+
-        '<thead><tr style="background:var(--surface);">'+
-          '<th style="padding:5px 8px;font-size:9px;font-weight:700;color:var(--text-muted);text-align:left;">Type</th>'+
-          '<th style="padding:5px 8px;font-size:9px;font-weight:700;color:var(--text-muted);text-align:left;">Goal</th>'+
-          '<th style="padding:5px 8px;font-size:9px;font-weight:700;color:var(--text-muted);text-align:center;">Target</th>'+
-          '<th style="padding:5px 8px;font-size:9px;font-weight:700;color:var(--text-muted);text-align:center;">Actual</th>'+
-          '<th style="padding:5px 8px;font-size:9px;font-weight:700;color:var(--text-muted);text-align:center;">Achieve%</th>'+
-          '<th style="width:24px;"></th>'+
+      // Goals table
+      '<div style="overflow-x:auto;">'+
+      '<table style="width:100%;border-collapse:collapse;font-size:11px;">'+
+        '<thead><tr>'+
+          '<th style="'+thS+'">Type</th>'+
+          '<th style="'+thS+'">Goal</th>'+
+          '<th style="'+thC+'">Target</th>'+
+          '<th style="'+thC+'">Min</th>'+
+          '<th style="'+thC+'">Weight</th>'+
+          '<th style="'+thC+'">Actual</th>'+
+          '<th style="'+thC+'">Achieve%</th>'+
+          '<th style="'+thC+'">Bonus $</th>'+
+          '<th style="width:28px;background:var(--surface2);border-bottom:1.5px solid var(--border);"></th>'+
         '</tr></thead>'+
         '<tbody>'+goalsHtml+'</tbody>'+
       '</table>'+
+      '</div>'+
+    '</div>';
+
+    return '<div style="border:1.5px solid var(--border);border-radius:var(--radius);overflow:hidden;background:var(--surface);margin-bottom:2px;">'+
+      // Summary bar — always visible
+      '<div onclick="toggleScorecard(\''+cardId+'\')" style="display:flex;align-items:center;gap:12px;padding:13px 16px;cursor:pointer;background:var(--surface);" onmouseover="this.style.background=\'var(--surface2)\'" onmouseout="this.style.background=\'var(--surface)\'">'+
+        '<div id="'+cardId+'-arrow" style="font-size:12px;color:var(--text-muted);transition:transform 0.2s;flex-shrink:0;">▶</div>'+
+        '<div style="flex:1;min-width:0;">'+
+          '<div style="font-size:13px;font-weight:700;color:var(--text);">'+escAttr(emp.name)+'</div>'+
+          '<div style="font-size:11px;color:var(--text-muted);margin-top:1px;">'+escAttr(emp.role||'')+(emp.department?' · '+escAttr(emp.department):'')+(emp.location?' · '+escAttr(emp.location):'')+'</div>'+
+        '</div>'+
+        '<div style="text-align:right;flex-shrink:0;">'+
+          '<div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);">Achievement</div>'+
+          '<div style="font-size:17px;font-weight:700;color:'+achColor+';">'+achStr+'</div>'+
+        '</div>'+
+        '<div style="text-align:right;flex-shrink:0;min-width:80px;">'+
+          '<div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);">Bonus</div>'+
+          '<div style="font-size:17px;font-weight:700;color:var(--brick);">'+(sc.bonusAmt!==null?'$'+sc.bonusAmt.toFixed(2):'—')+'</div>'+
+        '</div>'+
+      '</div>'+
+      detailHtml+
     '</div>';
   }).join('');
+}
+
+function toggleScorecard(cardId) {
+  var detail = document.getElementById(cardId+'-detail');
+  var arrow  = document.getElementById(cardId+'-arrow');
+  if (!detail) return;
+  var open = detail.style.display !== 'none';
+  detail.style.display = open ? 'none' : 'block';
+  if (arrow) arrow.style.transform = open ? '' : 'rotate(90deg)';
 }
 
 async function clearMonthTargets() {
@@ -6222,7 +6274,9 @@ function bankShowInlineRow(g, targetRow){
   var typeOpts='<option value="">Type</option>'+(isAdminUser2?'<option value="company"'+(tier==='company'?' selected':'')+'>Company</option>':'')+
     '<option value="department"'+(tier==='department'?' selected':'')+'>Department</option>'+
     '<option value="individual"'+(tier==='individual'?' selected':'')+'>Individual</option>';
-  var locOpts='<option value="">Location</option><option value="Utah"'+(g&&g.location==='Utah'?' selected':'')+'>Utah</option><option value="Georgia"'+(g&&g.location==='Georgia'?' selected':'')+'>Georgia</option><option value="Remote"'+(g&&g.location==='Remote'?' selected':'')+'>Remote</option>';
+  var locChecks = '<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;margin-right:8px;cursor:pointer;"><input type="checkbox" id="banki-loc-ut" value="Utah" '+(g&&g.location==='Utah'||!g?'checked':'')+' style="accent-color:var(--brick);"> Utah</label>'+
+    '<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;margin-right:8px;cursor:pointer;"><input type="checkbox" id="banki-loc-ga" value="Georgia" '+(g&&g.location==='Georgia'||!g?'checked':'')+' style="accent-color:var(--brick);"> Georgia</label>'+
+    '<label style="display:inline-flex;align-items:center;gap:4px;font-size:11px;cursor:pointer;"><input type="checkbox" id="banki-loc-re" value="Remote" '+(g&&g.location==='Remote'?'checked':'')+' style="accent-color:var(--brick);"> Remote</label>';
   var allDepts2 = ['Client Care','Design','Experience','Fulfillment','General & Administrative','Growth','Marketing','Operations','Preservation','Recreation','Resin'];
   var allowedDepts2 = (currentProfile && currentProfile.role !== 'admin' && (currentProfile.departments||[]).length)
     ? currentProfile.departments : allDepts2;
@@ -6235,7 +6289,7 @@ function bankShowInlineRow(g, targetRow){
   var rowHTML='<tr id="bank-inline-row" style="'+bg+'"><td colspan="'+colCount+'" style="padding:10px 12px;border-bottom:2px solid var(--brick);'+bg+'">'+
     '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;margin-bottom:10px;">'+
       '<div><span style="'+labelS+'">Type</span><select id="banki-type" onchange="bankInlineTypeChange()" style="'+inputS+'">'+typeOpts+'</select></div>'+
-      '<div id="banki-loc-wrap"><span style="'+labelS+'">Location</span><select id="banki-loc" style="'+inputS+'">'+locOpts+'</select></div>'+
+      '<div id="banki-loc-wrap"><span style="'+labelS+'">Location</span><div style="display:flex;flex-wrap:wrap;gap:4px;padding:4px 0;">'+locChecks+'</div></div>'+
       '<div id="banki-dept-wrap"><span style="'+labelS+'">Department</span><select id="banki-dept" onchange="bankInlineDeptChange()" style="'+inputS+'">'+deptOpts+'</select></div>'+
       '<div id="banki-role-wrap"><span style="'+labelS+'">Role</span><select id="banki-role" style="'+inputS+'"><option value="">Select role</option></select></div>'+
       '<div style="grid-column:1/-1;"><span style="'+labelS+'">Goal name</span><input type="text" id="banki-name" value="'+escAttr(g?g.name||'':'')+'" placeholder="e.g. Individual Ratio" style="'+inputS+'"></div>'+
@@ -6305,7 +6359,12 @@ function bankCancelInline(silent){
 
 async function bankSaveInline(){
   var type   =document.getElementById('banki-type')?document.getElementById('banki-type').value:'';
-  var loc    =document.getElementById('banki-loc')?document.getElementById('banki-loc').value:'';
+  // Get selected locations from checkboxes
+  var locBoxes = ['banki-loc-ut','banki-loc-ga','banki-loc-re'];
+  var selectedLocs = locBoxes.map(function(id){
+    var el = document.getElementById(id); return el && el.checked ? el.value : null;
+  }).filter(Boolean);
+  var loc = selectedLocs.length === 1 ? selectedLocs[0] : (selectedLocs.length === 0 ? '' : selectedLocs[0]);
   var dept   =document.getElementById('banki-dept')?document.getElementById('banki-dept').value:'';
   var role   =document.getElementById('banki-role')?document.getElementById('banki-role').value:'';
   var name   =document.getElementById('banki-name')?document.getElementById('banki-name').value.trim():'';
@@ -6374,9 +6433,18 @@ async function bankSaveInline(){
   var mmEl = document.getElementById('banki-month-min');
 
   if (sb && currentUser) {
-    var sbResult = await sbSaveGoal(goal, sbId2);
-    if (sbResult && sbResult.error) { showToast('Error saving: ' + sbResult.error.message, 'error'); return; }
-    if (sbResult && sbResult.data && sbResult.data.id) goal._sbId = sbResult.data.id;
+    // If multiple locations, save one goal per location
+    if (selectedLocs.length > 1 && !sbId2) {
+      for (var li = 0; li < selectedLocs.length; li++) {
+        var locGoal = Object.assign({}, goal, { location: selectedLocs[li] });
+        var lRes = await sbSaveGoal(locGoal, null);
+        if (lRes && lRes.error) { showToast('Error saving: ' + lRes.error.message, 'error'); return; }
+      }
+    } else {
+      var sbResult = await sbSaveGoal(goal, sbId2);
+      if (sbResult && sbResult.error) { showToast('Error saving: ' + sbResult.error.message, 'error'); return; }
+      if (sbResult && sbResult.data && sbResult.data.id) goal._sbId = sbResult.data.id;
+    }
   } else {
     if(editingIdx2!==null){
       goal.createdAt=bankGoals[editingIdx2].createdAt||goal.createdAt;
