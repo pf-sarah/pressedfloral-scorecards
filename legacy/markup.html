@@ -1,0 +1,498 @@
+<!-- Auth overlay -->
+<div id="auth-overlay" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:var(--bg);z-index:1000;display:flex;align-items:center;justify-content:center;">
+  <div style="background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:36px 40px;max-width:380px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.1);">
+    <div style="font-size:20px;font-weight:700;color:var(--brick);margin-bottom:4px;">Pressed Floral</div>
+    <div style="font-size:13px;color:var(--text-muted);font-family:var(--mono);margin-bottom:28px;">Scorecards</div>
+    <div id="auth-error" style="display:none;padding:8px 12px;background:#fcebeb;border-radius:var(--radius-sm);font-size:12px;color:#a32d2d;margin-bottom:14px;font-family:var(--mono);"></div>
+    <div class="field">
+      <label>Email</label>
+      <input type="email" id="auth-email" placeholder="you@pressedfloral.com" style="width:100%;" onkeydown="if(event.key==='Enter')authSignIn()">
+    </div>
+    <div class="field">
+      <label>Password</label>
+      <input type="password" id="auth-password" placeholder="••••••••" style="width:100%;" onkeydown="if(event.key==='Enter')authSignIn()">
+    </div>
+    <button onclick="authSignIn()" id="auth-btn" style="width:100%;padding:12px;background:var(--brick);color:#fff;border:none;border-radius:var(--radius-sm);font-family:var(--sans);font-size:14px;font-weight:600;cursor:pointer;margin-top:8px;">Sign In</button>
+  </div>
+</div>
+
+<div id="sidebar">
+  <div id="sidebar-header">
+    <h1>Pressed Floral</h1>
+    <p>Scorecards</p>
+  </div>
+  <nav id="sidebar-nav">
+    <div onclick="switchMode('landing')" class="nav-item" id="nav-item-landing">
+      <span class="nav-icon">&#8962;</span> Home
+    </div>
+    <div style="font-size:9px;font-weight:700;color:var(--text-faint);letter-spacing:0.8px;padding:12px 10px 4px;font-family:var(--mono);">MANAGE</div>
+    <div onclick="switchMode('setup')" class="nav-item" id="nav-item-setup">
+      <span class="nav-icon">&#9776;</span> Goals & Actuals
+    </div>
+    <div onclick="switchMode('scorecard')" class="nav-item" id="nav-item-scorecard">
+      <span class="nav-icon">&#128101;</span> Team Scorecards
+    </div>
+    <div style="font-size:9px;font-weight:700;color:var(--text-faint);letter-spacing:0.8px;padding:12px 10px 4px;font-family:var(--mono);">REVIEW</div>
+    <div onclick="switchMode('history')" class="nav-item" id="nav-item-history">
+      <span class="nav-icon">&#128337;</span> Historical Data
+    </div>
+    <div onclick="switchMode('rippling')" class="nav-item" id="nav-item-rippling">
+      <span class="nav-icon">&#8645;</span> Rippling Data
+    </div>
+    <div style="border-top:1.5px solid var(--border);margin:12px 0 8px;"></div>
+    <div onclick="switchMode('guide')" class="nav-item" id="nav-item-guide">
+      <span class="nav-icon">&#9432;</span> How To Use
+    </div>
+    <div onclick="switchMode('todos')" class="nav-item" id="nav-item-todos">
+      <span class="nav-icon">&#9744;</span> To Do <span id="todo-badge" style="display:none;background:var(--brick);color:#fff;font-size:9px;padding:1px 5px;border-radius:99px;font-family:var(--mono);margin-left:4px;font-weight:700;"></span>
+    </div>
+    <div onclick="switchMode('migrate')" class="nav-item" id="nav-item-migrate" style="color:var(--brick);">
+      <span class="nav-icon">&#8593;</span> Migrate Data
+    </div>
+  </nav>
+  <div id="user-badge" style="padding:10px 8px;border-top:1.5px solid var(--border);">
+    <div style="font-size:11px;color:var(--text-muted);font-family:var(--mono);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;" id="user-email-display">Not signed in</div>
+    <div style="font-size:10px;color:var(--text-faint);font-family:var(--mono);margin-top:2px;" id="user-role-display"></div>
+    <button onclick="authSignOut()" style="margin-top:6px;padding:4px 10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:none;font-family:var(--sans);font-size:11px;cursor:pointer;color:var(--text-muted);">Sign out</button>
+  </div>
+</div>
+
+<div id="app-main">
+<header>
+  <div class="header-left">
+    <h1 id="current-page-label">Home</h1>
+  </div>
+</header>
+
+<main>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- SCREEN 1: GOAL SETUP                      -->
+  <!-- ══════════════════════════════════════════ -->
+  <div class="screen active" id="screen-landing">
+    <div style="padding:24px 0 8px;">
+      <div style="font-size:13px;color:var(--text-muted);font-family:var(--mono);margin-bottom:24px;">Where would you like to go?</div>
+
+      <div style="font-size:9px;font-weight:700;color:var(--text-faint);letter-spacing:0.8px;font-family:var(--mono);margin-bottom:10px;">MANAGE</div>
+      <div style="display:grid;grid-template-columns:repeat(2,1fr);gap:16px;margin-bottom:24px;">
+        <div onclick="switchMode('setup')" style="background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:24px 20px;cursor:pointer;transition:all 0.15s;min-height:160px;" onmouseover="this.style.borderColor='var(--brick)';this.style.background='var(--surface2)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--surface)'">
+          <div style="font-size:22px;margin-bottom:12px;">&#9776;</div>
+          <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;">Goals & Actuals</div>
+          <div style="font-size:11px;color:var(--text-muted);line-height:1.5;">Manage goals and enter monthly actuals in one place.</div>
+        </div>
+        
+        <div onclick="switchMode('scorecard')" style="background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:24px 20px;cursor:pointer;transition:all 0.15s;min-height:160px;" onmouseover="this.style.borderColor='var(--brick)';this.style.background='var(--surface2)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--surface)'">
+          <div style="font-size:22px;margin-bottom:12px;">&#9998;</div>
+          <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;">Team Scorecards</div>
+          <div style="font-size:11px;color:var(--text-muted);line-height:1.5;">View live scorecards for your team based on goals, targets, and actuals.</div>
+        </div>
+      </div>
+
+      <div style="font-size:9px;font-weight:700;color:var(--text-faint);letter-spacing:0.8px;font-family:var(--mono);margin-bottom:10px;">REVIEW</div>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:16px;margin-bottom:24px;">
+        <div onclick="switchMode('history')" style="background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:24px 20px;cursor:pointer;transition:all 0.15s;min-height:160px;" onmouseover="this.style.borderColor='var(--brick)';this.style.background='var(--surface2)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--surface)'">
+          <div style="font-size:22px;margin-bottom:12px;">&#128337;</div>
+          <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;">Historical Data</div>
+          <div style="font-size:11px;color:var(--text-muted);line-height:1.5;">Search and review submitted scorecards across all employees and time periods.</div>
+        </div>
+        <div onclick="switchMode('rippling')" style="background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius);padding:24px 20px;cursor:pointer;transition:all 0.15s;min-height:160px;" onmouseover="this.style.borderColor='var(--brick)';this.style.background='var(--surface2)'" onmouseout="this.style.borderColor='var(--border)';this.style.background='var(--surface)'">
+          <div style="font-size:22px;margin-bottom:12px;">&#8645;</div>
+          <div style="font-size:14px;font-weight:600;color:var(--text);margin-bottom:6px;">Rippling Data</div>
+          <div style="font-size:11px;color:var(--text-muted);line-height:1.5;">Upload monthly CSV exports to auto-fill employee pay, title, and location data.</div>
+        </div>
+      </div>
+
+      <div style="border-top:1.5px solid var(--border);padding-top:20px;">
+        <div onclick="switchMode('guide')" style="display:inline-flex;align-items:center;gap:10px;background:var(--brick-light);border:1.5px solid var(--taupe);border-radius:var(--radius);padding:14px 20px;cursor:pointer;transition:all 0.15s;" onmouseover="this.style.borderColor='var(--brick)';this.style.background='#f0e4df'" onmouseout="this.style.borderColor='var(--taupe)';this.style.background='var(--brick-light)'">
+          <span style="font-size:18px;">&#9432;</span>
+          <div>
+            <div style="font-size:13px;font-weight:600;color:var(--brick);">How To Use</div>
+            <div style="font-size:11px;color:var(--text-muted);line-height:1.4;">Step-by-step guide to setting up and using the app.</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen" id="screen-setup">
+
+    <!-- Mode toggle + Filter bar -->
+    <section style="padding:14px 16px;">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:10px;margin-bottom:14px;">
+        <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+          <div class="section-title" id="bank-table-title" style="margin:0;">Goals & Actuals</div>
+          <select id="bank-month" onchange="bankLoad()" style="padding:5px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;background:var(--surface);">
+            <option value="">No month selected</option>
+          </select>
+          <span id="bank-month-status" style="font-size:11px;font-family:var(--mono);color:var(--text-muted);"></span>
+        </div>
+        <label style="display:flex;align-items:center;gap:6px;font-size:12px;color:var(--text-muted);font-family:var(--sans);cursor:pointer;">
+          <input type="checkbox" id="bank-show-inactive" onchange="bankRender()" style="accent-color:var(--brick);">
+          Show inactive
+        </label>
+      </div>
+      <div style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;">
+        <div class="multi-select-dropdown" id="bank-type-dd" style="flex:1;min-width:120px;">
+          <div class="multi-select-trigger" onclick="toggleDropdown('bank-type-dd')">
+            <span id="bank-type-dd-label">All types</span>
+            <span style="font-size:10px;color:var(--text-muted);">&#9660;</span>
+          </div>
+          <div class="multi-select-menu" id="bank-type-checkboxes">
+            <label class="multi-select-item"><input type="checkbox" value="company" onchange="bankUpdateTypeLabel();bankRender();" checked style="accent-color:var(--brick);"> Company</label>
+            <label class="multi-select-item"><input type="checkbox" value="department" onchange="bankUpdateTypeLabel();bankRender();" checked style="accent-color:var(--brick);"> Department</label>
+            <label class="multi-select-item"><input type="checkbox" value="individual" onchange="bankUpdateTypeLabel();bankRender();" checked style="accent-color:var(--brick);"> Individual</label>
+          </div>
+        </div>
+        <select id="bank-loc" onchange="bankRender()" style="flex:1;min-width:100px;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;background:var(--surface);">
+          <option value="">All locations</option>
+          <option value="Utah">Utah</option>
+          <option value="Georgia">Georgia</option>
+          <option value="Remote">Remote</option>
+        </select>
+        <div class="multi-select-dropdown" id="bank-dept-dd" style="flex:1;min-width:150px;">
+          <div class="multi-select-trigger" onclick="toggleDropdown('bank-dept-dd')">
+            <span id="bank-dept-dd-label">All departments</span>
+            <span style="font-size:10px;color:var(--text-muted);">&#9660;</span>
+          </div>
+          <div class="multi-select-menu" id="bank-dept-checkboxes">
+            <label class="multi-select-item" style="border-bottom:1px solid var(--border);margin-bottom:4px;padding-bottom:6px;"><input type="checkbox" value="" onchange="bankToggleAllDepts(this)" checked style="accent-color:var(--brick);"> <em>All departments</em></label>
+            <label class="multi-select-item"><input type="checkbox" value="Client Care" onchange="bankUpdateDeptLabel();bankRender();" checked style="accent-color:var(--brick);"> Client Care</label>
+            <label class="multi-select-item"><input type="checkbox" value="Design" onchange="bankUpdateDeptLabel();bankRender();" checked style="accent-color:var(--brick);"> Design</label>
+            <label class="multi-select-item"><input type="checkbox" value="Experience" onchange="bankUpdateDeptLabel();bankRender();" checked style="accent-color:var(--brick);"> Experience</label>
+            <label class="multi-select-item"><input type="checkbox" value="Fulfillment" onchange="bankUpdateDeptLabel();bankRender();" checked style="accent-color:var(--brick);"> Fulfillment</label>
+            <label class="multi-select-item"><input type="checkbox" value="General &amp; Administrative" onchange="bankUpdateDeptLabel();bankRender();" checked style="accent-color:var(--brick);"> General &amp; Administrative</label>
+            <label class="multi-select-item"><input type="checkbox" value="Growth" onchange="bankUpdateDeptLabel();bankRender();" checked style="accent-color:var(--brick);"> Growth</label>
+            <label class="multi-select-item"><input type="checkbox" value="Marketing" onchange="bankUpdateDeptLabel();bankRender();" checked style="accent-color:var(--brick);"> Marketing</label>
+            <label class="multi-select-item"><input type="checkbox" value="Operations" onchange="bankUpdateDeptLabel();bankRender();" checked style="accent-color:var(--brick);"> Operations</label>
+            <label class="multi-select-item"><input type="checkbox" value="Preservation" onchange="bankUpdateDeptLabel();bankRender();" checked style="accent-color:var(--brick);"> Preservation</label>
+            <label class="multi-select-item"><input type="checkbox" value="Recreation" onchange="bankUpdateDeptLabel();bankRender();" checked style="accent-color:var(--brick);"> Recreation</label>
+            <label class="multi-select-item"><input type="checkbox" value="Resin" onchange="bankUpdateDeptLabel();bankRender();" checked style="accent-color:var(--brick);"> Resin</label>
+          </div>
+        </div>
+        <select id="bank-sort" onchange="bankRender()" style="flex:1;min-width:130px;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;background:var(--surface);">
+          <option value="type">Sort: Type</option>
+          <option value="dept">Sort: Department</option>
+          <option value="loc">Sort: Location</option>
+          <option value="role">Sort: Role</option>
+          <option value="name">Sort: Goal Name</option>
+        </select>
+        <button onclick="bankResetFilters()" style="padding:7px 12px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:none;font-family:var(--sans);font-size:12px;cursor:pointer;color:var(--text-muted);">Reset</button>
+      </div>
+
+    </section>
+
+    <!-- Goals table -->
+    <section style="padding:0;">
+      <div style="overflow-x:auto;">
+        <table style="width:100%;border-collapse:collapse;font-size:11px;font-family:var(--mono);table-layout:fixed;">
+          <colgroup>
+            <col style="width:48px">   <!-- Type -->
+            <col style="width:52px">   <!-- Location -->
+            <col style="width:90px">   <!-- Department -->
+            <col style="width:105px">  <!-- Role -->
+            <col style="width:auto">   <!-- Goal Name (fills remaining) -->
+            <col style="width:60px">   <!-- Lower Better -->
+            <col style="width:52px">   <!-- Capped -->
+            <col style="width:58px">   <!-- Target -->
+            <col style="width:52px">   <!-- Min -->
+            <col style="width:55px">   <!-- Status -->
+            <col style="width:28px">   <!-- Actions -->
+          </colgroup>
+          <thead id="bank-thead"></thead>
+          <tbody id="bank-tbody"></tbody>
+        </table>
+      </div>
+      <div id="bank-empty" style="display:none;padding:20px 16px;font-size:13px;color:var(--text-muted);font-family:var(--mono);">No goals match the current filter</div>
+      <div id="bank-save-bar" style="padding:10px 16px;border-top:1.5px solid var(--border);display:flex;align-items:center;gap:12px;">
+        <button onclick="bankSaveMonthTargetsAll()" id="bank-save-btn" disabled style="padding:8px 22px;background:var(--surface2);color:var(--text-muted);border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:13px;font-weight:600;cursor:not-allowed;transition:all 0.15s;">Save Targets</button>
+        <span id="bank-save-hint" style="font-size:12px;color:var(--text-muted);font-family:var(--mono);">Enter targets or minimums to enable saving</span>
+        <button onclick="clearMonthTargets()" style="margin-left:auto;padding:7px 14px;border:1px solid var(--border);border-radius:var(--radius-sm);background:none;font-family:var(--sans);font-size:12px;cursor:pointer;color:var(--text-muted);">Clear targets &amp; mins</button>
+      </div>
+      <div style="padding:12px 16px;">
+        <button onclick="bankOpenAdd()" class="add-goal-btn" style="width:100%;">+ Add Goal to Bank</button>
+      </div>
+    </section>
+
+  </div>
+
+  <div class="screen" id="screen-scorecard">
+    <section style="padding:14px 16px;">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap;">
+        <div>
+          <label style="font-size:9px;font-weight:700;color:var(--text-muted);letter-spacing:0.5px;font-family:var(--mono);">MONTH</label>
+          <select id="team-sc-month" onchange="renderTeamScorecards()" style="display:block;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;background:var(--surface);margin-top:4px;"></select>
+        </div>
+        <div id="team-sc-filter-dept" style="display:none;">
+          <label style="font-size:9px;font-weight:700;color:var(--text-muted);letter-spacing:0.5px;font-family:var(--mono);">DEPARTMENT</label>
+          <select id="team-sc-dept" onchange="renderTeamScorecards()" style="display:block;padding:7px 10px;border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;background:var(--surface);margin-top:4px;">
+            <option value="">All departments</option>
+          </select>
+        </div>
+      </div>
+    </section>
+    <section>
+      <div id="team-sc-list" style="display:flex;flex-direction:column;gap:12px;"></div>
+    </section>
+  </div>
+
+  <div class="screen" id="screen-history">
+
+    <section>
+      <div class="section-title">Search scorecards</div>
+      <div class="fields-grid">
+        <div class="field">
+          <label>Period</label>
+          <input type="month" id="history-month">
+        </div>
+        <div class="field">
+          <label>Search</label>
+          <input type="text" id="history-search" placeholder="e.g. Jane Smith, Utah">
+        </div>
+        <div class="field">
+          <label>Location</label>
+          <select id="history-location">
+            <option value="">All locations</option>
+            <option value="Utah">Utah</option>
+            <option value="Georgia">Georgia</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Department</label>
+          <select id="history-dept">
+            <option value="">All departments</option>
+            <option value="Client Care">Client Care</option>
+            <option value="Design">Design</option>
+            <option value="Experience">Experience</option>
+            <option value="Fulfillment">Fulfillment</option>
+            <option value="General & Administrative">General & Administrative</option>
+            <option value="Growth">Growth</option>
+            <option value="Marketing">Marketing</option>
+            <option value="Operations">Operations</option>
+            <option value="Preservation">Preservation</option>
+            <option value="Recreation">Recreation</option>
+            <option value="Resin">Resin</option>
+          </select>
+        </div>
+        <div class="field">
+          <label>Goal</label>
+          <select id="history-goal">
+            <option value="">All goals</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:12px;">
+        <button class="submit-btn" onclick="runHistorySearch()" style="max-width:200px;">Search</button>
+      </div>
+    </section>
+
+    <section id="history-results-section" style="display:none;">
+      <div style="display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:8px;margin-bottom:12px;">
+        <div class="section-title" id="history-results-title" style="margin:0;">Results</div>
+        <div style="display:flex;gap:6px;">
+          <button id="hist-view-spreadsheet" onclick="setHistoryView('spreadsheet')" style="padding:6px 14px;border:1.5px solid var(--brick);border-radius:var(--radius-sm);background:var(--brick);color:#fff;font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;">Spreadsheet</button>
+          <button id="hist-view-scorecard" onclick="setHistoryView('scorecard')" style="padding:6px 14px;border:1.5px solid var(--border);border-radius:var(--radius-sm);background:none;color:var(--text-muted);font-family:var(--sans);font-size:12px;font-weight:600;cursor:pointer;">Scorecard</button>
+        </div>
+      </div>
+      <div id="history-results-list"></div>
+    </section>
+
+    <section id="history-empty-section" style="display:none;">
+      <div style="text-align:center;padding:20px;font-size:13px;color:var(--text-muted);font-family:var(--mono);">No scorecards found for this search</div>
+    </section>
+
+    <section style="background:var(--surface2);border-style:dashed;">
+      <div class="section-title">Export</div>
+      <button onclick="exportHistoryCSV()" style="width:100%;padding:10px;border:1.5px solid var(--border-strong);border-radius:var(--radius-sm);background:none;font-family:var(--sans);font-size:13px;font-weight:500;cursor:pointer;color:var(--text);">&#8595; Export filtered results CSV</button>
+    </section>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- SCREEN 4: GOALS OVERVIEW                  -->
+  <!-- ══════════════════════════════════════════ -->
+  <div class="screen" id="screen-rippling">
+
+    <section>
+      <div class="section-title">Upload Rippling CSV</div>
+      <div class="fields-grid">
+        <div class="field">
+          <label>Period (month this data applies to)</label>
+          <input type="month" id="rippling-month">
+        </div>
+      </div>
+      <div id="rippling-drop-zone" style="margin-top:12px;border:2px dashed var(--border-strong);border-radius:var(--radius-sm);padding:32px;text-align:center;cursor:pointer;transition:all 0.2s;background:var(--surface2);" onclick="document.getElementById('rippling-file-input').click()" ondragover="event.preventDefault();this.style.borderColor='var(--brick)'" ondragleave="this.style.borderColor='var(--border-strong)'" ondrop="handleRipplingDrop(event)">
+        <div style="font-size:28px;margin-bottom:8px;">📄</div>
+        <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:4px;">Drop your Rippling CSV here</div>
+        <div style="font-size:12px;color:var(--text-muted);">or click to browse — Active_Employees_with_Hourly_and_Annual_Base_Pay.csv</div>
+        <input type="file" id="rippling-file-input" accept=".csv" style="display:none;" onchange="handleRipplingFile(this.files[0])">
+      </div>
+    </section>
+
+    <section id="rippling-preview-section" style="display:none;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px;">
+        <div class="section-title" id="rippling-preview-title" style="margin:0;">Imported employees</div>
+        <button onclick="saveRipplingData()" class="submit-btn" style="max-width:160px;padding:10px 16px;">Save to App</button>
+      </div>
+      <div style="overflow-x:auto;">
+        <table id="rippling-preview-table" style="width:100%;border-collapse:collapse;font-size:12px;font-family:var(--mono);">
+          <thead id="rippling-preview-thead"></thead>
+          <tbody id="rippling-preview-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+    <section id="rippling-saved-section" style="display:none;">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:4px;">
+        <div class="section-title" id="rippling-saved-title" style="margin:0;">Saved employee data</div>
+        <button onclick="clearAllRipplingData()" style="padding:5px 12px;border:1.5px solid #e0b0a0;border-radius:var(--radius-sm);background:none;font-family:var(--sans);font-size:12px;cursor:pointer;color:var(--brick);">Clear all</button>
+      </div>
+      <div class="fields-grid" style="margin-bottom:12px;">
+        <div class="field">
+          <label>View saved month</label>
+          <select id="rippling-saved-month" onchange="loadRipplingSaved()">
+            <option value="">Select month...</option>
+          </select>
+        </div>
+      </div>
+      <div style="overflow-x:auto;">
+        <table id="rippling-saved-table" style="width:100%;border-collapse:collapse;font-size:12px;font-family:var(--mono);">
+          <thead id="rippling-saved-thead"></thead>
+          <tbody id="rippling-saved-tbody"></tbody>
+        </table>
+      </div>
+    </section>
+
+  </div>
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- SCREEN 5: RIPPLING DATA                   -->
+  <!-- ══════════════════════════════════════════ -->
+  
+
+  <!-- ══════════════════════════════════════════ -->
+  <!-- SCREEN 6: HOW TO USE                      -->
+  <!-- ══════════════════════════════════════════ -->
+  <div class="screen" id="screen-guide">
+
+    <section>
+      <div class="section-title">How to use this app</div>
+      <p style="font-size:13px;color:var(--text-muted);line-height:1.7;margin-bottom:0;">Follow these steps each month to set up goals, enter actuals, and build employee scorecards.</p>
+    </section>
+
+    <section style="background:var(--brick-light);border-color:var(--taupe);">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+        <div style="width:28px;height:28px;border-radius:50%;background:var(--brick);color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">1</div>
+        <div class="section-title" style="margin:0;">Upload Rippling Data</div>
+      </div>
+      <p style="font-size:13px;color:var(--text);line-height:1.7;margin-bottom:8px;">Start each month by uploading your Rippling CSV. This pre-loads employee names, roles, departments, locations, and pay rates so you don't have to enter them manually.</p>
+      <ul style="font-size:13px;color:var(--text-muted);line-height:1.9;padding-left:18px;"><li>Go to <strong>Rippling Data</strong> in the sidebar</li><li>Select the payroll month</li><li>Upload the <em>Active_Employees_with_Hourly_and_Annual_Base_Pay.csv</em> file</li><li>Review the preview and click <strong>Save to App</strong></li></ul>
+    </section>
+    <section style="background:#f0f7fa;border-color:#b8d4e0;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+        <div style="width:28px;height:28px;border-radius:50%;background:#185FA5;color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">2</div>
+        <div class="section-title" style="margin:0;">Build Your Goal Bank</div>
+      </div>
+      <p style="font-size:13px;color:var(--text);line-height:1.7;margin-bottom:8px;">The Goal Bank is your permanent library of goals. Goals don't expire — they're reused month to month and pulled into scorecards. Set this up once and update as needed.</p>
+      <ul style="font-size:13px;color:var(--text-muted);line-height:1.9;padding-left:18px;"><li>Go to <strong>Goal Bank</strong> in the sidebar</li><li>Click <strong>+ Add Goal to Bank</strong> at the bottom</li><li>Set the type: <strong>Company</strong> (everyone), <strong>Department</strong> (dept-wide), or <strong>Individual</strong> (role-specific)</li><li>Fill in goal name, default target, minimum, and whether lower is better</li><li>Goals can be <strong>deactivated</strong> (hidden from scorecards) without being deleted</li><li>Repeat for all company, department, and individual goals</li></ul>
+    </section>
+    <section style="background:#f0f7fa;border-color:#b8d4e0;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+        <div style="width:28px;height:28px;border-radius:50%;background:#185FA5;color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">3</div>
+        <div class="section-title" style="margin:0;">Enter Company & Department Actuals</div>
+      </div>
+      <p style="font-size:13px;color:var(--text);line-height:1.7;margin-bottom:8px;">At month end, enter the actual results for company and department goals. These are shared across all employees — enter them once and they'll be available when building scorecards.</p>
+      <ul style="font-size:13px;color:var(--text-muted);line-height:1.9;padding-left:18px;"><li>Go to <strong>Enter Actuals</strong> in the sidebar</li><li>Select the month from the filter at the top</li><li>Type the actual result in the <strong>Actual</strong> column for each goal</li><li>Click the <strong>✓</strong> button on each row to save</li><li>Individual goal actuals are entered per-employee in the Build Scorecard step</li></ul>
+    </section>
+    <section style="background:#eef5ec;border-color:#aacfa5;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+        <div style="width:28px;height:28px;border-radius:50%;background:#1a5c1a;color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">4</div>
+        <div class="section-title" style="margin:0;">Build Individual Scorecards</div>
+      </div>
+      <p style="font-size:13px;color:var(--text);line-height:1.7;margin-bottom:8px;">For each employee, build their scorecard by selecting goals from the bank, setting weights, entering individual actuals, and submitting. Company and department actuals you already entered will pre-fill automatically.</p>
+      <ul style="font-size:13px;color:var(--text-muted);line-height:1.9;padding-left:18px;"><li>Go to <strong>Build Scorecard</strong> in the sidebar</li><li>Type the employee's name — Rippling data auto-fills their role, location, and pay info</li><li>Select the scorecard month</li><li>Goals from the bank load automatically based on their role and department</li><li>Set a <strong>weight</strong> for each goal (all weights must total 100%)</li><li>Override the <strong>target</strong> per goal if this month's target differs from the default</li><li>Enter <strong>actuals</strong> for individual goals — company and dept actuals are pre-filled</li><li>Use <strong>+ Misc Goal</strong> to add a one-off goal unique to this employee</li><li>Use <strong>Add more goals from bank</strong> to include additional goals beyond the defaults</li><li>Review the calculated bonus summary at the bottom, then click <strong>Submit Scorecard</strong></li></ul>
+    </section>
+    <section style="background:#eef5ec;border-color:#aacfa5;">
+      <div style="display:flex;align-items:center;gap:10px;margin-bottom:14px;">
+        <div style="width:28px;height:28px;border-radius:50%;background:#1a5c1a;color:#fff;font-size:13px;font-weight:700;display:flex;align-items:center;justify-content:center;flex-shrink:0;">5</div>
+        <div class="section-title" style="margin:0;">Review Historical Data</div>
+      </div>
+      <p style="font-size:13px;color:var(--text);line-height:1.7;margin-bottom:8px;">Search and review all submitted scorecards. Filter by period, employee, department, or location. Export to CSV for payroll or further analysis.</p>
+      <ul style="font-size:13px;color:var(--text-muted);line-height:1.9;padding-left:18px;"><li>Go to <strong>Historical Data</strong> in the sidebar</li><li>Select a period and optionally filter by location or department</li><li>Click <strong>Search</strong> to view results</li><li>Each row shows goal-level detail — achievement, actuals, and bonus contribution</li><li>Goals that didn't meet their minimum show <strong>Below min</strong> with $0 bonus contribution</li><li>Click <strong>↓ Export filtered results CSV</strong> to download a full spreadsheet</li></ul>
+    </section>
+    <section style="background:var(--surface2);border-style:dashed;">
+      <div class="section-title">Tips</div>
+      <ul style="font-size:13px;color:var(--text-muted);line-height:1.9;padding-left:18px;">
+        <li>All goal weights on a scorecard must total exactly <strong>100%</strong> — the builder warns you if they don't</li>
+        <li>Scorecards are <strong>capped at 200%</strong> total weighted achievement</li>
+        <li>Achievements of <strong>120%+</strong> are flagged for review but not capped</li>
+        <li>If a goal's actual doesn't meet the <strong>minimum threshold</strong>, that goal contributes $0 to the bonus</li>
+        <li>Company and department actuals only need to be entered once — they apply to all scorecards for that month</li>
+        <li>Goals can be <strong>deactivated</strong> in the Goal Bank without deleting them, keeping history intact</li>
+      </ul>
+    </section>
+
+  </div>
+
+  <!-- Duplicate employee warning modal -->
+  <div id="duplicate-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:200;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:var(--radius);padding:28px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.18);">
+      <div style="font-size:16px;font-weight:600;margin-bottom:10px;color:var(--text);">Actuals already submitted</div>
+      <div id="duplicate-msg" style="font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:20px;"></div>
+      <div style="display:flex;gap:10px;">
+        <button id="duplicate-cancel-btn" style="flex:1;padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:none;font-family:var(--sans);font-size:14px;cursor:pointer;color:var(--text);">Cancel</button>
+        <button id="duplicate-confirm-btn" style="flex:1;padding:10px;border:none;border-radius:var(--radius-sm);background:#8C2A2A;color:#fff;font-family:var(--sans);font-size:14px;font-weight:500;cursor:pointer;">Update Existing</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Overwrite warning modal -->
+  <div id="overwrite-modal" style="display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);z-index:200;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:var(--radius);padding:28px;max-width:420px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.18);">
+      <div style="font-size:16px;font-weight:600;margin-bottom:10px;color:var(--text);">Goals already exist</div>
+      <div id="overwrite-msg" style="font-size:13px;color:var(--text-muted);line-height:1.6;margin-bottom:20px;"></div>
+      <div style="display:flex;gap:10px;">
+        <button id="overwrite-cancel-btn" style="flex:1;padding:10px;border:1px solid var(--border);border-radius:var(--radius-sm);background:none;font-family:var(--sans);font-size:14px;cursor:pointer;color:var(--text);">Cancel</button>
+        <button id="overwrite-confirm-btn" style="flex:1;padding:10px;border:none;border-radius:var(--radius-sm);background:var(--brick);color:#fff;font-family:var(--sans);font-size:14px;font-weight:500;cursor:pointer;">Yes, update</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="screen" id="screen-migrate">
+    <section>
+      <div class="section-title">Migrate Local Data to Supabase</div>
+      <p style="font-size:13px;color:var(--text-muted);line-height:1.7;margin-bottom:16px;">This tool will upload your locally saved goals, actuals, and scorecards to Supabase so they're available to all users. Run this once from your browser where the data was originally saved.</p>
+      <div id="migrate-status" style="font-size:13px;font-family:var(--mono);color:var(--text-muted);margin-bottom:16px;line-height:1.9;"></div>
+      <button onclick="runMigration()" style="padding:12px 28px;background:var(--brick);color:#fff;border:none;border-radius:var(--radius-sm);font-family:var(--sans);font-size:14px;font-weight:600;cursor:pointer;">Start Migration</button>
+    </section>
+  </div>
+
+  <div class="screen" id="screen-todos">
+    <section>
+      <div class="section-title">To Do</div>
+      <div id="todo-list" style="display:flex;flex-direction:column;gap:12px;"></div>
+    </section>
+  </div>
+
+  <!-- Global row action menu -->
+  <div id="gs2-row-menu" style="display:none;position:fixed;background:var(--surface);border:1.5px solid var(--border);border-radius:var(--radius-sm);box-shadow:0 4px 16px rgba(0,0,0,0.12);z-index:500;min-width:130px;padding:4px;">
+    <div id="gs2-row-menu-edit" style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;font-size:13px;font-family:var(--sans);color:var(--text);border-radius:4px;" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='none'">&#9998;&nbsp; Edit</div>
+    <div id="gs2-row-menu-delete" style="display:flex;align-items:center;gap:8px;padding:8px 12px;cursor:pointer;font-size:13px;font-family:var(--sans);color:var(--brick);border-radius:4px;" onmouseover="this.style.background='var(--surface2)'" onmouseout="this.style.background='none'">&#128465;&nbsp; Delete</div>
+  </div>
+</main>
+
+<div class="toast" id="toast"></div>
+
+
+</div>
+  <!-- Scorecard goal delete modal - outside all screens so it's always visible -->
+  <div id="sc-delete-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:9999;align-items:center;justify-content:center;">
+    <div style="background:#fff;border-radius:var(--radius);padding:28px 28px 22px;max-width:380px;width:90%;box-shadow:0 8px 32px rgba(0,0,0,0.18);">
+      <div style="font-size:14px;font-weight:700;color:var(--text);margin-bottom:6px;">Remove goal from scorecard</div>
+      <div id="sc-delete-msg" style="font-size:12px;color:var(--text-muted);margin-bottom:20px;line-height:1.5;"></div>
+      <div style="display:flex;flex-direction:column;gap:8px;">
+        <button id="sc-delete-single" style="padding:10px 16px;background:var(--brick);color:#fff;border:none;border-radius:var(--radius-sm);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;text-align:left;">Remove from this employee only</button>
+        <button id="sc-delete-all" style="padding:10px 16px;background:var(--surface2);color:var(--text);border:1.5px solid var(--border);border-radius:var(--radius-sm);font-family:var(--sans);font-size:13px;font-weight:600;cursor:pointer;text-align:left;">Remove from all team scorecards this month</button>
+        <button onclick="hideSCDeleteModal()" style="padding:8px 16px;background:none;color:var(--text-muted);border:none;border-radius:var(--radius-sm);font-family:var(--sans);font-size:12px;cursor:pointer;text-align:left;">Cancel</button>
+      </div>
+    </div>
+  </div>
