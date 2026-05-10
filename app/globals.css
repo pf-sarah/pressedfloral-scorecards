@@ -143,3 +143,361 @@
     .sc-goal-row:hover { background: var(--surface2); }
 
 #legacy-root { display: contents; }
+
+button {
+  font-family: var(--sans);
+}
+
+.auth-card {
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 36px 40px;
+  max-width: 380px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.1);
+}
+
+.auth-title {
+  font-size: 20px;
+  font-weight: 700;
+  color: var(--brick);
+  margin-bottom: 4px;
+}
+
+.auth-subtitle {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  margin-bottom: 28px;
+}
+
+#auth-error {
+  padding: 8px 12px;
+  background: #fcebeb;
+  border-radius: var(--radius-sm);
+  font-size: 12px;
+  color: #a32d2d;
+  margin-bottom: 14px;
+  font-family: var(--mono);
+}
+
+#auth-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--bg);
+  z-index: 1000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#sidebar-nav button.nav-item {
+  border: 0;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+}
+
+.nav-section {
+  font-size: 9px;
+  font-weight: 700;
+  color: var(--text-faint);
+  letter-spacing: 0.8px;
+  padding: 12px 10px 4px;
+  font-family: var(--mono);
+}
+
+#todo-badge {
+  background: var(--brick);
+  color: #fff;
+  font-size: 9px;
+  padding: 1px 5px;
+  border-radius: 99px;
+  font-family: var(--mono);
+  margin-left: 4px;
+  font-weight: 700;
+}
+
+#user-badge button,
+.actions button,
+.button-row button,
+.toolbar-row button,
+.export-section button,
+.todo-card button,
+.scorecard-card button,
+.modal-actions button {
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  padding: 6px 10px;
+  font-size: 12px;
+}
+
+.landing-wrap {
+  padding: 24px 0 8px;
+}
+
+.landing-kicker {
+  font-size: 13px;
+  color: var(--text-muted);
+  font-family: var(--mono);
+  margin-bottom: 24px;
+}
+
+.landing-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 16px;
+  margin-bottom: 26px;
+}
+
+.landing-card {
+  background: var(--surface);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius);
+  padding: 24px 20px;
+  cursor: pointer;
+  min-height: 160px;
+  text-align: left;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  color: var(--text);
+}
+
+.landing-card:hover {
+  border-color: var(--brick);
+  background: var(--surface2);
+}
+
+.landing-card span {
+  font-size: 22px;
+}
+
+.landing-card strong {
+  font-size: 14px;
+}
+
+.landing-card small,
+.guide-callout small {
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+
+.guide-callout {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--brick-light);
+  border: 1.5px solid var(--taupe);
+  border-radius: var(--radius);
+  padding: 14px 20px;
+  cursor: pointer;
+  color: var(--brick);
+}
+
+.toolbar-row,
+.filter-row,
+.button-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+
+.toolbar-row {
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+
+.filter-row > * {
+  flex: 1;
+  min-width: 150px;
+}
+
+.check-label {
+  display: inline-flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 6px;
+  color: var(--text-muted);
+  text-transform: none;
+  letter-spacing: 0;
+}
+
+.table-wrap {
+  overflow-x: auto;
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+  font-family: var(--mono);
+}
+
+.data-table th {
+  text-align: left;
+  font-size: 10px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 8px;
+  border-bottom: 1.5px solid var(--border);
+}
+
+.data-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border);
+  vertical-align: middle;
+}
+
+.data-table input {
+  min-width: 72px;
+  padding: 6px 8px;
+  font-size: 12px;
+}
+
+.actions {
+  display: flex;
+  gap: 5px;
+  flex-wrap: wrap;
+}
+
+.muted-row {
+  opacity: 0.62;
+}
+
+.modal-section {
+  border-color: var(--taupe);
+  background: var(--brick-light);
+}
+
+.scorecard-list {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.scorecard-card {
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+  background: var(--surface);
+}
+
+.scorecard-card-head {
+  border: 0 !important;
+  border-radius: 0 !important;
+  width: 100%;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 13px 16px !important;
+  text-align: left;
+}
+
+#rippling-drop-zone {
+  margin-top: 12px;
+  border: 2px dashed var(--border-strong);
+  border-radius: var(--radius-sm);
+  padding: 32px;
+  text-align: center;
+  cursor: pointer;
+  background: var(--surface2);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.drop-icon {
+  font-size: 28px;
+}
+
+.todo-card {
+  background: var(--surface2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 12px;
+  align-items: center;
+}
+
+.todo-card span {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.guide-step {
+  display: flex;
+  gap: 12px;
+}
+
+.step-number {
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  background: var(--brick);
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 13px;
+  font-weight: 700;
+  flex: 0 0 auto;
+}
+
+#sc-delete-modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.45);
+  z-index: 9999;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+#sc-delete-modal > div {
+  background: #fff;
+  border-radius: var(--radius);
+  padding: 28px;
+  max-width: 380px;
+  width: 90%;
+  box-shadow: 0 8px 32px rgba(0,0,0,0.18);
+}
+
+.modal-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 6px;
+}
+
+.modal-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+@media (max-width: 760px) {
+  body {
+    display: block;
+  }
+  #sidebar {
+    position: relative;
+    width: 100%;
+    height: auto;
+  }
+  #app-main {
+    margin-left: 0;
+  }
+  .landing-grid {
+    grid-template-columns: 1fr;
+  }
+}
