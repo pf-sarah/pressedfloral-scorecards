@@ -23,10 +23,11 @@ export function goalFromRow(row: Record<string, any>): Goal {
     name: row.name,
     goalValue: Number(row.goal_value) || 0,
     minValue: Number(row.min_value) || 0,
-    lowerBetter: row.lower_better !== false,
+    lowerBetter: row.lower_better === true,
     capped: row.capped || "no",
     capPct: Number(row.cap_pct) || 100,
-    active: row.active !== false
+    active: row.active !== false,
+    periodType: (row.period_type === "quarterly" ? "quarterly" : "monthly") as "monthly" | "quarterly"
   };
 }
 
@@ -43,7 +44,8 @@ export function goalToRow(goal: Goal) {
     lower_better: goal.lowerBetter,
     capped: goal.capped,
     cap_pct: goal.capPct,
-    active: goal.active
+    active: goal.active,
+    period_type: goal.periodType || "monthly"
   };
 }
 
