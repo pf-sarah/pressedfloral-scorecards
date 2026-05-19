@@ -89,7 +89,8 @@ export function profileFromRow(email: string, row: Record<string, any>): Manager
     email,
     role: row.role || "manager",
     departments: row.departments || [],
-    locations: row.locations || []
+    locations: row.locations || [],
+    linkedEmployeeName: row.linked_employee_name || undefined
   };
 }
 

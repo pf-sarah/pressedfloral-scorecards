@@ -1,6 +1,6 @@
 export type GoalTier = "company" | "department" | "individual";
 export type PayType = "hourly" | "salary";
-export type ProfileRole = "admin" | "manager";
+export type ProfileRole = "admin" | "manager" | "user";
 
 export type ManagerProfile = {
   id: string;
@@ -8,6 +8,7 @@ export type ManagerProfile = {
   role: ProfileRole;
   departments: string[];
   locations: string[];
+  linkedEmployeeName?: string;
 };
 
 export type Goal = {
@@ -23,6 +24,7 @@ export type Goal = {
   capped: "yes" | "no";
   capPct: number;
   active: boolean;
+  periodType?: "monthly" | "quarterly";
 };
 
 export type ActualsByKey = Record<string, number | null>;
@@ -40,6 +42,7 @@ export type Employee = {
   grossEarnings?: number;
   hoursWorked?: number;
   isExempt?: boolean;
+  isManager?: boolean;
   employmentType?: string;
 };
 

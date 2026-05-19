@@ -1,11 +1,11 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
 import { downloadCsv, parseRipplingEmployees, scorecardsToCsv, toCsv } from "../lib/csv";
 import { fixtureData, fixtureMonth, fixturePeriod } from "../lib/fixtures";
 import { currentMonthValue, formatMonthLabel } from "../lib/periods";
-import { buildScorecard, formatCurrency, formatNumber, type EditableGoal } from "../lib/score";
+import { baseEarnings, buildScorecard, calculateGoal, formatCurrency, formatNumber, type EditableGoal } from "../lib/score";
 import {
   hydrateFromLocalStorage,
   persistActuals,
@@ -29,8 +29,8 @@ import {
 } from "../lib/supabase";
 import type { ActualsByKey, AppData, Employee, Goal, GoalTier, HistoryFilters, ManagerProfile, Scorecard } from "../lib/types";
 
-type Screen = "landing" | "setup" | "scorecard" | "history" | "rippling" | "guide" | "todos" | "migrate";
-type HistoryView = "spreadsheet" | "scorecard";
+type Screen = "landing" | "setup" | "scorecard" | "history" | "rippling" | "guide" | "todos" | "migrate" | "whatif";
+type HistoryView = "table" | "scorecard" | "grid" | "chart";
 
 const departments = [
   "Client Care",
@@ -61,6 +61,7 @@ const rolesByDepartment: Record<string, string[]> = {
 
 const emptyGoal: Omit<Goal, "id"> = {
   goalTier: "individual",
+  periodType: "monthly",
   location: "Utah",
   department: "Design",
   role: "Design Specialist",
@@ -77,17 +78,92 @@ function actualKey(goal: Pick<Goal, "goalTier" | "location" | "department" | "na
   return [goal.goalTier, goal.location || "", goal.department || "", goal.name].join("|");
 }
 
+function metaKey(type: "target" | "min", goal: Pick<Goal, "goalTier" | "location" | "department" | "name">) {
+  return `__${type}__${actualKey(goal)}`;
+}
+
+function quarterKeyForMonth(isoMonth: string): string {
+  const [y, m] = isoMonth.split("-").map(Number);
+  if (!y || !m) return "";
+  return `Q${Math.ceil(m / 3)} ${y}`;
+}
+
+function quarterRangeLabel(isoMonth: string): string {
+  const [y, m] = isoMonth.split("-").map(Number);
+  if (!y || !m) return "";
+  const q = Math.ceil(m / 3);
+  const ranges = [["Jan","Mar"],["Apr","Jun"],["Jul","Sep"],["Oct","Dec"]];
+  const [s, e] = ranges[q - 1];
+  return `Q${q} ${y} · ${s} – ${e}`;
+}
+
 function cloneData(data: AppData): AppData {
   return JSON.parse(JSON.stringify(data)) as AppData;
 }
 
+const ROLE_RANK: Record<string, number> = { admin: 3, manager: 2, user: 1 };
+function roleAtLeast(profile: ManagerProfile | null, minRole: "admin" | "manager" | "user") {
+  return (ROLE_RANK[profile?.role ?? "user"] ?? 1) >= ROLE_RANK[minRole];
+}
+
+function getReportingTree(managerName: string, employees: Employee[]): Set<string> {
+  const result = new Set<string>();
+  const queue = [managerName];
+  const visited = new Set<string>();
+  while (queue.length) {
+    const current = queue.shift()!;
+    if (visited.has(current)) continue;
+    visited.add(current);
+    for (const emp of employees) {
+      if (emp.manager === current && !visited.has(emp.name)) {
+        result.add(emp.name);
+        queue.push(emp.name);
+      }
+    }
+  }
+  return result;
+}
+
 function scopedForProfile<T extends { department?: string; location?: string }>(items: T[], profile: ManagerProfile | null) {
   if (!profile || profile.role === "admin") return items;
+  if (profile.role === "user") return items; // user filtering is done separately by employee name
   return items.filter((item) => {
-    const deptOk = !profile.departments.length || profile.departments.includes(item.department || "");
-    const locOk = !profile.locations.length || profile.locations.includes(item.location || "");
+    const deptOk = !profile.departments.length || !item.department || profile.departments.includes(item.department);
+    const locOk = !profile.locations.length || !item.location || profile.locations.includes(item.location);
     return deptOk && locOk;
   });
+}
+
+function scopedScorecardsForProfile(scorecards: import("../lib/types").Scorecard[], profile: ManagerProfile | null, allEmployees: Employee[] = []) {
+  if (!profile || profile.role === "admin") return scorecards;
+  if (profile.role === "user") {
+    if (!profile.linkedEmployeeName) return [];
+    return scorecards.filter((sc) => sc.employeeName === profile.linkedEmployeeName);
+  }
+  if (profile.linkedEmployeeName) {
+    const tree = getReportingTree(profile.linkedEmployeeName, allEmployees);
+    return scorecards.filter((sc) => tree.has(sc.employeeName));
+  }
+  return scorecards.filter((sc) => {
+    const deptOk = !profile.departments.length || profile.departments.includes(sc.department || "");
+    const locOk = !profile.locations.length || profile.locations.includes(sc.location || "");
+    return deptOk && locOk;
+  });
+}
+
+function scopedEmployeesForProfile(employees: Employee[], profile: ManagerProfile | null, allEmployees: Employee[] = []) {
+  if (!profile || profile.role === "admin") return employees;
+  if (profile.role === "user") return [];
+  if (profile.linkedEmployeeName) {
+    const tree = getReportingTree(profile.linkedEmployeeName, allEmployees);
+    const treeFiltered = employees.filter((e) => tree.has(e.name));
+    // If the manager also has explicit department restrictions, intersect them
+    if (profile.departments.length > 0) {
+      return treeFiltered.filter((e) => profile.departments.includes(e.department || ""));
+    }
+    return treeFiltered;
+  }
+  return scopedForProfile(employees, profile);
 }
 
 export default function ScorecardsApp() {
@@ -103,7 +179,7 @@ export default function ScorecardsApp() {
   const [toast, setToast] = useState<{ message: string; type?: "success" | "error" } | null>(null);
 
   const [bankMonth, setBankMonth] = useState(fixtureMonth);
-  const [bankFilters, setBankFilters] = useState({ type: "all", location: "", department: "", sort: "type", showInactive: false });
+  const [bankFilters, setBankFilters] = useState({ types: ["company", "department", "individual"] as string[], location: "", departments: [...departments] as string[], sort: "goalTier", showInactive: false });
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
 
   const [ripplingMonth, setRipplingMonth] = useState(fixtureMonth);
@@ -116,12 +192,9 @@ export default function ScorecardsApp() {
     department: "",
     goal: ""
   });
-  const [historyView, setHistoryView] = useState<HistoryView>("spreadsheet");
+  const [historyView, setHistoryView] = useState<HistoryView>("table");
 
-  const [scorecardMonth, setScorecardMonth] = useState(fixturePeriod);
-  const [scorecardDept, setScorecardDept] = useState("");
-  const [selectedEmployeeId, setSelectedEmployeeId] = useState("");
-  const [scoreGoals, setScoreGoals] = useState<EditableGoal[]>([]);
+  const [scorecardMonths, setScorecardMonths] = useState<string[]>([currentMonthValue()]);
   const [deleteModal, setDeleteModal] = useState<{ scorecardId: string; goalName: string } | null>(null);
 
   const isFixture = dataMode === "fixture";
@@ -143,8 +216,8 @@ export default function ScorecardsApp() {
     client.auth.getSession().then(async ({ data }) => {
       if (data.session?.user) await loadSupabaseProfile(client, data.session.user.id, data.session.user.email || "");
     });
-    const { data: listener } = client.auth.onAuthStateChange(async (event, session) => {
-      if (event === "SIGNED_IN" && session?.user) await loadSupabaseProfile(client, session.user.id, session.user.email || "");
+    const { data: listener } = client.auth.onAuthStateChange((event, session) => {
+      if (event === "SIGNED_IN" && session?.user) setTimeout(() => loadSupabaseProfile(client, session.user.id, session.user.email || ""), 0);
       if (event === "SIGNED_OUT") {
         setAuthenticated(false);
         setProfile(null);
@@ -158,7 +231,10 @@ export default function ScorecardsApp() {
 
   useEffect(() => {
     if (!authenticated) return;
-    if (mode === "rippling" && profile?.role !== "admin") setMode("landing");
+    const managerScreens: Screen[] = ["setup", "scorecard", "todos", "rippling", "migrate"];
+    const adminScreens: Screen[] = ["rippling", "migrate"];
+    if (profile?.role === "user" && managerScreens.includes(mode)) setMode("history");
+    else if (profile?.role === "manager" && adminScreens.includes(mode)) setMode("landing");
   }, [authenticated, mode, profile]);
 
   useEffect(() => {
@@ -179,19 +255,34 @@ export default function ScorecardsApp() {
   }
 
   async function loadSupabaseData(client: SupabaseClient, loadedProfile: ManagerProfile) {
+    const isUser = loadedProfile.role === "user";
+
+    if (isUser) {
+      const scQuery = loadedProfile.linkedEmployeeName
+        ? client.from("scorecards").select("*").eq("employee_name", loadedProfile.linkedEmployeeName).order("scorecard_month", { ascending: false })
+        : client.from("scorecards").select("*").order("scorecard_month", { ascending: false });
+      const { data } = await scQuery;
+      const scorecards = (data || []).map(scorecardFromRow);
+      setAppData((current) => ({ ...current, goals: [] as Goal[], scorecards, rippling: {} }));
+      return;
+    }
+
     const [goalsResult, scorecardsResult, ripplingResult] = await Promise.all([
       client.from("goals_bank").select("*").order("goal_tier").order("department").order("name"),
       client.from("scorecards").select("*").order("scorecard_month", { ascending: false }).order("employee_name"),
       client.from("rippling_employees").select("*").order("period", { ascending: false })
     ]);
 
-    const goals = scopedForProfile((goalsResult.data || []).map(goalFromRow), loadedProfile);
-    const scorecards = scopedForProfile((scorecardsResult.data || []).map(scorecardFromRow), loadedProfile);
     const rippling: Record<string, Employee[]> = {};
+    const allEmployees: Employee[] = [];
     for (const row of ripplingResult.data || []) {
       const period = row.period || fixtureMonth;
-      rippling[period] = [...(rippling[period] || []), employeeFromRow(row)];
+      const emp = employeeFromRow(row);
+      rippling[period] = [...(rippling[period] || []), emp];
+      allEmployees.push(emp);
     }
+    const goals = scopedForProfile((goalsResult.data || []).map(goalFromRow), loadedProfile);
+    const scorecards = scopedScorecardsForProfile((scorecardsResult.data || []).map(scorecardFromRow), loadedProfile, allEmployees);
     setAppData((current) => ({ ...current, goals, scorecards, rippling }));
   }
 
@@ -228,40 +319,48 @@ export default function ScorecardsApp() {
   }
 
   const months = useMemo(() => {
-    const values = new Set<string>([fixtureMonth, ...Object.keys(appData.rippling), ...appData.scorecards.map((sc) => sc.scorecardMonth)]);
+    const values = new Set<string>([fixtureMonth, ...Object.keys(appData.rippling)]);
+    // include 24 months back through 12 months forward so every month is always selectable
+    const today = new Date();
+    for (let offset = -24; offset <= 12; offset++) {
+      const d = new Date(today.getFullYear(), today.getMonth() + offset, 1);
+      values.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+    }
     return Array.from(values).sort().reverse();
   }, [appData.rippling, appData.scorecards]);
 
   const visibleGoals = useMemo(() => {
     let goals = scopedForProfile(appData.goals, profile);
     if (!bankFilters.showInactive) goals = goals.filter((goal) => goal.active);
-    if (bankFilters.type !== "all") goals = goals.filter((goal) => goal.goalTier === bankFilters.type);
+    if (bankFilters.types.length > 0 && bankFilters.types.length < 3) goals = goals.filter((goal) => bankFilters.types.includes(goal.goalTier));
     if (bankFilters.location) goals = goals.filter((goal) => !goal.location || goal.location === bankFilters.location);
-    if (bankFilters.department) goals = goals.filter((goal) => goal.department === bankFilters.department);
+    if (bankFilters.departments.length < departments.length) goals = goals.filter((goal) => !goal.department || bankFilters.departments.includes(goal.department));
     return [...goals].sort((a, b) => {
       const field = bankFilters.sort as keyof Goal;
       return String(a[field] || "").localeCompare(String(b[field] || "")) || a.name.localeCompare(b.name);
     });
   }, [appData.goals, bankFilters, profile]);
 
-  const selectedEmployee = useMemo(() => {
-    const employees = Object.values(appData.rippling).flat();
-    return employees.find((employee) => employee.id === selectedEmployeeId || employee.name === selectedEmployeeId) || null;
-  }, [appData.rippling, selectedEmployeeId]);
+  const allRipplingEmployees = useMemo(() => Object.values(appData.rippling).flat(), [appData.rippling]);
 
-  const scorecardPreview = useMemo(() => {
-    if (!selectedEmployee || !scoreGoals.length) return null;
-    return buildScorecard({
-      employee: selectedEmployee,
-      month: scorecardMonth,
-      periodType: scorecardMonth.startsWith("Q") ? "quarterly" : "monthly",
-      goals: scoreGoals,
-      submittedBy: currentUserEmail
-    });
-  }, [currentUserEmail, scoreGoals, scorecardMonth, selectedEmployee]);
+  // Deduplicated employees: most recent period wins when the same name appears in multiple uploads
+  const latestRipplingEmployees = useMemo(() => {
+    const periods = Object.keys(appData.rippling).sort().reverse();
+    const seen = new Set<string>();
+    const result: Employee[] = [];
+    for (const period of periods) {
+      for (const emp of appData.rippling[period] || []) {
+        if (!seen.has(emp.name)) {
+          seen.add(emp.name);
+          result.push(emp);
+        }
+      }
+    }
+    return result;
+  }, [appData.rippling]);
 
   const filteredHistory = useMemo(() => {
-    return appData.scorecards.filter((scorecard) => {
+    return scopedScorecardsForProfile(appData.scorecards, profile, allRipplingEmployees).filter((scorecard) => {
       if (historyFilters.period && scorecard.scorecardMonth !== historyFilters.period) return false;
       if (historyFilters.location && scorecard.location !== historyFilters.location) return false;
       if (historyFilters.department && scorecard.department !== historyFilters.department) return false;
@@ -272,19 +371,68 @@ export default function ScorecardsApp() {
       }
       return true;
     });
-  }, [appData.scorecards, historyFilters]);
+  }, [appData.scorecards, historyFilters, profile, allRipplingEmployees]);
+
+  // workMonth = the most recently completed month (always previous calendar month)
+  const workMonth = useMemo(() => {
+    const d = new Date();
+    const prev = new Date(d.getFullYear(), d.getMonth() - 1, 1);
+    return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+  }, []);
+
+  // currentMonth = this calendar month — the Rippling upload for this month contains last month's earnings
+  const currentMonth = useMemo(() => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+  }, []);
+
+  const missingActuals = useMemo(() => {
+    const actuals = appData.actuals[formatMonthLabel(workMonth)] || {};
+    return appData.goals.filter((goal) =>
+      goal.active &&
+      (goal.goalTier === "company" || goal.goalTier === "department") &&
+      actuals[metaKey("target", goal)] != null &&
+      actuals[metaKey("min", goal)] != null &&
+      actuals[actualKey(goal)] == null
+    );
+  }, [appData.goals, appData.actuals, workMonth]);
+
+  const missingScorecards = useMemo(() => {
+    const employees = appData.rippling[workMonth] || [];
+    return employees.filter((employee) => !appData.scorecards.some((sc) => sc.employeeName === employee.name && sc.scorecardMonth === formatMonthLabel(workMonth)));
+  }, [appData.rippling, appData.scorecards, workMonth]);
+
+  const missingCurrentTargets = useMemo(() => {
+    const today = new Date();
+    const currentMonthVal = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+    const currentLabel = formatMonthLabel(currentMonthVal);
+    const currentActuals = appData.actuals[currentLabel] || {};
+    const isAdmin = roleAtLeast(profile, "admin");
+    return appData.goals.filter((g) => g.active && (isAdmin ? true : g.goalTier !== "company") && (g.goalTier === "company" || g.goalTier === "department") && currentActuals[metaKey("target", g)] == null);
+  }, [appData.goals, appData.actuals, profile]);
+
+  const missingNextTargets = useMemo(() => {
+    const today = new Date();
+    const next = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    const nextVal = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
+    const nextLabel = formatMonthLabel(nextVal);
+    const nextActuals = appData.actuals[nextLabel] || {};
+    const isAdmin = roleAtLeast(profile, "admin");
+    return appData.goals.filter((g) => g.active && (isAdmin ? true : g.goalTier !== "company") && (g.goalTier === "company" || g.goalTier === "department") && nextActuals[metaKey("target", g)] == null);
+  }, [appData.goals, appData.actuals, profile]);
 
   const todos = useMemo(() => {
     const tasks: { label: string; detail: string; action: Screen }[] = [];
-    if (!appData.rippling[bankMonth]?.length) tasks.push({ label: "Upload Rippling data", detail: `${formatMonthLabel(bankMonth)} has no saved employee data.`, action: "rippling" });
-    const actuals = appData.actuals[formatMonthLabel(bankMonth)] || {};
-    const missingActuals = appData.goals.filter((goal) => goal.active && (goal.goalTier === "company" || goal.goalTier === "department") && actuals[actualKey(goal)] == null);
+    if (roleAtLeast(profile, "admin") && !appData.rippling[currentMonth]?.length) tasks.push({ label: "Upload Rippling data", detail: `${formatMonthLabel(currentMonth)} data not uploaded yet.`, action: "rippling" });
     if (missingActuals.length) tasks.push({ label: "Enter shared actuals", detail: `${missingActuals.length} company or department goals need actuals.`, action: "setup" });
-    const employees = appData.rippling[bankMonth] || [];
-    const missingScorecards = employees.filter((employee) => !appData.scorecards.some((scorecard) => scorecard.employeeName === employee.name && scorecard.scorecardMonth === formatMonthLabel(bankMonth)));
-    if (missingScorecards.length) tasks.push({ label: "Build team scorecards", detail: `${missingScorecards.length} employees need scorecards.`, action: "scorecard" });
+    if (missingCurrentTargets.length) tasks.push({ label: "Set current month targets", detail: `${missingCurrentTargets.length} goals need targets for this month.`, action: "todos" });
     return tasks;
-  }, [appData, bankMonth]);
+  }, [appData.rippling, currentMonth, workMonth, missingActuals, missingCurrentTargets, profile]);
+
+  const todoBadgeCount = useMemo(() => {
+    const ripplingPending = roleAtLeast(profile, "admin") && !appData.rippling[currentMonth]?.length ? 1 : 0;
+    return ripplingPending + missingActuals.length + missingCurrentTargets.length + missingNextTargets.length;
+  }, [profile, appData.rippling, currentMonth, missingActuals, missingCurrentTargets, missingNextTargets]);
 
   async function saveGoal(goal: Goal) {
     const nextGoals = appData.goals.some((item) => item.id === goal.id)
@@ -311,8 +459,8 @@ export default function ScorecardsApp() {
     await saveGoal({ ...goal, active: !goal.active });
   }
 
-  async function saveActual(goal: Goal, value: string) {
-    const period = formatMonthLabel(bankMonth);
+  async function saveActual(goal: Goal, value: string, periodOverride?: string) {
+    const period = periodOverride ?? formatMonthLabel(bankMonth);
     const key = actualKey(goal);
     const nextActuals = { ...(appData.actuals[period] || {}), [key]: value === "" ? null : Number(value) };
     setAppData((current) => ({ ...current, actuals: { ...current.actuals, [period]: nextActuals } }));
@@ -331,6 +479,51 @@ export default function ScorecardsApp() {
     showToast("Actual saved");
   }
 
+  async function saveMonthTarget(goal: Goal, period: string, type: "target" | "min", value: string) {
+    const key = metaKey(type, goal);
+    const nextActuals = { ...(appData.actuals[period] || {}), [key]: value === "" ? null : Number(value) };
+    setAppData((current) => ({ ...current, actuals: { ...current.actuals, [period]: nextActuals } }));
+    persistActuals(period, nextActuals);
+    if (!isFixture && sb) {
+      await sb.from("actuals").upsert({
+        period,
+        goal_tier: "__meta__",
+        location: null,
+        department: null,
+        goal_name: key,
+        actual_value: value === "" ? null : Number(value)
+      }, { onConflict: "period,goal_tier,location,department,goal_name" });
+    }
+  }
+
+  async function saveMonthTargetPair(goal: Goal, period: string, target: string, min: string) {
+    const targetKey = metaKey("target", goal);
+    const minKey = metaKey("min", goal);
+    const nextActuals = {
+      ...(appData.actuals[period] || {}),
+      [targetKey]: target === "" ? null : Number(target),
+      [minKey]: min === "" ? null : Number(min)
+    };
+    setAppData((current) => ({ ...current, actuals: { ...current.actuals, [period]: nextActuals } }));
+    persistActuals(period, nextActuals);
+    if (!isFixture && sb) {
+      await sb.from("actuals").upsert([
+        { period, goal_tier: "__meta__", location: null, department: null, goal_name: targetKey, actual_value: target === "" ? null : Number(target) },
+        { period, goal_tier: "__meta__", location: null, department: null, goal_name: minKey, actual_value: min === "" ? null : Number(min) }
+      ], { onConflict: "period,goal_tier,location,department,goal_name" });
+    }
+  }
+
+  async function saveRipplingForMonth(month: string, employees: Employee[]) {
+    setAppData((current) => ({ ...current, rippling: { ...current.rippling, [month]: employees } }));
+    persistRippling(month, employees);
+    if (!isFixture && sb) {
+      await sb.from("rippling_employees").delete().eq("period", month);
+      await sb.from("rippling_employees").insert(employees.map((employee) => employeeToRow(month, employee)));
+    }
+    showToast("Rippling data saved");
+  }
+
   async function saveRippling() {
     if (!ripplingMonth || !ripplingPreview.length) {
       showToast("Upload a CSV before saving", "error");
@@ -346,48 +539,13 @@ export default function ScorecardsApp() {
     showToast("Rippling data saved");
   }
 
-  function loadGoalsForEmployee(employee: Employee) {
-    const period = scorecardMonth;
-    const actuals = appData.actuals[period] || {};
-    const applicable = appData.goals.filter((goal) => {
-      if (!goal.active) return false;
-      if (goal.goalTier === "company") return true;
-      if (goal.goalTier === "department") return goal.department === employee.department && (!goal.location || goal.location === employee.location);
-      return goal.role === employee.role && goal.department === employee.department && (!goal.location || goal.location === employee.location);
-    });
-    const defaultWeight = applicable.length ? Math.floor((100 / applicable.length) * 100) / 100 : 0;
-    setScoreGoals(applicable.map((goal, index) => ({
-      ...goal,
-      scTarget: goal.goalValue,
-      scMin: goal.minValue,
-      scActual: actuals[actualKey(goal)] ?? null,
-      scWeight: index === applicable.length - 1
-        ? Number((100 - defaultWeight * (applicable.length - 1)).toFixed(2))
-        : defaultWeight
-    })));
-  }
-
-  async function submitScorecard() {
-    if (!scorecardPreview) {
-      showToast("Select an employee and goals first", "error");
-      return;
-    }
-    const totalWeight = scoreGoals.reduce((sum, goal) => sum + Number(goal.scWeight || 0), 0);
-    if (Math.abs(totalWeight - 100) > 0.01) {
-      showToast("Goal weights must total 100%", "error");
-      return;
-    }
-    const missingActuals = scoreGoals.filter((goal) => goal.scActual === null || goal.scActual === undefined || Number.isNaN(Number(goal.scActual)));
-    if (missingActuals.length) {
-      showToast("Enter actuals for every goal", "error");
-      return;
-    }
+  async function submitScorecardDirect(scorecard: Scorecard) {
     setAppData((current) => ({
       ...current,
-      scorecards: [...current.scorecards.filter((item) => item.id !== scorecardPreview.id), scorecardPreview]
+      scorecards: [...current.scorecards.filter((item) => item.id !== scorecard.id), scorecard]
     }));
-    persistScorecard(scorecardPreview);
-    if (!isFixture && sb) await sb.from("scorecards").insert(scorecardToRow(scorecardPreview));
+    persistScorecard(scorecard);
+    if (!isFixture && sb) await sb.from("scorecards").upsert(scorecardToRow(scorecard));
     showToast("Scorecard submitted");
   }
 
@@ -427,7 +585,7 @@ export default function ScorecardsApp() {
         mode={mode}
         profile={profile}
         email={currentUserEmail}
-        todoCount={todos.length}
+        todoCount={todoBadgeCount}
         onMode={setMode}
         onSignOut={signOut}
       />
@@ -446,37 +604,34 @@ export default function ScorecardsApp() {
               filters={bankFilters}
               goals={visibleGoals}
               actuals={appData.actuals[formatMonthLabel(bankMonth)] || {}}
+              allActuals={appData.actuals}
               editingGoal={editingGoal}
               onMonth={setBankMonth}
               onFilters={setBankFilters}
               onActual={saveActual}
               onEdit={setEditingGoal}
               onSave={saveGoal}
+              onSaveTargetPair={(goal, target, min, period) => saveMonthTargetPair(goal, period ?? formatMonthLabel(bankMonth), target, min)}
               onDelete={deleteGoal}
               onToggle={toggleGoal}
+              isAdmin={profile?.role === "admin"}
+              allowedDepartments={profile?.role === "admin" ? undefined : (profile?.departments || [])}
             />
           )}
           {mode === "scorecard" && (
             <ScorecardsScreen
-              month={scorecardMonth}
-              dept={scorecardDept}
+              selectedMonths={scorecardMonths}
+              months={months}
               profile={profile}
-              employees={Object.values(appData.rippling).flat()}
-              scorecards={scopedForProfile(appData.scorecards, profile)}
-              selectedEmployeeId={selectedEmployeeId}
-              selectedEmployee={selectedEmployee}
-              goals={scoreGoals}
-              preview={scorecardPreview}
-              onMonth={setScorecardMonth}
-              onDept={setScorecardDept}
-              onEmployee={(value) => {
-                setSelectedEmployeeId(value);
-                const employee = Object.values(appData.rippling).flat().find((item) => item.id === value || item.name === value);
-                if (employee) loadGoalsForEmployee(employee);
-              }}
-              onGoals={setScoreGoals}
-              onSubmit={submitScorecard}
+              rippling={appData.rippling}
+              allEmployees={allRipplingEmployees}
+              scorecards={scopedScorecardsForProfile(appData.scorecards, profile, allRipplingEmployees)}
+              allGoals={appData.goals.filter((g) => g.active)}
+              allActuals={appData.actuals}
+              onMonths={setScorecardMonths}
+              onSubmitScorecard={submitScorecardDirect}
               onDeleteGoal={setDeleteModal}
+              currentUserEmail={currentUserEmail}
             />
           )}
           {mode === "history" && (
@@ -484,7 +639,8 @@ export default function ScorecardsApp() {
               filters={historyFilters}
               view={historyView}
               scorecards={filteredHistory}
-              allScorecards={appData.scorecards}
+              allScorecards={scopedScorecardsForProfile(appData.scorecards, profile, allRipplingEmployees)}
+              readonly={profile?.role === "user"}
               onFilters={setHistoryFilters}
               onView={setHistoryView}
             />
@@ -504,7 +660,43 @@ export default function ScorecardsApp() {
             />
           )}
           {mode === "guide" && <GuideScreen />}
-          {mode === "todos" && <TodosScreen tasks={todos} onMode={setMode} />}
+          {mode === "whatif" && (
+            <WhatIfScreen
+              allGoals={appData.goals.filter((g) => g.active)}
+              profile={profile}
+              latestEmployees={latestRipplingEmployees}
+              allEmployees={allRipplingEmployees}
+            />
+          )}
+          {mode === "todos" && (
+            <TodosScreen
+              workMonth={workMonth}
+              bankMonth={bankMonth}
+              profile={profile}
+              hasRippling={!!appData.rippling[currentMonth]?.length}
+              missingActuals={missingActuals}
+              goals={appData.goals.filter((g) => g.active)}
+              allActuals={appData.actuals}
+              onSaveTarget={saveMonthTarget}
+              onSaveCurrentTargetPair={(goal, target, min) => {
+                const today = new Date();
+                const period = formatMonthLabel(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`);
+                return saveMonthTargetPair(goal, period, target, min);
+              }}
+              onSaveTargetPair={(goal, target, min) => {
+                const today = new Date();
+                const next = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+                const period = formatMonthLabel(`${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`);
+                return saveMonthTargetPair(goal, period, target, min);
+              }}
+              onSaveActual={(goal, value) => saveActual(goal, value, formatMonthLabel(workMonth))}
+              onRipplingUpload={(employees) => saveRipplingForMonth(workMonth, employees)}
+              onBuildEmployee={() => {
+                setScorecardMonths([workMonth]);
+                setMode("scorecard");
+              }}
+            />
+          )}
           {mode === "migrate" && <MigrateScreen />}
         </main>
       </div>
@@ -530,7 +722,8 @@ function pageLabel(mode: Screen) {
     rippling: "Rippling Data",
     guide: "How To Use",
     todos: "To Do",
-    migrate: "Migrate Data"
+    migrate: "Migrate Data",
+    whatif: "What If Scorecard"
   }[mode];
 }
 
@@ -572,16 +765,19 @@ function Sidebar(props: {
   onMode: (mode: Screen) => void;
   onSignOut: () => void;
 }) {
-  const isAdmin = props.profile?.role === "admin";
-  const nav: { mode: Screen; label: string; icon: string; adminOnly?: boolean }[] = [
+  const role = props.profile?.role ?? "user";
+  const isAdmin = role === "admin";
+  const isManager = role === "manager" || isAdmin;
+  const nav: { mode: Screen; label: string; icon: string; minRole?: "manager" | "admin" }[] = [
     { mode: "landing", label: "Home", icon: "⌂" },
-    { mode: "setup", label: "Goals & Actuals", icon: "☰" },
-    { mode: "scorecard", label: "Team Scorecards", icon: "👥" },
+    { mode: "setup", label: "Goals & Actuals", icon: "☰", minRole: "manager" },
+    { mode: "scorecard", label: "Team Scorecards", icon: "👥", minRole: "manager" },
     { mode: "history", label: "Historical Data", icon: "◷" },
-    { mode: "rippling", label: "Rippling Data", icon: "⇅", adminOnly: true },
+    { mode: "whatif", label: "What If Scorecard", icon: "◆" },
+    { mode: "rippling", label: "Rippling Data", icon: "⇅", minRole: "admin" },
     { mode: "guide", label: "How To Use", icon: "ⓘ" },
-    { mode: "todos", label: "To Do", icon: "☐" },
-    { mode: "migrate", label: "Migrate Data", icon: "↑" }
+    { mode: "todos", label: "To Do", icon: "☐", minRole: "manager" },
+    { mode: "migrate", label: "Migrate Data", icon: "↑", minRole: "admin" }
   ];
   return (
     <div id="sidebar">
@@ -591,7 +787,8 @@ function Sidebar(props: {
       </div>
       <nav id="sidebar-nav">
         {nav.map((item, index) => {
-          if (item.adminOnly && !isAdmin) return null;
+          if (item.minRole === "admin" && !isAdmin) return null;
+          if (item.minRole === "manager" && !isManager) return null;
           const sectionBreak = index === 1 || index === 3 || index === 5;
           return (
             <div key={item.mode}>
@@ -608,7 +805,7 @@ function Sidebar(props: {
       <div id="user-badge">
         <div id="user-email-display">{props.email || "Not signed in"}</div>
         <div id="user-role-display">
-          {props.profile?.role === "admin" ? "Admin - full access" : `Manager - ${(props.profile?.departments || []).join(", ")}`}
+          {role === "admin" ? "Admin · full access" : role === "manager" ? (props.profile?.linkedEmployeeName ? `Manager · ${props.profile.linkedEmployeeName}'s team` : `Manager · ${(props.profile?.departments || []).join(", ") || "all depts"}`) : `Viewer · ${props.profile?.linkedEmployeeName || props.email}`}
         </div>
         <button onClick={props.onSignOut}>Sign out</button>
       </div>
@@ -617,18 +814,39 @@ function Sidebar(props: {
 }
 
 function LandingScreen({ onMode, profile }: { onMode: (mode: Screen) => void; profile: ManagerProfile | null }) {
-  const cards: { mode: Screen; label: string; text: string; icon: string; adminOnly?: boolean }[] = [
+  const isUser = profile?.role === "user";
+  const isAdmin = profile?.role === "admin";
+  const manageCards: { mode: Screen; label: string; text: string; icon: string }[] = [
     { mode: "setup", label: "Goals & Actuals", text: "Manage goals and enter monthly actuals in one place.", icon: "☰" },
     { mode: "scorecard", label: "Team Scorecards", text: "View live scorecards for your team based on goals, targets, and actuals.", icon: "✎" },
-    { mode: "history", label: "Historical Data", text: "Search and review submitted scorecards across all employees and time periods.", icon: "◷" },
+  ];
+  const reviewCards: { mode: Screen; label: string; text: string; icon: string; adminOnly?: boolean }[] = [
+    { mode: "history", label: "Historical Data", text: isUser ? "View your submitted scorecards." : "Search and review submitted scorecards across all employees and time periods.", icon: "◷" },
+    { mode: "whatif", label: "What If Scorecard", text: "Explore how targets, actuals, and weights affect bonus calculations. Nothing here is saved.", icon: "◆" },
     { mode: "rippling", label: "Rippling Data", text: "Upload monthly CSV exports to auto-fill employee pay, title, and location data.", icon: "⇅", adminOnly: true }
   ];
+  const visibleReview = reviewCards.filter((card) => !card.adminOnly || isAdmin);
   return (
     <div className="screen active">
       <div className="landing-wrap">
-        <div className="landing-kicker">Where would you like to go?</div>
-        <div className="landing-grid">
-          {cards.filter((card) => !card.adminOnly || profile?.role === "admin").map((card) => (
+        <div className="landing-kicker">{isUser ? `Welcome, ${profile?.linkedEmployeeName || ""}` : "Where would you like to go?"}</div>
+        {!isUser && (
+          <>
+            <div className="landing-section-label">Manage</div>
+            <div className="landing-grid">
+              {manageCards.map((card) => (
+                <button key={card.mode} className="landing-card" onClick={() => onMode(card.mode)}>
+                  <span>{card.icon}</span>
+                  <strong>{card.label}</strong>
+                  <small>{card.text}</small>
+                </button>
+              ))}
+            </div>
+          </>
+        )}
+        <div className="landing-section-label">Review</div>
+        <div className="landing-grid landing-grid-review">
+          {visibleReview.map((card) => (
             <button key={card.mode} className="landing-card" onClick={() => onMode(card.mode)}>
               <span>{card.icon}</span>
               <strong>{card.label}</strong>
@@ -636,10 +854,15 @@ function LandingScreen({ onMode, profile }: { onMode: (mode: Screen) => void; pr
             </button>
           ))}
         </div>
-        <button className="guide-callout" onClick={() => onMode("guide")}>
-          <span>ⓘ</span>
-          <span><strong>How To Use</strong><small>Step-by-step guide to setting up and using the app.</small></span>
-        </button>
+        <div className="guide-callout-wrap">
+          <button className="guide-callout" onClick={() => onMode("guide")}>
+            <span>ⓘ</span>
+            <div>
+              <strong>How To Use</strong>
+              <small>Step-by-step guide to setting up and using the app.</small>
+            </div>
+          </button>
+        </div>
       </div>
     </div>
   );
@@ -648,211 +871,1108 @@ function LandingScreen({ onMode, profile }: { onMode: (mode: Screen) => void; pr
 function GoalsScreen(props: {
   month: string;
   months: string[];
-  filters: { type: string; location: string; department: string; sort: string; showInactive: boolean };
+  filters: { types: string[]; location: string; departments: string[]; sort: string; showInactive: boolean };
   goals: Goal[];
   actuals: ActualsByKey;
+  allActuals: Record<string, ActualsByKey>;
   editingGoal: Goal | null;
+  readonly?: boolean;
   onMonth: (value: string) => void;
-  onFilters: (value: { type: string; location: string; department: string; sort: string; showInactive: boolean }) => void;
-  onActual: (goal: Goal, value: string) => void;
+  onFilters: (value: { types: string[]; location: string; departments: string[]; sort: string; showInactive: boolean }) => void;
+  onActual: (goal: Goal, value: string, period?: string) => void;
   onEdit: (goal: Goal | null) => void;
   onSave: (goal: Goal) => void;
+  onSaveTargetPair: (goal: Goal, target: string, min: string, period?: string) => void;
   onDelete: (id: string) => void;
   onToggle: (id: string) => void;
+  isAdmin?: boolean;
+  allowedDepartments?: string[];
 }) {
+  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
+  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const [actualEditId, setActualEditId] = useState<string | null>(null);
+
+  const now = new Date();
+  const currentMonthVal = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
+  let monthStatus = "";
+  let isGoalLocked = false;   // goals can't be edited (past > 21 days)
+  let isActualLocked = true;  // actuals can only be entered for past months within 21 days
+  if (props.month) {
+    if (props.month < currentMonthVal) {
+      const [y, m] = props.month.split("-");
+      const monthEnd = new Date(parseInt(y), parseInt(m), 0);
+      const daysSince = Math.floor((now.getTime() - monthEnd.getTime()) / (1000 * 60 * 60 * 24));
+      isGoalLocked = daysSince > 21;
+      isActualLocked = daysSince > 21;
+      monthStatus = isGoalLocked
+        ? "🔒 Past month — locked"
+        : `⚠️ Past month — actuals & goals editable for ${21 - daysSince} more days`;
+    } else if (props.month === currentMonthVal) {
+      monthStatus = "● Current month — actuals entered after month ends";
+    } else {
+      monthStatus = "○ Future month — plan goals ahead";
+    }
+  }
+  const effectiveReadonly = props.readonly || isGoalLocked;
+  const actualsReadonly = props.readonly || isActualLocked;
+
+  const quarterKey = quarterKeyForMonth(props.month);
+  const quarterActuals = props.allActuals[quarterKey] || {};
+  const monthlyGoals = props.goals.filter((g) => g.periodType !== "quarterly");
+  const quarterlyGoals = props.goals.filter((g) => g.periodType === "quarterly");
+
+  const goalHasTargets = (goal: Goal) => {
+    const a = goal.periodType === "quarterly" ? quarterActuals : props.actuals;
+    return a[metaKey("target", goal)] != null && a[metaKey("min", goal)] != null;
+  };
+
+  const handleSaveTargetPair = (goal: Goal, target: string, min: string) => {
+    const period = goal.periodType === "quarterly" ? quarterKey : undefined;
+    props.onSaveTargetPair(goal, target, min, period);
+  };
+
+  const mergedActuals = { ...props.actuals, ...quarterActuals };
+
+  function locLabel(loc?: string) {
+    if (!loc) return "—";
+    if (loc === "Utah") return "UT";
+    if (loc === "Georgia") return "GA";
+    if (loc === "Remote") return "Rem";
+    return loc.slice(0, 3);
+  }
+
+  function cappedLabel(goal: Goal) {
+    if (goal.capped !== "yes") return "No";
+    return `Yes (${goal.capPct}%)`;
+  }
+
+  const thCtx = { background: "#faf8f5" } as React.CSSProperties;
+  const thGoal = { background: "#f2f7fa" } as React.CSSProperties;
+  const thTarget = { background: "#f5f8f3" } as React.CSSProperties;
+  const thActual = { background: "#eef5ec" } as React.CSSProperties;
+  const thStatus = { background: "#fff" } as React.CSSProperties;
+
   return (
-    <div className="screen active">
-      <section>
-        <div className="toolbar-row">
-          <div className="section-title">Goals & Actuals</div>
-          <select value={props.month} onChange={(event) => props.onMonth(event.target.value)}>
-            {props.months.map((month) => <option key={month} value={month}>{formatMonthLabel(month)}</option>)}
-          </select>
-          <label className="check-label"><input type="checkbox" checked={props.filters.showInactive} onChange={(event) => props.onFilters({ ...props.filters, showInactive: event.target.checked })} /> Show inactive</label>
+    <div className="screen active" onClick={() => { setMenuOpenId(null); setMenuPos(null); setActualEditId(null); }}>
+      <section style={{ padding: "12px 16px 10px" }}>
+        {/* Toolbar: title + month + status | Show inactive */}
+        <div className="toolbar-row" style={{ marginBottom: 10, gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", minWidth: 0 }}>
+            <div className="section-title" style={{ margin: 0, borderBottom: "none", paddingBottom: 0 }}>Goals & Actuals</div>
+            <select className="bank-filter-select" style={{ flex: "none" }} value={props.month} onChange={(e) => props.onMonth(e.target.value)}>
+              {props.months.filter((m) => {
+                if (!/^\d{4}-\d{2}$/.test(m)) return false;
+                const now = new Date();
+                const cur = now.getFullYear() * 12 + now.getMonth();
+                const [y, mo] = m.split("-").map(Number);
+                const val = y * 12 + (mo - 1);
+                return val >= cur - 12 && val <= cur + 3;
+              }).map((month) => <option key={month} value={month}>{formatMonthLabel(month)}</option>)}
+            </select>
+            {monthStatus && <span className="current-month-tag" style={{ whiteSpace: "nowrap" }}>{monthStatus}</span>}
+          </div>
+          <label className="check-label" style={{ fontSize: "12px", whiteSpace: "nowrap", flexShrink: 0 }}>
+            <input type="checkbox" checked={props.filters.showInactive} onChange={(e) => props.onFilters({ ...props.filters, showInactive: e.target.checked })} style={{ accentColor: "var(--brick)" }} />
+            Show inactive
+          </label>
         </div>
-        <div className="filter-row">
-          <select value={props.filters.type} onChange={(event) => props.onFilters({ ...props.filters, type: event.target.value })}>
-            <option value="all">All types</option>
-            <option value="company">Company</option>
-            <option value="department">Department</option>
-            <option value="individual">Individual</option>
-          </select>
-          <select value={props.filters.location} onChange={(event) => props.onFilters({ ...props.filters, location: event.target.value })}>
+        {/* Filter row */}
+        <div className="filter-row" style={{ gap: 8 }}>
+          <MultiSelectDropdown
+            label="All types"
+            options={[{ value: "company", label: "Company" }, { value: "department", label: "Department" }, { value: "individual", label: "Individual" }]}
+            selected={props.filters.types}
+            onChange={(types) => props.onFilters({ ...props.filters, types })}
+          />
+          <select className="bank-filter-select" value={props.filters.location} onChange={(e) => props.onFilters({ ...props.filters, location: e.target.value })}>
             <option value="">All locations</option>
             <option value="Utah">Utah</option>
             <option value="Georgia">Georgia</option>
             <option value="Remote">Remote</option>
           </select>
-          <select value={props.filters.department} onChange={(event) => props.onFilters({ ...props.filters, department: event.target.value })}>
-            <option value="">All departments</option>
-            {departments.map((department) => <option key={department}>{department}</option>)}
-          </select>
-          <select value={props.filters.sort} onChange={(event) => props.onFilters({ ...props.filters, sort: event.target.value })}>
+          <MultiSelectDropdown
+            label="All departments"
+            options={departments.map((d) => ({ value: d, label: d }))}
+            selected={props.filters.departments}
+            onChange={(depts) => props.onFilters({ ...props.filters, departments: depts })}
+          />
+          <select className="bank-filter-select" value={props.filters.sort} onChange={(e) => props.onFilters({ ...props.filters, sort: e.target.value })}>
             <option value="goalTier">Sort: Type</option>
-            <option value="department">Sort: Department</option>
+            <option value="department">Sort: Dept</option>
             <option value="location">Sort: Location</option>
-            <option value="role">Sort: Role</option>
-            <option value="name">Sort: Goal Name</option>
+            <option value="name">Sort: Name</option>
           </select>
+          <button className="reset-filters-btn" onClick={() => props.onFilters({ types: ["company", "department", "individual"], location: "", departments: [...departments], sort: "goalTier", showInactive: false })}>Reset</button>
         </div>
       </section>
-      <section>
-        <div className="table-wrap">
-          <table className="data-table">
+      <section style={{ padding: 0 }}>
+        <div style={{ overflowX: "auto" }}>
+          <table className="data-table bank-table">
+            <colgroup>
+              <col style={{ width: "44px" }} />
+              <col style={{ width: "46px" }} />
+              <col style={{ width: "78px" }} />
+              <col />
+              <col style={{ width: "38px" }} />
+              <col style={{ width: "46px" }} />
+              <col style={{ width: "60px" }} />
+              <col style={{ width: "58px" }} />
+              <col style={{ width: "52px" }} />
+              <col style={{ width: "70px" }} />
+              <col style={{ width: "58px" }} />
+              <col style={{ width: "36px" }} />
+            </colgroup>
             <thead>
               <tr>
-                <th>Type</th><th>Location</th><th>Department</th><th>Role</th><th>Goal</th><th>Target</th><th>Min</th><th>Actual</th><th>Status</th><th>Actions</th>
+                <th style={thCtx}>Type</th>
+                <th style={thCtx}>Loc</th>
+                <th style={thCtx}>Dept</th>
+                <th style={thGoal}>Goal Name</th>
+                <th style={{ ...thGoal, textAlign: "center" }}>Per.</th>
+                <th style={thGoal}>Lower</th>
+                <th style={thGoal}>Cap</th>
+                <th style={thTarget}>Target</th>
+                <th style={thTarget}>Min</th>
+                <th style={thActual}>Actual</th>
+                <th style={thStatus}>Status</th>
+                <th style={thStatus}></th>
               </tr>
             </thead>
             <tbody>
-              {props.goals.map((goal) => (
-                <tr key={goal.id} className={!goal.active ? "muted-row" : ""}>
-                  <td>{goal.goalTier}</td>
-                  <td>{goal.location || "-"}</td>
-                  <td>{goal.department || "-"}</td>
-                  <td>{goal.role || "-"}</td>
-                  <td>{goal.name}</td>
-                  <td>{formatNumber(goal.goalValue)}</td>
-                  <td>{formatNumber(goal.minValue)}</td>
-                  <td>
-                    <input
-                      aria-label={`Actual for ${goal.name}`}
-                      type="number"
-                      defaultValue={props.actuals[actualKey(goal)] ?? ""}
-                      onBlur={(event) => props.onActual(goal, event.target.value)}
-                    />
+              {monthlyGoals.map((goal) => {
+                const a = props.actuals;
+                return (
+                <React.Fragment key={goal.id}>
+                <tr style={!goal.active ? { opacity: 0.45 } : undefined}>
+                  <td style={thCtx}><TierBadge tier={goal.goalTier} /></td>
+                  <td style={{ ...thCtx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{locLabel(goal.location)}</td>
+                  <td style={{ ...thCtx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{goal.department || "—"}</td>
+                  <td style={{ ...thGoal, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {goal.name}{goal.goalTier === "individual" && goal.role && <span style={{ fontSize: "9px", padding: "1px 5px", borderRadius: "99px", background: "#e9e9e9", color: "#555", fontWeight: 600, fontFamily: "var(--mono)", whiteSpace: "nowrap", marginLeft: "4px" }}>{goal.role}</span>}
                   </td>
-                  <td><span className={`badge ${goal.active ? "met" : "unmet"}`}>{goal.active ? "Active" : "Inactive"}</span></td>
-                  <td className="actions">
-                    <button onClick={() => props.onEdit(goal)}>Edit</button>
-                    <button onClick={() => props.onToggle(goal.id)}>{goal.active ? "Deactivate" : "Activate"}</button>
-                    <button onClick={() => props.onDelete(goal.id)}>Delete</button>
+                  <td style={{ ...thGoal, textAlign: "center" }}><span style={{ fontSize: "9px", fontWeight: 700, fontFamily: "var(--mono)", color: "var(--text-muted)" }}>M</span></td>
+                  <td style={thGoal}>{goal.lowerBetter ? "Yes" : "No"}</td>
+                  <td style={thGoal}>{cappedLabel(goal)}</td>
+                  <td style={thTarget}>{a[metaKey("target", goal)] != null ? formatNumber(a[metaKey("target", goal)] as number) : "—"}</td>
+                  <td style={thTarget}>{a[metaKey("min", goal)] != null ? formatNumber(a[metaKey("min", goal)] as number) : "—"}</td>
+                  <td style={thActual} onClick={(e) => e.stopPropagation()}>
+                    {!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && goalHasTargets(goal) && actualEditId === goal.id ? (
+                      <input
+                        autoFocus
+                        aria-label={`Actual for ${goal.name}`}
+                        type="number"
+                        className="actual-inline-input"
+                        defaultValue={a[actualKey(goal)] ?? ""}
+                        onBlur={(e) => { const period = goal.periodType === "quarterly" ? quarterKey : undefined; props.onActual(goal, e.target.value, period); setActualEditId(null); }}
+                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setActualEditId(null); }}
+                      />
+                    ) : (
+                      <span className="actual-value" title={!goalHasTargets(goal) ? "Set a target and minimum first" : undefined} style={!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && !goalHasTargets(goal) ? { color: "var(--text-faint)", fontSize: "11px" } : undefined}>
+                        {a[actualKey(goal)] != null ? formatNumber(a[actualKey(goal)] as number) : ((!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && !goalHasTargets(goal)) ? "no target set" : "—")}
+                      </span>
+                    )}
+                  </td>
+                  <td style={thStatus}>
+                    <span style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "99px", fontWeight: 600, background: goal.active ? "#eef5ec" : "#f0ece6", color: goal.active ? "#1a5c1a" : "#7a7268" }}>
+                      {goal.active ? "Active" : "Inactive"}
+                    </span>
+                  </td>
+                  {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && (
+                    <td style={{ ...thStatus, textAlign: "center" }} className="row-menu-cell" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        className="row-menu-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (menuOpenId === goal.id) {
+                            setMenuOpenId(null);
+                            setMenuPos(null);
+                          } else {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                            setMenuOpenId(goal.id);
+                          }
+                        }}
+                      >⋮</button>
+                    </td>
+                  )}
+                  {(effectiveReadonly || (!props.isAdmin && goal.goalTier === "company")) && <td style={thStatus} />}
+                </tr>
+                {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && props.editingGoal?.id === goal.id && (
+                  <tr className="goal-editor-row">
+                    <td colSpan={12}>
+                      <GoalEditor goal={props.editingGoal} actuals={mergedActuals} isAdmin={props.isAdmin} allowedDepartments={props.allowedDepartments} onCancel={() => props.onEdit(null)} onSave={props.onSave} onSaveTargetPair={handleSaveTargetPair} />
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
+                );
+              })}
+              {quarterlyGoals.length > 0 && (
+                <tr>
+                  <td colSpan={12} style={{ background: "var(--surface2)", padding: "6px 10px", fontSize: "10px", fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.5px", fontFamily: "var(--mono)", textTransform: "uppercase", borderTop: "2px solid var(--border)" }}>
+                    Quarterly Goals — {quarterRangeLabel(props.month)}
                   </td>
                 </tr>
-              ))}
+              )}
+              {quarterlyGoals.map((goal) => {
+                const a = quarterActuals;
+                return (
+                <React.Fragment key={goal.id}>
+                <tr style={!goal.active ? { opacity: 0.45 } : undefined}>
+                  <td style={thCtx}><TierBadge tier={goal.goalTier} /></td>
+                  <td style={{ ...thCtx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{locLabel(goal.location)}</td>
+                  <td style={{ ...thCtx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{goal.department || "—"}</td>
+                  <td style={{ ...thGoal, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+                    {goal.name}{goal.goalTier === "individual" && goal.role && <span style={{ fontSize: "9px", padding: "1px 5px", borderRadius: "99px", background: "#e9e9e9", color: "#555", fontWeight: 600, fontFamily: "var(--mono)", whiteSpace: "nowrap", marginLeft: "4px" }}>{goal.role}</span>}
+                  </td>
+                  <td style={{ ...thGoal, textAlign: "center" }}><span style={{ fontSize: "9px", fontWeight: 700, fontFamily: "var(--mono)", color: "#7a4400", background: "#fdf0e0", padding: "1px 4px", borderRadius: "3px" }}>Q</span></td>
+                  <td style={thGoal}>{goal.lowerBetter ? "Yes" : "No"}</td>
+                  <td style={thGoal}>{cappedLabel(goal)}</td>
+                  <td style={thTarget}>{a[metaKey("target", goal)] != null ? formatNumber(a[metaKey("target", goal)] as number) : "—"}</td>
+                  <td style={thTarget}>{a[metaKey("min", goal)] != null ? formatNumber(a[metaKey("min", goal)] as number) : "—"}</td>
+                  <td style={thActual} onClick={(e) => e.stopPropagation()}>
+                    {!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && goalHasTargets(goal) && actualEditId === goal.id ? (
+                      <input
+                        autoFocus
+                        aria-label={`Actual for ${goal.name}`}
+                        type="number"
+                        className="actual-inline-input"
+                        defaultValue={a[actualKey(goal)] ?? ""}
+                        onBlur={(e) => { const period = goal.periodType === "quarterly" ? quarterKey : undefined; props.onActual(goal, e.target.value, period); setActualEditId(null); }}
+                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setActualEditId(null); }}
+                      />
+                    ) : (
+                      <span className="actual-value" title={!goalHasTargets(goal) ? "Set a target and minimum first" : undefined} style={!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && !goalHasTargets(goal) ? { color: "var(--text-faint)", fontSize: "11px" } : undefined}>
+                        {a[actualKey(goal)] != null ? formatNumber(a[actualKey(goal)] as number) : ((!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && !goalHasTargets(goal)) ? "no target set" : "—")}
+                      </span>
+                    )}
+                  </td>
+                  <td style={thStatus}>
+                    <span style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "99px", fontWeight: 600, background: goal.active ? "#eef5ec" : "#f0ece6", color: goal.active ? "#1a5c1a" : "#7a7268" }}>
+                      {goal.active ? "Active" : "Inactive"}
+                    </span>
+                  </td>
+                  {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && (
+                    <td style={{ ...thStatus, textAlign: "center" }} className="row-menu-cell" onClick={(e) => e.stopPropagation()}>
+                      <button
+                        className="row-menu-btn"
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          if (menuOpenId === goal.id) {
+                            setMenuOpenId(null);
+                            setMenuPos(null);
+                          } else {
+                            const rect = e.currentTarget.getBoundingClientRect();
+                            setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                            setMenuOpenId(goal.id);
+                          }
+                        }}
+                      >⋮</button>
+                    </td>
+                  )}
+                  {(effectiveReadonly || (!props.isAdmin && goal.goalTier === "company")) && <td style={thStatus} />}
+                </tr>
+                {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && props.editingGoal?.id === goal.id && (
+                  <tr className="goal-editor-row">
+                    <td colSpan={12}>
+                      <GoalEditor goal={props.editingGoal} actuals={mergedActuals} isAdmin={props.isAdmin} allowedDepartments={props.allowedDepartments} onCancel={() => props.onEdit(null)} onSave={props.onSave} onSaveTargetPair={handleSaveTargetPair} />
+                    </td>
+                  </tr>
+                )}
+                </React.Fragment>
+                );
+              })}
+              {!effectiveReadonly && props.editingGoal && !props.goals.find((g) => g.id === props.editingGoal!.id) && (
+                <tr className="goal-editor-row">
+                  <td colSpan={12}>
+                    <GoalEditor goal={props.editingGoal} actuals={mergedActuals} isAdmin={props.isAdmin} allowedDepartments={props.allowedDepartments} onCancel={() => props.onEdit(null)} onSave={props.onSave} onSaveTargetPair={handleSaveTargetPair} />
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </div>
         {!props.goals.length && <div className="no-goals-msg" style={{ display: "block" }}>No goals match the current filter</div>}
-        <button className="add-goal-btn" onClick={() => props.onEdit({ ...emptyGoal, id: `goal-${Date.now()}` })}>+ Add Goal to Bank</button>
+        {!effectiveReadonly && (
+          <div style={{ padding: "12px 16px" }}>
+            <button className="add-goal-btn" onClick={() => props.onEdit({ ...emptyGoal, id: `goal-${Date.now()}` })}>+ Add Goal to Bank</button>
+          </div>
+        )}
       </section>
-      {props.editingGoal && <GoalEditor goal={props.editingGoal} onCancel={() => props.onEdit(null)} onSave={props.onSave} />}
+      {menuOpenId && menuPos && (() => {
+        const goal = props.goals.find((g) => g.id === menuOpenId);
+        if (!goal) return null;
+        return (
+          <div
+            className="row-menu"
+            style={{ position: "fixed", top: menuPos.top, right: menuPos.right, zIndex: 1000 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && <button onClick={() => { props.onEdit(goal); setMenuOpenId(null); setMenuPos(null); }}>Edit goal</button>}
+            {!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && goalHasTargets(goal) && <button onClick={() => { setActualEditId(goal.id); setMenuOpenId(null); setMenuPos(null); }}>Enter actual</button>}
+            {!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && !goalHasTargets(goal) && <span style={{ display: "block", padding: "8px 12px", fontSize: "12px", color: "var(--text-faint)" }}>Set target first</span>}
+            {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && <button onClick={() => { props.onToggle(goal.id); setMenuOpenId(null); setMenuPos(null); }}>{goal.active ? "Deactivate" : "Activate"}</button>}
+            {(!props.isAdmin && goal.goalTier === "company") && <span style={{ display: "block", padding: "8px 12px", fontSize: "12px", color: "var(--text-faint)" }}>No edits allowed</span>}
+          </div>
+        );
+      })()}
     </div>
   );
 }
 
-function GoalEditor({ goal, onSave, onCancel }: { goal: Goal; onSave: (goal: Goal) => void; onCancel: () => void }) {
-  const [draft, setDraft] = useState(goal);
-  const roles = draft.department ? rolesByDepartment[draft.department] || [] : [];
+function MultiSelectDropdown({ label, options, selected, onChange, emptyLabel }: {
+  label: string;
+  options: { value: string; label: string }[];
+  selected: string[];
+  onChange: (values: string[]) => void;
+  emptyLabel?: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    function close(e: MouseEvent) {
+      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+    }
+    document.addEventListener("mousedown", close);
+    return () => document.removeEventListener("mousedown", close);
+  }, []);
+
+  const allChecked = selected.length === options.length;
+  const noneChecked = selected.length === 0;
+
+  let displayLabel = label;
+  if (noneChecked) displayLabel = emptyLabel ?? "None";
+  else if (!allChecked) displayLabel = selected.length === 1 ? (options.find((o) => o.value === selected[0])?.label ?? label) : `${selected.length} selected`;
+
+  function toggleAll() {
+    onChange(allChecked ? [] : options.map((o) => o.value));
+  }
+
+  function toggleOne(value: string) {
+    const next = selected.includes(value)
+      ? selected.filter((v) => v !== value)
+      : [...selected, value];
+    onChange(next);
+  }
+
   return (
-    <section className="modal-section">
-      <div className="section-title">{goal.name ? "Edit Goal" : "Add Goal"}</div>
-      <div className="fields-grid">
-        <div className="field"><label>Type</label><select value={draft.goalTier} onChange={(event) => setDraft({ ...draft, goalTier: event.target.value as GoalTier })}><option value="company">Company</option><option value="department">Department</option><option value="individual">Individual</option></select></div>
-        <div className="field"><label>Location</label><select value={draft.location || ""} onChange={(event) => setDraft({ ...draft, location: event.target.value })}><option value="">All</option><option>Utah</option><option>Georgia</option><option>Remote</option></select></div>
-        <div className="field"><label>Department</label><select value={draft.department || ""} onChange={(event) => setDraft({ ...draft, department: event.target.value, role: "" })}><option value="">All</option>{departments.map((department) => <option key={department}>{department}</option>)}</select></div>
-        <div className="field"><label>Role</label><select value={draft.role || ""} onChange={(event) => setDraft({ ...draft, role: event.target.value })}><option value="">All</option>{roles.map((role) => <option key={role}>{role}</option>)}</select></div>
-        <div className="field half"><label>Goal Name</label><input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></div>
-        <div className="field"><label>Target</label><input type="number" value={draft.goalValue} onChange={(event) => setDraft({ ...draft, goalValue: Number(event.target.value) })} /></div>
-        <div className="field"><label>Minimum</label><input type="number" value={draft.minValue} onChange={(event) => setDraft({ ...draft, minValue: Number(event.target.value) })} /></div>
-        <div className="field"><label>Lower is Better</label><select value={String(draft.lowerBetter)} onChange={(event) => setDraft({ ...draft, lowerBetter: event.target.value === "true" })}><option value="false">No</option><option value="true">Yes</option></select></div>
-        <div className="field"><label>Capped</label><select value={draft.capped} onChange={(event) => setDraft({ ...draft, capped: event.target.value as "yes" | "no" })}><option value="no">No</option><option value="yes">Yes</option></select></div>
-        <div className="field"><label>Cap %</label><input type="number" value={draft.capPct} onChange={(event) => setDraft({ ...draft, capPct: Number(event.target.value) })} /></div>
+    <div ref={ref} className={`multi-select-dropdown${open ? " open" : ""}`} onClick={(e) => e.stopPropagation()}>
+      <div className="multi-select-trigger" onClick={() => setOpen(!open)}>
+        <span>{displayLabel}</span>
+        <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>&#9660;</span>
       </div>
+      <div className="multi-select-menu">
+        <label className="multi-select-item" style={{ borderBottom: "1px solid var(--border)", marginBottom: "4px", paddingBottom: "6px" }}>
+          <input type="checkbox" checked={allChecked} onChange={toggleAll} style={{ accentColor: "var(--brick)" }} />
+          <em>{label}</em>
+        </label>
+        {options.map((opt) => (
+          <label key={opt.value} className="multi-select-item">
+            <input type="checkbox" value={opt.value} checked={selected.includes(opt.value)} onChange={() => toggleOne(opt.value)} style={{ accentColor: "var(--brick)" }} />
+            {opt.label}
+          </label>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+const tierColors: Record<string, { bg: string; color: string }> = {
+  company: { bg: "#f5e6d3", color: "#7a3010" },
+  department: { bg: "#d6e8d6", color: "#1a5c1a" },
+  individual: { bg: "#d3e4f5", color: "#0a3d6b" }
+};
+
+function TierBadge({ tier }: { tier: string }) {
+  const c = tierColors[tier] || { bg: "#eee", color: "#333" };
+  const label = tier === "individual" ? "Indiv" : tier === "department" ? "Dept" : "Co";
+  return <span style={{ fontSize: "9px", padding: "1px 5px", borderRadius: "99px", background: c.bg, color: c.color, fontWeight: 700, fontFamily: "var(--mono)", whiteSpace: "nowrap" }}>{label}</span>;
+}
+
+function GoalScopeTags({ location, department }: { location?: string; department?: string }) {
+  if (!location && !department) return null;
+  const tagStyle: React.CSSProperties = { fontSize: "9px", padding: "1px 5px", borderRadius: "99px", background: "#e9e9e9", color: "#555", fontWeight: 600, fontFamily: "var(--mono)", whiteSpace: "nowrap", marginLeft: "4px" };
+  return (
+    <>
+      {location && <span style={tagStyle}>{location}</span>}
+      {department && <span style={tagStyle}>{department}</span>}
+    </>
+  );
+}
+
+function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, onSave, onSaveTargetPair, onCancel }: { goal: Goal; actuals: ActualsByKey; isAdmin?: boolean; allowedDepartments?: string[]; onSave: (goal: Goal) => void; onSaveTargetPair: (goal: Goal, target: string, min: string) => void; onCancel: () => void }) {
+  const isNew = goal.name === "";
+  const [draft, setDraft] = useState(goal);
+  const [target, setTarget] = useState(actuals[metaKey("target", goal)] != null ? String(actuals[metaKey("target", goal)]) : String(goal.goalValue || ""));
+  const [min, setMin] = useState(actuals[metaKey("min", goal)] != null ? String(actuals[metaKey("min", goal)]) : String(goal.minValue || ""));
+
+  // Required fields that must be explicitly chosen — blank ("" or "__unset__") on new goals
+  const [tierVal, setTierVal] = useState<string>(isNew ? "" : goal.goalTier);
+  const [locVal, setLocVal] = useState<string>(isNew ? "__unset__" : (goal.location ?? ""));
+  const [deptVal, setDeptVal] = useState<string>(isNew ? "__unset__" : (goal.department ?? ""));
+  const [roleVal, setRoleVal] = useState<string>(isNew ? "__unset__" : (goal.role ?? ""));
+  const [lowerVal, setLowerVal] = useState<string>(isNew ? "" : String(goal.lowerBetter));
+  const [cappedVal, setCappedVal] = useState<string>(isNew ? "" : goal.capped);
+  const [periodVal, setPeriodVal] = useState<string>(isNew ? "" : (goal.periodType || "monthly"));
+
+  const visibleDepartments = allowedDepartments?.length ? allowedDepartments : departments;
+  const roles = (deptVal && deptVal !== "__unset__") ? (rolesByDepartment[deptVal] || []) : [];
+
+  const isIndividual = tierVal === "individual";
+
+  const missing: string[] = [];
+  if (!draft.name.trim()) missing.push("Goal Name");
+  if (!tierVal) missing.push("Type");
+  if (locVal === "__unset__") missing.push("Location");
+  if (deptVal === "__unset__") missing.push("Department");
+  if (isIndividual && roleVal === "__unset__") missing.push("Role");
+  if (!lowerVal) missing.push("Lower is Better");
+  if (!cappedVal) missing.push("Capped");
+  if (!periodVal) missing.push("Period Type");
+  const canSave = missing.length === 0;
+
+  function handleSave() {
+    if (!canSave) return;
+    const finalGoal: Goal = {
+      ...draft,
+      goalTier: tierVal as GoalTier,
+      location: locVal === "" ? undefined : locVal,
+      department: deptVal === "" ? undefined : deptVal,
+      role: roleVal === "" ? undefined : roleVal,
+      lowerBetter: lowerVal === "true",
+      capped: cappedVal as "yes" | "no",
+      periodType: periodVal as "monthly" | "quarterly",
+    };
+    onSave(finalGoal);
+    onSaveTargetPair(finalGoal, target, min);
+  }
+
+  const reqStyle: React.CSSProperties = { color: "var(--brick)", marginLeft: 2 };
+
+  return (
+    <div className="goal-editor-inline">
+      <div className="section-title" style={{ marginBottom: 12 }}>{goal.name ? "Edit Goal" : "Add Goal"}</div>
+      <div className="fields-grid">
+        <div className="field">
+          <label>Type<span style={reqStyle}>*</span></label>
+          <select value={tierVal} onChange={(e) => { setTierVal(e.target.value); if (e.target.value !== "individual") setRoleVal(""); }} style={!tierVal ? { color: "var(--text-muted)" } : undefined}>
+            <option value="" disabled hidden>— select —</option>
+            {isAdmin && <option value="company">Company</option>}
+            <option value="department">Department</option>
+            <option value="individual">Individual</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>Location<span style={reqStyle}>*</span></label>
+          <select value={locVal} onChange={(e) => setLocVal(e.target.value)} style={locVal === "__unset__" ? { color: "var(--text-muted)" } : undefined}>
+            <option value="__unset__" disabled hidden>— select —</option>
+            <option value="">All locations</option>
+            <option>Utah</option>
+            <option>Georgia</option>
+            <option>Remote</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>Department<span style={reqStyle}>*</span></label>
+          <select value={deptVal} onChange={(e) => { setDeptVal(e.target.value); setRoleVal("__unset__"); }} style={deptVal === "__unset__" ? { color: "var(--text-muted)" } : undefined}>
+            <option value="__unset__" disabled hidden>— select —</option>
+            {isAdmin && <option value="">All departments</option>}
+            {visibleDepartments.map((d) => <option key={d}>{d}</option>)}
+          </select>
+        </div>
+        {isIndividual && (
+          <div className="field">
+            <label>Role<span style={reqStyle}>*</span></label>
+            <select value={roleVal} onChange={(e) => setRoleVal(e.target.value)} style={roleVal === "__unset__" ? { color: "var(--text-muted)" } : undefined}>
+              <option value="__unset__" disabled hidden>— select —</option>
+              <option value="">All roles</option>
+              {roles.map((r) => <option key={r}>{r}</option>)}
+            </select>
+          </div>
+        )}
+        <div className="field half"><label>Goal Name<span style={reqStyle}>*</span></label><input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Monthly Revenue" /></div>
+        <div className="field"><label>Target</label><input type="number" value={target} onChange={(e) => setTarget(e.target.value)} /></div>
+        <div className="field"><label>Minimum</label><input type="number" value={min} onChange={(e) => setMin(e.target.value)} /></div>
+        <div className="field">
+          <label>Lower is Better<span style={reqStyle}>*</span></label>
+          <select value={lowerVal} onChange={(e) => setLowerVal(e.target.value)} style={!lowerVal ? { color: "var(--text-muted)" } : undefined}>
+            <option value="" disabled hidden>— select —</option>
+            <option value="false">No</option>
+            <option value="true">Yes</option>
+          </select>
+        </div>
+        <div className="field">
+          <label>Capped<span style={reqStyle}>*</span></label>
+          <select value={cappedVal} onChange={(e) => setCappedVal(e.target.value)} style={!cappedVal ? { color: "var(--text-muted)" } : undefined}>
+            <option value="" disabled hidden>— select —</option>
+            <option value="no">No</option>
+            <option value="yes">Yes</option>
+          </select>
+        </div>
+        {cappedVal === "yes" && (
+          <div className="field"><label>Cap %</label><input type="number" value={draft.capPct} onChange={(e) => setDraft({ ...draft, capPct: Number(e.target.value) })} /></div>
+        )}
+        <div className="field">
+          <label>Period Type<span style={reqStyle}>*</span></label>
+          <select value={periodVal} onChange={(e) => setPeriodVal(e.target.value)} style={!periodVal ? { color: "var(--text-muted)" } : undefined}>
+            <option value="" disabled hidden>— select —</option>
+            <option value="monthly">Monthly</option>
+            <option value="quarterly">Quarterly</option>
+          </select>
+        </div>
+      </div>
+      {!canSave && missing.length > 0 && (
+        <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: 8, fontFamily: "var(--sans)" }}>
+          Required: {missing.join(", ")}
+        </div>
+      )}
       <div className="button-row">
-        <button className="submit-btn" onClick={() => onSave(draft)} disabled={!draft.name}>Save Goal</button>
+        <button className="submit-btn" onClick={handleSave} disabled={!canSave} title={!canSave ? `Complete required fields: ${missing.join(", ")}` : undefined}>Save Goal</button>
         <button onClick={onCancel}>Cancel</button>
       </div>
-    </section>
+    </div>
   );
 }
 
 function ScorecardsScreen(props: {
-  month: string;
-  dept: string;
+  selectedMonths: string[];
+  months: string[];
   profile: ManagerProfile | null;
-  employees: Employee[];
+  rippling: Record<string, Employee[]>;
+  allEmployees: Employee[];
   scorecards: Scorecard[];
-  selectedEmployeeId: string;
-  selectedEmployee: Employee | null;
-  goals: EditableGoal[];
-  preview: Scorecard | null;
-  onMonth: (value: string) => void;
-  onDept: (value: string) => void;
-  onEmployee: (value: string) => void;
-  onGoals: (goals: EditableGoal[]) => void;
-  onSubmit: () => void;
+  allGoals: Goal[];
+  allActuals: Record<string, ActualsByKey>;
+  onMonths: (months: string[]) => void;
+  onSubmitScorecard: (scorecard: Scorecard) => void;
   onDeleteGoal: (value: { scorecardId: string; goalName: string }) => void;
+  currentUserEmail: string;
 }) {
-  const employees = scopedForProfile(props.employees, props.profile).filter((employee) => !props.dept || employee.department === props.dept);
-  const scorecards = props.scorecards.filter((scorecard) => (!props.dept || scorecard.department === props.dept) && scorecard.scorecardMonth === props.month);
-  const totalWeight = props.goals.reduce((sum, goal) => sum + Number(goal.scWeight || 0), 0);
+  const [filterEmployees, setFilterEmployees] = useState<string[]>([]);
+  const [filterDepts, setFilterDepts] = useState<string[]>([]);
+  const [filterLocations, setFilterLocations] = useState<string[]>([]);
+  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+
+  // Single-month mode = exactly one month selected → live draft cards
+  // Multi/all mode = 0 or 2+ months → live draft cards per month, grouped by month
+  const singleMonthMode = props.selectedMonths.length === 1;
+  const selectedMonth = singleMonthMode ? props.selectedMonths[0] : "";
+  const periodLabel = formatMonthLabel(selectedMonth);
+
+  // Deduplicated latest employees — fallback when selected month has no Rippling upload
+  const latestEmployees = useMemo(() => {
+    const periods = Object.keys(props.rippling).sort().reverse();
+    const seen = new Set<string>();
+    const result: Employee[] = [];
+    for (const period of periods) {
+      for (const emp of props.rippling[period] || []) {
+        if (!seen.has(emp.name)) { seen.add(emp.name); result.push(emp); }
+      }
+    }
+    return result;
+  }, [props.rippling]);
+
+  // Use selected month's data if available, otherwise fall back to latest employees
+  const monthRaw = singleMonthMode ? (props.rippling[selectedMonth] || []) : [];
+  const monthEmployees = monthRaw.length > 0 ? monthRaw : (singleMonthMode ? latestEmployees : []);
+  const teamEmployees = scopedEmployeesForProfile(monthEmployees, props.profile, props.allEmployees);
+
+  const earningsPeriodKey = (() => {
+    if (!selectedMonth) return "";
+    const [y, m] = selectedMonth.split("-").map(Number);
+    if (!y || !m) return "";
+    return `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}`;
+  })();
+  const earningsUpload = props.rippling[earningsPeriodKey] || [];
+  function withActualEarnings(emp: Employee): Employee {
+    const src = earningsUpload.find((e) => e.name === emp.name);
+    return { ...emp, grossEarnings: src?.grossEarnings, hoursWorked: src?.hoursWorked };
+  }
+  const periodActuals = {
+    ...(props.allActuals[periodLabel] || {}),
+    ...(props.allActuals[quarterKeyForMonth(selectedMonth)] || {}),
+  };
+
+  // Latest employees scoped to profile — used for multi-month mode filters
+  const multiMonthTeam = scopedEmployeesForProfile(latestEmployees, props.profile, props.allEmployees);
+
+  // Filter options from team employees (single) or latest scoped team (multi/all)
+  const teamDepts = singleMonthMode
+    ? Array.from(new Set(teamEmployees.map((e) => e.department).filter(Boolean))).sort()
+    : Array.from(new Set(multiMonthTeam.map((e) => e.department).filter(Boolean))).sort();
+  const teamLocations = singleMonthMode
+    ? Array.from(new Set(teamEmployees.map((e) => e.location).filter(Boolean))).sort()
+    : Array.from(new Set(multiMonthTeam.map((e) => e.location).filter(Boolean))).sort();
+  const showDeptFilter = teamDepts.length > 1;
+  const showLocationFilter = teamLocations.length > 1;
+
+  function goalsForEmployee(employee: Employee): Goal[] {
+    return props.allGoals.filter((goal) => {
+      if (goal.goalTier === "company") return true;
+      if (goal.goalTier === "department") return goal.department === employee.department && (!goal.location || goal.location === employee.location);
+      return goal.role === employee.role && goal.department === employee.department && (!goal.location || goal.location === employee.location);
+    });
+  }
+
+  const sortedTeam = [...teamEmployees].sort((a, b) => a.name.localeCompare(b.name));
+  const filteredEmployees = sortedTeam.filter((e) =>
+    (filterEmployees.length === 0 || filterEmployees.includes(e.name)) &&
+    (filterDepts.length === 0 || filterDepts.includes(e.department)) &&
+    (filterLocations.length === 0 || filterLocations.includes(e.location))
+  );
+  const noRippling = singleMonthMode && latestEmployees.length === 0;
+
+  const employeeOptions = singleMonthMode
+    ? sortedTeam.filter((e) =>
+        (filterLocations.length === 0 || filterLocations.includes(e.location)) &&
+        (filterDepts.length === 0 || filterDepts.includes(e.department))
+      ).map((e) => e.name)
+    : [...multiMonthTeam]
+        .filter((e) =>
+          (filterDepts.length === 0 || filterDepts.includes(e.department)) &&
+          (filterLocations.length === 0 || filterLocations.includes(e.location))
+        )
+        .sort((a, b) => a.name.localeCompare(b.name))
+        .map((e) => e.name);
+
+  // Limit month picker to 12 months back through 3 months forward
+  const relevantMonths = (() => {
+    const now = new Date();
+    const cur = now.getFullYear() * 12 + now.getMonth(); // months since year 0
+    return props.months.filter((m) => {
+      if (!/^\d{4}-\d{2}$/.test(m)) return false;
+      const [y, mo] = m.split("-").map(Number);
+      const val = y * 12 + (mo - 1);
+      return val >= cur - 12 && val <= cur + 3;
+    });
+  })();
+
+  // Display months for multi-month mode:
+  //   "All months" (0 selected) → only months with rippling data or submitted scorecards (avoid showing 36 empty months)
+  //   Specific months selected → exactly those months, descending
+  const displayMonths = !singleMonthMode
+    ? (props.selectedMonths.length === 0
+        ? props.months.filter((m) =>
+            /^\d{4}-\d{2}$/.test(m) &&
+            ((props.rippling[m]?.length ?? 0) > 0 || props.scorecards.some((sc) => sc.scorecardMonth === formatMonthLabel(m)))
+          )
+        : [...props.selectedMonths].sort().reverse()
+      )
+    : [];
+
+  const monthPickerLabel = props.selectedMonths.length === 0
+    ? "All months"
+    : props.selectedMonths.length === 1
+    ? formatMonthLabel(props.selectedMonths[0])
+    : `${props.selectedMonths.length} months selected`;
+
+  const filterStyle: React.CSSProperties = { display: "block", padding: "7px 10px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", fontFamily: "var(--sans)", fontSize: "12px", background: "var(--surface)" };
+  const filterLabelStyle: React.CSSProperties = { fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.5px", fontFamily: "var(--mono)", marginBottom: "4px" };
+
   return (
-    <div className="screen active">
-      <section>
-        <div className="toolbar-row">
-          <div className="section-title">Team Scorecards</div>
-          <input type="month" value={props.month.startsWith("Q") ? currentMonthValue() : props.month.includes("-") ? props.month : fixtureMonth} onChange={(event) => props.onMonth(formatMonthLabel(event.target.value))} />
-          <select value={props.dept} onChange={(event) => props.onDept(event.target.value)}>
-            <option value="">All departments</option>
-            {departments.map((department) => <option key={department}>{department}</option>)}
-          </select>
+    <div className="screen active" onClick={() => setMonthPickerOpen(false)}>
+      <section style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
+        <div style={{ display: "flex", alignItems: "flex-end", gap: "12px", flexWrap: "wrap" }}>
+          {/* Month multi-select */}
+          <div onClick={(e) => e.stopPropagation()}>
+            <div style={filterLabelStyle}>MONTH</div>
+            <div style={{ position: "relative" }}>
+              <button
+                style={{ ...filterStyle, cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", minWidth: 180 }}
+                onClick={() => setMonthPickerOpen(!monthPickerOpen)}
+              >
+                <span style={{ flex: 1, textAlign: "left" }}>{monthPickerLabel}</span>
+                <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>▾</span>
+              </button>
+              {monthPickerOpen && (
+                <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, background: "var(--surface)", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 200, minWidth: "200px", maxHeight: "300px", overflowY: "auto" }}>
+                  <button
+                    style={{ display: "block", width: "100%", padding: "8px 14px", border: "none", borderBottom: "1px solid var(--border)", background: props.selectedMonths.length === 0 ? "var(--surface2)" : "none", textAlign: "left", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "12px", fontWeight: 600, color: "var(--text)" }}
+                    onClick={() => { props.onMonths([]); setFilterEmployees([]); setMonthPickerOpen(false); }}
+                  >All months</button>
+                  {relevantMonths.map((m) => (
+                    <label key={m} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "7px 14px", cursor: "pointer", fontSize: "12px", fontFamily: "var(--sans)", color: "var(--text)", whiteSpace: "nowrap", userSelect: "none" }}>
+                      <input
+                        type="checkbox"
+                        checked={props.selectedMonths.includes(m)}
+                        onChange={(e) => {
+                          const next = e.target.checked
+                            ? [...props.selectedMonths, m].sort().reverse()
+                            : props.selectedMonths.filter((x) => x !== m);
+                          props.onMonths(next);
+                          setFilterEmployees([]);
+                        }}
+                        style={{ cursor: "pointer", accentColor: "var(--brick)", width: 14, height: 14, flexShrink: 0, margin: 0 }}
+                      />
+                      <span>{formatMonthLabel(m)}</span>
+                    </label>
+                  ))}
+                </div>
+              )}
+            </div>
+          </div>
+
+          {showLocationFilter && (
+            <div>
+              <div style={filterLabelStyle}>LOCATION</div>
+              <MultiSelectDropdown
+                label="All locations"
+                emptyLabel="All locations"
+                options={teamLocations.map((l) => ({ value: l, label: l }))}
+                selected={filterLocations}
+                onChange={(v) => { setFilterLocations(v); setFilterEmployees([]); }}
+              />
+            </div>
+          )}
+          {showDeptFilter && (
+            <div>
+              <div style={filterLabelStyle}>DEPARTMENT</div>
+              <MultiSelectDropdown
+                label="All departments"
+                emptyLabel="All departments"
+                options={teamDepts.map((d) => ({ value: d, label: d }))}
+                selected={filterDepts}
+                onChange={(v) => { setFilterDepts(v); setFilterEmployees([]); }}
+              />
+            </div>
+          )}
+          <div>
+            <div style={filterLabelStyle}>EMPLOYEE</div>
+            <MultiSelectDropdown
+              label="All employees"
+              emptyLabel="All employees"
+              options={employeeOptions.map((name) => ({ value: name, label: name }))}
+              selected={filterEmployees}
+              onChange={setFilterEmployees}
+            />
+          </div>
         </div>
       </section>
-      <section>
-        <div className="section-title">Build scorecard</div>
-        <div className="fields-grid">
-          <div className="field half">
-            <label>Employee</label>
-            <select aria-label="Employee" value={props.selectedEmployeeId} onChange={(event) => props.onEmployee(event.target.value)}>
-              <option value="">Select employee...</option>
-              {employees.map((employee) => <option key={employee.id} value={employee.id}>{employee.name} - {employee.role}</option>)}
-            </select>
-          </div>
-          {props.selectedEmployee && (
-            <>
-              <div className="field"><label>Location</label><input value={props.selectedEmployee.location} readOnly /></div>
-              <div className="field"><label>Department</label><input value={props.selectedEmployee.department} readOnly /></div>
-              <div className="field"><label>Base Earnings</label><input value={formatCurrency(props.selectedEmployee.grossEarnings || 0)} readOnly /></div>
-            </>
-          )}
-        </div>
-        {props.goals.length > 0 && (
-          <>
-            <div className="weight-bar-wrap">
-              <div className="weight-bar-track"><div className="weight-bar-fill" style={{ width: `${Math.min(totalWeight, 100)}%`, background: Math.abs(totalWeight - 100) < 0.01 ? "var(--sage-dark)" : "var(--brick)" }} /></div>
-              <span className="weight-label">{totalWeight.toFixed(1)}% total</span>
+
+      {singleMonthMode ? (
+        <section>
+          <div style={{ padding: "14px 16px 6px" }}>
+            <div className="section-title" style={{ margin: 0 }}>
+              {filteredEmployees.length} team member{filteredEmployees.length !== 1 ? "s" : ""}
+              <span style={{ fontWeight: 400, color: "var(--text-muted)", marginLeft: 6, fontSize: "12px" }}>
+                {filterEmployees.length === 1
+                  ? filterEmployees[0]
+                  : [
+                      filterLocations.length > 0 && filterLocations.length < teamLocations.length ? filterLocations.join(", ") : "",
+                      filterDepts.length > 0 && filterDepts.length < teamDepts.length ? filterDepts.join(", ") : "",
+                    ].filter(Boolean).join(" · ") || periodLabel}
+              </span>
             </div>
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead><tr><th>Goal</th><th>Type</th><th>Target</th><th>Min</th><th>Actual</th><th>Weight</th><th></th></tr></thead>
+          </div>
+          <div className="scorecard-list" style={{ padding: "8px 16px 16px" }}>
+            {noRippling && (
+              <div className="no-goals-msg" style={{ display: "block" }}>No employee data available. Upload a Rippling CSV first.</div>
+            )}
+            {filteredEmployees.map((emp) => {
+              const submitted = props.scorecards.find((sc) => sc.employeeName === emp.name && sc.scorecardMonth === periodLabel);
+              return (
+                <LiveScorecardCard
+                  key={emp.id || emp.name}
+                  employee={withActualEarnings(emp)}
+                  month={periodLabel}
+                  baseGoals={goalsForEmployee(emp)}
+                  allGoals={props.allGoals}
+                  periodActuals={periodActuals}
+                  submittedScorecard={submitted}
+                  onSubmit={props.onSubmitScorecard}
+                  onDeleteGoal={props.onDeleteGoal}
+                  currentUserEmail={props.currentUserEmail}
+                />
+              );
+            })}
+            {!noRippling && filteredEmployees.length === 0 && (
+              <div className="no-goals-msg" style={{ display: "block" }}>No employees match the current filter.</div>
+            )}
+          </div>
+        </section>
+      ) : (
+        <section>
+          <div style={{ padding: "14px 16px 6px" }}>
+            <div className="section-title" style={{ margin: 0 }}>
+              {displayMonths.length} month{displayMonths.length !== 1 ? "s" : ""}
+              <span style={{ fontWeight: 400, color: "var(--text-muted)", marginLeft: 6, fontSize: "12px" }}>
+                {filterEmployees.length === 1
+                  ? filterEmployees[0]
+                  : [
+                      filterLocations.length > 0 && filterLocations.length < teamLocations.length ? filterLocations.join(", ") : "",
+                      filterDepts.length > 0 && filterDepts.length < teamDepts.length ? filterDepts.join(", ") : "",
+                    ].filter(Boolean).join(" · ") || monthPickerLabel.toLowerCase()}
+              </span>
+            </div>
+          </div>
+          <div className="scorecard-list" style={{ padding: "8px 16px 16px" }}>
+            {displayMonths.length === 0 ? (
+              <div className="no-goals-msg" style={{ display: "block" }}>No data available. Upload a Rippling CSV to get started.</div>
+            ) : displayMonths.map((m) => {
+              const mLabel = formatMonthLabel(m);
+              const mRaw = (props.rippling[m]?.length ?? 0) > 0 ? props.rippling[m] : latestEmployees;
+              const mTeam = scopedEmployeesForProfile(mRaw, props.profile, props.allEmployees);
+              const mFiltered = mTeam
+                .filter((e) =>
+                  (filterEmployees.length === 0 || filterEmployees.includes(e.name)) &&
+                  (filterDepts.length === 0 || filterDepts.includes(e.department)) &&
+                  (filterLocations.length === 0 || filterLocations.includes(e.location))
+                )
+                .sort((a, b) => a.name.localeCompare(b.name));
+              const [my, mm] = m.split("-").map(Number);
+              const earningsKey = my && mm ? `${mm === 12 ? my + 1 : my}-${String(mm === 12 ? 1 : mm + 1).padStart(2, "0")}` : "";
+              const mEarningsUpload = props.rippling[earningsKey] || [];
+              const mActuals = {
+                ...(props.allActuals[mLabel] || {}),
+                ...(props.allActuals[quarterKeyForMonth(m)] || {}),
+              };
+              return (
+                <div key={m}>
+                  <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)", letterSpacing: "0.5px", padding: "10px 0 6px", textTransform: "uppercase" }}>
+                    {mLabel}
+                  </div>
+                  {mFiltered.length === 0 ? (
+                    <div className="no-goals-msg" style={{ display: "block" }}>No employees match the current filter.</div>
+                  ) : mFiltered.map((emp) => {
+                    const src = mEarningsUpload.find((e) => e.name === emp.name);
+                    const empWithEarnings = src ? { ...emp, grossEarnings: src.grossEarnings, hoursWorked: src.hoursWorked } : emp;
+                    const submitted = props.scorecards.find((sc) => sc.employeeName === emp.name && sc.scorecardMonth === mLabel);
+                    return (
+                      <LiveScorecardCard
+                        key={`${m}-${emp.id || emp.name}`}
+                        employee={empWithEarnings}
+                        month={mLabel}
+                        baseGoals={goalsForEmployee(emp)}
+                        allGoals={props.allGoals}
+                        periodActuals={mActuals}
+                        submittedScorecard={submitted}
+                        onSubmit={props.onSubmitScorecard}
+                        onDeleteGoal={props.onDeleteGoal}
+                        currentUserEmail={props.currentUserEmail}
+                      />
+                    );
+                  })}
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+    </div>
+  );
+}
+
+function LiveScorecardCard({
+  employee, month, baseGoals, allGoals, periodActuals, submittedScorecard, onSubmit, onDeleteGoal, currentUserEmail
+}: {
+  employee: Employee;
+  month: string;
+  baseGoals: Goal[];
+  allGoals: Goal[];
+  periodActuals: ActualsByKey;
+  submittedScorecard: Scorecard | undefined;
+  onSubmit: (scorecard: Scorecard) => void;
+  onDeleteGoal: (value: { scorecardId: string; goalName: string }) => void;
+  currentUserEmail: string;
+}) {
+  const [open, setOpen] = useState(false);
+  const [goalIds, setGoalIds] = useState<string[]>(() => baseGoals.map((g) => g.id));
+  const [indActuals, setIndActuals] = useState<Record<string, string>>({});
+  const [addGoalOpen, setAddGoalOpen] = useState(false);
+  const [lastSubmitted, setLastSubmitted] = useState<Scorecard | null>(null);
+
+  const displayedSubmitted = submittedScorecard || lastSubmitted;
+  if (displayedSubmitted) {
+    return <ScorecardCard scorecard={displayedSubmitted} onDeleteGoal={onDeleteGoal} />;
+  }
+
+  const currentGoals: EditableGoal[] = (() => {
+    const goals = goalIds
+      .map((id) => allGoals.find((g) => g.id === id))
+      .filter((g): g is Goal => !!g);
+    const n = goals.length;
+    return goals.map((g, i) => {
+      const equalWeight = n > 0 ? Number((100 / n).toFixed(2)) : 0;
+      const scWeight = i === n - 1 ? Number((100 - equalWeight * (n - 1)).toFixed(2)) : equalWeight;
+      return {
+        ...g,
+        scTarget: periodActuals[metaKey("target", g)] != null ? Number(periodActuals[metaKey("target", g)]) : g.goalValue,
+        scMin: periodActuals[metaKey("min", g)] != null ? Number(periodActuals[metaKey("min", g)]) : g.minValue,
+        scActual: g.goalTier === "individual"
+          ? (indActuals[g.name] !== undefined ? (indActuals[g.name] === "" ? null : Number(indActuals[g.name])) : null)
+          : (periodActuals[actualKey(g)] != null ? Number(periodActuals[actualKey(g)]) : null),
+        scWeight
+      };
+    });
+  })();
+
+  const liveScorecard = buildScorecard({ employee, month, periodType: "monthly", goals: currentGoals, submittedBy: currentUserEmail });
+
+  const hasNoTarget = currentGoals.some((g) => periodActuals[metaKey("target", g)] == null || periodActuals[metaKey("min", g)] == null);
+  const availableToAdd = allGoals.filter((g) => !goalIds.includes(g.id));
+  const achColor = liveScorecard.weightedAchievement >= 100 ? "#2D6B1A" : "var(--brick)";
+
+  const thS: React.CSSProperties = { padding: "6px 10px", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", textAlign: "left", borderBottom: "1.5px solid var(--border)", whiteSpace: "nowrap", background: "var(--surface2)" };
+  const thC: React.CSSProperties = { ...thS, textAlign: "center" };
+
+  return (
+    <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", background: "var(--surface)" }}>
+      <div onClick={() => setOpen(!open)} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "13px 16px", cursor: "pointer" }} className="sc-card-head">
+        <div style={{ fontSize: "12px", color: "var(--text-muted)", transition: "transform 0.2s", flexShrink: 0, transform: open ? "rotate(90deg)" : "none" }}>▶</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>{employee.name}</div>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "1px" }}>
+            {employee.role}{employee.department ? ` · ${employee.department}` : ""}{employee.location ? ` · ${employee.location}` : ""}
+          </div>
+        </div>
+        {currentGoals.length > 0 && (
+          <>
+            <div style={{ textAlign: "right", flexShrink: 0 }}>
+              <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>Achievement</div>
+              <div style={{ fontSize: "17px", fontWeight: 700, color: achColor }}>{liveScorecard.weightedAchievement.toFixed(1)}%</div>
+            </div>
+            <div style={{ textAlign: "right", flexShrink: 0, minWidth: "80px" }}>
+              <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>Est. Bonus</div>
+              <div style={{ fontSize: "17px", fontWeight: 700, color: "var(--brick)" }}>{formatCurrency(liveScorecard.bonusAmount)}</div>
+            </div>
+          </>
+        )}
+        <span style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "99px", background: "#f0ece6", color: "#7a7268", fontWeight: 700, fontFamily: "var(--mono)", flexShrink: 0 }}>DRAFT</span>
+      </div>
+
+      {open && (
+        <>
+          <div style={{ display: "flex", gap: "24px", padding: "10px 16px", background: "var(--surface2)", borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
+            <div>
+              <div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>BASE EARNINGS</div>
+              <div style={{ fontSize: "13px", fontWeight: 700 }}>{formatCurrency(liveScorecard.baseEarnings)}</div>
+            </div>
+            {employee.hoursWorked ? (
+              <div>
+                <div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>HOURS WORKED</div>
+                <div style={{ fontSize: "13px", fontWeight: 700 }}>{employee.hoursWorked.toFixed(2)}</div>
+              </div>
+            ) : null}
+          </div>
+
+          {hasNoTarget && (
+            <div style={{ padding: "8px 16px", background: "#fffbf0", borderTop: "1px solid #f0e0a0", fontSize: "11px", color: "#7a5c00" }}>
+              ⚠ Some goals are missing targets or minimums for {month}. Set them in Goals & Actuals before submitting.
+            </div>
+          )}
+
+          {currentGoals.length > 0 ? (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+                <thead>
+                  <tr>
+                    <th style={thS}>Type</th>
+                    <th style={thS}>Goal</th>
+                    <th style={thC}>Target</th>
+                    <th style={thC}>Min</th>
+                    <th style={thC}>Actual</th>
+                    <th style={thC}>Weight</th>
+                    <th style={thC}>Achieve%</th>
+                    <th style={thC}>Est. Bonus $</th>
+                    <th style={{ ...thC, width: "28px" }}></th>
+                  </tr>
+                </thead>
                 <tbody>
-                  {props.goals.map((goal, index) => (
-                    <tr key={`${goal.id}-${index}`}>
-                      <td>{goal.name}</td>
-                      <td>{goal.goalTier}</td>
-                      <td><input type="number" value={goal.scTarget} onChange={(event) => props.onGoals(props.goals.map((item, i) => i === index ? { ...item, scTarget: Number(event.target.value) } : item))} /></td>
-                      <td><input type="number" value={goal.scMin} onChange={(event) => props.onGoals(props.goals.map((item, i) => i === index ? { ...item, scMin: Number(event.target.value) } : item))} /></td>
-                      <td><input aria-label={`Scorecard actual for ${goal.name}`} type="number" value={goal.scActual ?? ""} onChange={(event) => props.onGoals(props.goals.map((item, i) => i === index ? { ...item, scActual: event.target.value === "" ? null : Number(event.target.value) } : item))} /></td>
-                      <td><input type="number" value={goal.scWeight} onChange={(event) => props.onGoals(props.goals.map((item, i) => i === index ? { ...item, scWeight: Number(event.target.value) } : item))} /></td>
-                      <td><button onClick={() => props.onGoals(props.goals.filter((_, i) => i !== index))}>Remove</button></td>
-                    </tr>
-                  ))}
+                  {currentGoals.map((goal) => {
+                    const sc = liveScorecard.goals.find((g) => g.name === goal.name);
+                    const noTarget = periodActuals[metaKey("target", goal)] == null || periodActuals[metaKey("min", goal)] == null;
+                    const isInd = goal.goalTier === "individual";
+                    return (
+                      <tr key={goal.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                        <td style={{ padding: "6px 10px" }}><TierBadge tier={goal.goalTier} /></td>
+                        <td style={{ padding: "6px 10px", fontWeight: 600, minWidth: "140px" }}>
+                          {goal.name}<GoalScopeTags location={goal.location} department={goal.department} />
+                        </td>
+                        <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>
+                          {noTarget ? <span style={{ color: "var(--text-faint)", fontSize: "10px" }}>not set</span> : formatNumber(goal.scTarget)}
+                        </td>
+                        <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>
+                          {noTarget ? <span style={{ color: "var(--text-faint)", fontSize: "10px" }}>not set</span> : formatNumber(goal.scMin)}
+                        </td>
+                        <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                          {isInd ? (
+                            <input
+                              aria-label={`Actual for ${goal.name}`}
+                              type="number"
+                              className="actual-inline-input"
+                              value={indActuals[goal.name] ?? ""}
+                              onChange={(e) => setIndActuals((prev) => ({ ...prev, [goal.name]: e.target.value }))}
+                              style={{ width: "68px" }}
+                            />
+                          ) : (
+                            <span style={{ color: goal.scActual == null ? "var(--text-faint)" : undefined }}>
+                              {goal.scActual != null ? formatNumber(goal.scActual) : "—"}
+                            </span>
+                          )}
+                        </td>
+                        <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{goal.scWeight.toFixed(1)}%</td>
+                        <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center", fontWeight: 700 }}>
+                          {sc?.actual != null
+                            ? (sc.metMin
+                              ? <span style={{ color: sc.achievement >= 100 ? "#2D6B1A" : "var(--brick)" }}>{sc.achievement.toFixed(1)}%</span>
+                              : <span style={{ color: "#9B2C2C" }}>Below min</span>)
+                            : <span style={{ color: "var(--text-faint)" }}>—</span>}
+                        </td>
+                        <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{formatCurrency(sc?.bonusContribution ?? 0)}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
+                          <button
+                            className="sc-del-btn"
+                            title="Remove goal"
+                            onClick={(e) => { e.stopPropagation(); setGoalIds((prev) => prev.filter((id) => id !== goal.id)); }}
+                            style={{ border: "none", background: "none", color: "#9B2C2C", fontSize: "14px", cursor: "pointer", padding: 0, lineHeight: 1, opacity: 0.6 }}
+                          >✕</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
-            {props.preview && <ScorecardSummary scorecard={props.preview} />}
-            <button className="submit-btn" onClick={props.onSubmit}>Submit Scorecard</button>
-          </>
-        )}
-      </section>
-      <section>
-        <div className="section-title">Submitted scorecards</div>
-        <div className="scorecard-list">
-          {scorecards.map((scorecard) => <ScorecardCard key={scorecard.id} scorecard={scorecard} onDeleteGoal={props.onDeleteGoal} />)}
-          {!scorecards.length && <div className="no-goals-msg" style={{ display: "block" }}>No scorecards found for this month</div>}
-        </div>
-      </section>
+          ) : (
+            <div className="no-goals-msg" style={{ display: "block", margin: "12px 16px" }}>No goals assigned for this employee and month.</div>
+          )}
+
+          <div style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px", borderTop: "1px solid var(--border)", flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
+            <div style={{ position: "relative" }}>
+              <button
+                style={{ fontSize: "12px", padding: "5px 10px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", background: "none", cursor: "pointer", fontFamily: "var(--sans)" }}
+                onClick={() => setAddGoalOpen(!addGoalOpen)}
+              >+ Add Goal</button>
+              {addGoalOpen && (
+                <div style={{ position: "absolute", bottom: "calc(100% + 4px)", left: 0, background: "var(--surface)", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", boxShadow: "0 4px 12px rgba(0,0,0,0.12)", zIndex: 100, minWidth: "220px", maxHeight: "220px", overflowY: "auto" }}>
+                  {availableToAdd.length === 0 ? (
+                    <div style={{ padding: "10px 12px", fontSize: "11px", color: "var(--text-muted)" }}>No more goals available</div>
+                  ) : availableToAdd.map((g) => (
+                    <button key={g.id}
+                      style={{ display: "block", width: "100%", padding: "7px 12px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "12px" }}
+                      onClick={() => { setGoalIds((prev) => [...prev, g.id]); setAddGoalOpen(false); }}>
+                      {g.name}<GoalScopeTags location={g.location} department={g.department} />
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              className="submit-btn"
+              style={{ marginLeft: "auto", padding: "6px 18px", fontSize: "12px" }}
+              disabled={hasNoTarget || currentGoals.length === 0}
+              title={hasNoTarget ? "Set targets and minimums first" : undefined}
+              onClick={() => {
+                onSubmit(liveScorecard);
+                setLastSubmitted(liveScorecard);
+              }}
+            >
+              Submit Scorecard
+            </button>
+          </div>
+        </>
+      )}
     </div>
   );
 }
@@ -877,30 +1997,129 @@ function Metric({ label, value, highlight }: { label: string; value: string; hig
 
 function ScorecardCard({ scorecard, onDeleteGoal }: { scorecard: Scorecard; onDeleteGoal: (value: { scorecardId: string; goalName: string }) => void }) {
   const [open, setOpen] = useState(false);
+  const achColor = scorecard.weightedAchievement >= 100 ? "#2D6B1A" : "var(--brick)";
+  const effectiveHourly = scorecard.hours && scorecard.hours > 0
+    ? ((scorecard.baseEarnings + scorecard.bonusAmount) / scorecard.hours).toFixed(2)
+    : null;
+  const weight = scorecard.goals.length ? (100 / scorecard.goals.length).toFixed(1) : "0";
+  const thS: React.CSSProperties = { padding: "6px 10px", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", textAlign: "left", borderBottom: "1.5px solid var(--border)", whiteSpace: "nowrap", background: "var(--surface2)" };
+  const thC: React.CSSProperties = { ...thS, textAlign: "center" };
   return (
-    <div className="scorecard-card">
-      <button data-testid={`scorecard-card-${scorecard.id}`} className="scorecard-card-head" onClick={() => setOpen(!open)}>
-        <strong>{scorecard.employeeName}</strong>
-        <span>{scorecard.department} - {scorecard.scorecardMonth} - {formatCurrency(scorecard.bonusAmount)}</span>
-      </button>
+    <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", background: "var(--surface)" }}>
+      <div
+        data-testid={`scorecard-card-${scorecard.id}`}
+        onClick={() => setOpen(!open)}
+        style={{ display: "flex", alignItems: "center", gap: "12px", padding: "13px 16px", cursor: "pointer", background: "var(--surface)" }}
+        className="sc-card-head"
+      >
+        <div style={{ fontSize: "12px", color: "var(--text-muted)", transition: "transform 0.2s", flexShrink: 0, transform: open ? "rotate(90deg)" : "none" }}>▶</div>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>{scorecard.employeeName}</div>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "1px" }}>
+            {scorecard.role}{scorecard.department ? ` · ${scorecard.department}` : ""}{scorecard.location ? ` · ${scorecard.location}` : ""}
+          </div>
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0 }}>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>Achievement</div>
+          <div style={{ fontSize: "17px", fontWeight: 700, color: achColor }}>{scorecard.weightedAchievement.toFixed(1)}%{scorecard.scorecardCapped ? " cap" : ""}</div>
+        </div>
+        <div style={{ textAlign: "right", flexShrink: 0, minWidth: "80px" }}>
+          <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>Bonus</div>
+          <div style={{ fontSize: "17px", fontWeight: 700, color: "var(--brick)" }}>{formatCurrency(scorecard.bonusAmount)}</div>
+        </div>
+      </div>
       {open && (
-        <table className="breakdown-table">
-          <thead><tr><th>Goal</th><th>Actual</th><th>Achievement</th><th>Bonus</th><th></th></tr></thead>
-          <tbody>
-            {scorecard.goals.map((goal) => (
-              <tr key={goal.name}>
-                <td>{goal.name}</td>
-                <td>{goal.actual ?? "-"}</td>
-                <td>{goal.metMin ? `${goal.achievement.toFixed(1)}%` : "Below min"}</td>
-                <td>{formatCurrency(goal.bonusContribution)}</td>
-                <td><button onClick={() => onDeleteGoal({ scorecardId: scorecard.id, goalName: goal.name })}>Remove</button></td>
-              </tr>
+        <>
+          <div style={{ display: "flex", gap: "24px", padding: "10px 16px", background: "var(--surface2)", borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
+            {[
+              { label: "MONTHLY EARNINGS", value: formatCurrency(scorecard.baseEarnings) },
+              scorecard.hours ? { label: "HOURS WORKED", value: scorecard.hours.toFixed(2) } : null,
+              scorecard.hourlyRate ? { label: "HOURLY RATE", value: formatCurrency(scorecard.hourlyRate) } : null,
+              effectiveHourly ? { label: "EFFECTIVE HOURLY", value: `$${effectiveHourly}` } : null,
+              { label: "BONUS AMOUNT", value: formatCurrency(scorecard.bonusAmount), color: "var(--brick)" }
+            ].filter(Boolean).map((item) => item && (
+              <div key={item.label}>
+                <div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>{item.label}</div>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: item.color || "var(--text)" }}>{item.value}</div>
+              </div>
             ))}
-          </tbody>
-        </table>
+          </div>
+          <div style={{ overflowX: "auto" }}>
+            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+              <thead>
+                <tr>
+                  <th style={thS}>Type</th>
+                  <th style={thS}>Goal</th>
+                  <th style={thC}>Target</th>
+                  <th style={thC}>Min</th>
+                  <th style={thC}>Weight</th>
+                  <th style={thC}>Actual</th>
+                  <th style={thC}>Achieve%</th>
+                  <th style={thC}>Bonus $</th>
+                  <th style={{ ...thC, width: "28px" }}></th>
+                </tr>
+              </thead>
+              <tbody>
+                {scorecard.goals.map((goal) => (
+                  <tr key={goal.name} className="sc-goal-row" style={{ borderBottom: "1px solid var(--border)" }}>
+                    <td style={{ padding: "6px 10px" }}><TierBadge tier={goal.goalTier} /></td>
+                    <td style={{ padding: "6px 10px", fontWeight: 600, minWidth: "140px" }}>
+                      {goal.name}<GoalScopeTags location={goal.location} department={goal.department} />
+                    </td>
+                    <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{goal.target ?? "—"}</td>
+                    <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{goal.min ?? "—"}</td>
+                    <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{weight}%</td>
+                    <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{goal.actual ?? "—"}</td>
+                    <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center", fontWeight: 700, color: goal.metMin ? (goal.achievement >= 100 ? "#2D6B1A" : "var(--brick)") : "#9B2C2C" }}>
+                      {goal.metMin ? `${goal.achievement.toFixed(1)}%` : <span style={{ color: "#9B2C2C", fontWeight: 700 }}>Below min</span>}
+                    </td>
+                    <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{formatCurrency(goal.bonusContribution)}</td>
+                    <td style={{ padding: "4px 6px", textAlign: "center", width: "28px" }}>
+                      <button className="sc-del-btn" title="Remove goal" onClick={() => onDeleteGoal({ scorecardId: scorecard.id, goalName: goal.name })} style={{ border: "none", background: "none", color: "#9B2C2C", fontSize: "14px", cursor: "pointer", padding: 0, lineHeight: 1, opacity: 0, transition: "opacity 0.15s" }}>✕</button>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </>
       )}
     </div>
   );
+}
+
+const CHART_COLORS = ["#C0392B","#2980B9","#27AE60","#8E44AD","#E67E22","#16A085","#D35400","#1A5276","#7B241C","#1B4F72"];
+
+// Converts "April 2026" → "2026-04" reliably (no Date constructor parsing)
+const MONTH_NAMES = ["January","February","March","April","May","June","July","August","September","October","November","December"];
+function parseMonthLabel(label: string): string {
+  if (!label) return "";
+  if (/^\d{4}-\d{2}$/.test(label)) return label; // already ISO
+  const [name, yearStr] = label.trim().split(" ");
+  const m = MONTH_NAMES.indexOf(name);
+  const y = parseInt(yearStr ?? "");
+  if (m === -1 || isNaN(y)) return "";
+  return `${y}-${String(m + 1).padStart(2, "0")}`;
+}
+
+function shortMonthLabel(iso: string): string {
+  const names = ["Jan","Feb","Mar","Apr","May","Jun","Jul","Aug","Sep","Oct","Nov","Dec"];
+  const [y, m] = iso.split("-").map(Number);
+  if (!y || !m) return iso;
+  return `${names[m - 1]} '${String(y).slice(2)}`;
+}
+
+function niceYTicks(min: number, max: number): number[] {
+  const range = max - min || 1;
+  const rawStep = range / 5;
+  const magnitude = Math.pow(10, Math.floor(Math.log10(rawStep)));
+  const norm = rawStep / magnitude;
+  const step = norm <= 1 ? magnitude : norm <= 2 ? 2 * magnitude : norm <= 5 ? 5 * magnitude : 10 * magnitude;
+  const start = Math.floor(min / step) * step;
+  const end = Math.ceil(max / step) * step;
+  const ticks: number[] = [];
+  for (let t = start; t <= end + step * 0.001; t += step) ticks.push(Math.round(t * 1000) / 1000);
+  return ticks;
 }
 
 function HistoryScreen(props: {
@@ -908,35 +2127,445 @@ function HistoryScreen(props: {
   view: HistoryView;
   scorecards: Scorecard[];
   allScorecards: Scorecard[];
+  readonly?: boolean;
   onFilters: (filters: HistoryFilters) => void;
   onView: (view: HistoryView) => void;
 }) {
-  const goals = Array.from(new Set(props.allScorecards.flatMap((scorecard) => scorecard.goals.map((goal) => goal.name)))).sort();
+  // Report builder local state
+  const [fromMonth, setFromMonth] = useState("");
+  const [toMonth, setToMonth] = useState("");
+  const [selLocation, setSelLocation] = useState("");
+  const [selDept, setSelDept] = useState("");
+  const [selEmployee, setSelEmployee] = useState("");
+  const [metric, setMetric] = useState<"achievement" | "bonus" | "goal">("achievement");
+  const [metricGoal, setMetricGoal] = useState("");
+  const [groupBy, setGroupBy] = useState<"employee" | "department" | "location">("employee");
+
+  // Options derived from all scorecards
+  const allMonthIsos = useMemo(() =>
+    Array.from(new Set(props.allScorecards.map((sc) => parseMonthLabel(sc.scorecardMonth)))).filter(Boolean).sort(),
+    [props.allScorecards]
+  );
+  const allLocations = useMemo(() =>
+    Array.from(new Set(props.allScorecards.map((sc) => sc.location).filter(Boolean))).sort(),
+    [props.allScorecards]
+  );
+  const allDepts = useMemo(() =>
+    Array.from(new Set(props.allScorecards.map((sc) => sc.department).filter(Boolean))).sort(),
+    [props.allScorecards]
+  );
+  const allEmployeeNames = useMemo(() =>
+    Array.from(new Set(props.allScorecards.map((sc) => sc.employeeName))).sort(),
+    [props.allScorecards]
+  );
+  const allGoalNames = useMemo(() =>
+    Array.from(new Set(props.allScorecards.flatMap((sc) => sc.goals.map((g) => g.name)))).sort(),
+    [props.allScorecards]
+  );
+
+  // Filtered scorecards for report views
+  const reportScorecards = useMemo(() =>
+    props.allScorecards.filter((sc) => {
+      const iso = parseMonthLabel(sc.scorecardMonth);
+      if (fromMonth && iso < fromMonth) return false;
+      if (toMonth && iso > toMonth) return false;
+      if (selLocation && sc.location !== selLocation) return false;
+      if (selDept && sc.department !== selDept) return false;
+      if (selEmployee && sc.employeeName !== selEmployee) return false;
+      return true;
+    }),
+    [props.allScorecards, fromMonth, toMonth, selLocation, selDept, selEmployee]
+  );
+
+  const reportMonths = useMemo(() =>
+    Array.from(new Set(reportScorecards.map((sc) => parseMonthLabel(sc.scorecardMonth)))).filter(Boolean).sort(),
+    [reportScorecards]
+  );
+
+  const groupKeys = useMemo(() => {
+    if (groupBy === "employee") return Array.from(new Set(reportScorecards.map((sc) => sc.employeeName))).sort();
+    if (groupBy === "department") return Array.from(new Set(reportScorecards.map((sc) => sc.department).filter(Boolean))).sort();
+    return Array.from(new Set(reportScorecards.map((sc) => sc.location).filter(Boolean))).sort();
+  }, [reportScorecards, groupBy]);
+
+  function getMetricValue(sc: Scorecard): number | null {
+    if (metric === "achievement") return sc.weightedAchievement;
+    if (metric === "bonus") return sc.bonusAmount;
+    if (metric === "goal" && metricGoal) {
+      const g = sc.goals.find((g) => g.name === metricGoal);
+      return g ? g.achievement : null;
+    }
+    return null;
+  }
+
+  function getGroupMonthValue(groupKey: string, isoMonth: string): number | null {
+    const scs = reportScorecards.filter((sc) => {
+      if (parseMonthLabel(sc.scorecardMonth) !== isoMonth) return false;
+      if (groupBy === "employee") return sc.employeeName === groupKey;
+      if (groupBy === "department") return sc.department === groupKey;
+      return sc.location === groupKey;
+    });
+    const vals = scs.map(getMetricValue).filter((v): v is number => v !== null);
+    if (!vals.length) return null;
+    return vals.reduce((a, b) => a + b, 0) / vals.length;
+  }
+
+  const isPercent = metric === "achievement" || metric === "goal";
+  const isCurrency = metric === "bonus";
+  const metricLabel = metric === "achievement" ? "Achievement %" : metric === "bonus" ? "Bonus Amount" : (metricGoal || "Goal Achievement") + " %";
+
+  function formatMetric(v: number | null): string {
+    if (v === null) return "—";
+    if (isPercent) return v.toFixed(1) + "%";
+    if (isCurrency) return formatCurrency(v);
+    return v.toFixed(1);
+  }
+
+  function cellBg(v: number | null): string {
+    if (v === null) return "transparent";
+    if (isPercent) {
+      if (v >= 100) return "rgba(45,107,26,0.13)";
+      if (v >= 80) return "rgba(230,126,34,0.10)";
+      return "rgba(192,57,43,0.08)";
+    }
+    return v > 0 ? "rgba(45,107,26,0.08)" : "transparent";
+  }
+  function cellFg(v: number | null): string {
+    if (v === null) return "var(--text-muted)";
+    if (isPercent) {
+      if (v >= 100) return "#2D6B1A";
+      if (v >= 80) return "#7A4400";
+      return "var(--brick)";
+    }
+    return "var(--text)";
+  }
+
+  const fLabel: React.CSSProperties = { fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.5px", fontFamily: "var(--mono)", marginBottom: "4px" };
+  const fSelect: React.CSSProperties = { display: "block", padding: "7px 10px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", fontFamily: "var(--sans)", fontSize: "12px", background: "var(--surface)" };
+
+  const VIEW_BTNS: { key: HistoryView; label: string }[] = [
+    { key: "table", label: "Table" },
+    { key: "grid", label: "Grid" },
+    { key: "chart", label: "Chart" },
+    { key: "scorecard", label: "Cards" },
+  ];
+
   return (
     <div className="screen active">
-      <section>
-        <div className="section-title">Search scorecards</div>
-        <div className="fields-grid">
-          <div className="field"><label>Period</label><select value={props.filters.period} onChange={(event) => props.onFilters({ ...props.filters, period: event.target.value })}><option value="">All periods</option>{Array.from(new Set(props.allScorecards.map((sc) => sc.scorecardMonth))).map((period) => <option key={period}>{period}</option>)}</select></div>
-          <div className="field"><label>Search</label><input value={props.filters.search} onChange={(event) => props.onFilters({ ...props.filters, search: event.target.value })} placeholder="e.g. Jane Smith, Utah" /></div>
-          <div className="field"><label>Location</label><select value={props.filters.location} onChange={(event) => props.onFilters({ ...props.filters, location: event.target.value })}><option value="">All locations</option><option>Utah</option><option>Georgia</option><option>Remote</option></select></div>
-          <div className="field"><label>Department</label><select value={props.filters.department} onChange={(event) => props.onFilters({ ...props.filters, department: event.target.value })}><option value="">All departments</option>{departments.map((department) => <option key={department}>{department}</option>)}</select></div>
-          <div className="field"><label>Goal</label><select value={props.filters.goal} onChange={(event) => props.onFilters({ ...props.filters, goal: event.target.value })}><option value="">All goals</option>{goals.map((goal) => <option key={goal}>{goal}</option>)}</select></div>
+      {/* View toggle header */}
+      <section style={{ borderBottom: "1px solid var(--border)", paddingBottom: 14 }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+          <div className="section-title" style={{ margin: 0 }}>Historical Data</div>
+          <div style={{ display: "flex", gap: "6px" }}>
+            {VIEW_BTNS.map(({ key, label }) => (
+              <button
+                key={key}
+                data-testid={key === "scorecard" ? "history-scorecard-view" : undefined}
+                onClick={() => props.onView(key)}
+                style={{ padding: "6px 14px", border: `1.5px solid ${props.view === key ? "var(--brick)" : "var(--border)"}`, borderRadius: "var(--radius-sm)", background: props.view === key ? "var(--brick)" : "none", color: props.view === key ? "#fff" : "var(--text-muted)", fontFamily: "var(--sans)", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
+              >{label}</button>
+            ))}
+          </div>
         </div>
       </section>
-      <section>
-        <div className="toolbar-row"><div className="section-title">Results</div><div><button onClick={() => props.onView("spreadsheet")}>Spreadsheet</button><button data-testid="history-scorecard-view" onClick={() => props.onView("scorecard")}>Scorecard</button></div></div>
-        {props.view === "spreadsheet" ? (
-          <div className="table-wrap"><table className="data-table"><thead><tr><th>Employee</th><th>Department</th><th>Location</th><th>Achievement</th><th>Bonus</th></tr></thead><tbody>{props.scorecards.map((scorecard) => <tr key={scorecard.id}><td>{scorecard.employeeName}</td><td>{scorecard.department}</td><td>{scorecard.location}</td><td>{scorecard.weightedAchievement.toFixed(1)}%</td><td>{formatCurrency(scorecard.bonusAmount)}</td></tr>)}</tbody></table></div>
-        ) : (
-          <div className="scorecard-list">{props.scorecards.map((scorecard) => <ScorecardCard key={scorecard.id} scorecard={scorecard} onDeleteGoal={() => {}} />)}</div>
-        )}
-        {!props.scorecards.length && <div className="no-goals-msg" style={{ display: "block" }}>No scorecards found for this search</div>}
-      </section>
-      <section className="export-section">
-        <div className="section-title">Export</div>
-        <button onClick={() => downloadCsv(scorecardsToCsv(props.scorecards), "scorecards-history.csv")}>Export filtered results CSV</button>
-      </section>
+
+      {/* TABLE view — existing filter + flat list */}
+      {props.view === "table" && (
+        <>
+          {!props.readonly && (
+            <section>
+              <div className="section-title">Filters</div>
+              <div className="fields-grid">
+                <div className="field"><label>Period</label><select value={props.filters.period} onChange={(e) => props.onFilters({ ...props.filters, period: e.target.value })}><option value="">All periods</option>{Array.from(new Set(props.allScorecards.map((sc) => sc.scorecardMonth))).map((p) => <option key={p}>{p}</option>)}</select></div>
+                <div className="field"><label>Search</label><input value={props.filters.search} onChange={(e) => props.onFilters({ ...props.filters, search: e.target.value })} placeholder="e.g. Jane Smith, Utah" /></div>
+                <div className="field"><label>Location</label><select value={props.filters.location} onChange={(e) => props.onFilters({ ...props.filters, location: e.target.value })}><option value="">All locations</option><option>Utah</option><option>Georgia</option><option>Remote</option></select></div>
+                <div className="field"><label>Department</label><select value={props.filters.department} onChange={(e) => props.onFilters({ ...props.filters, department: e.target.value })}><option value="">All departments</option>{departments.map((d) => <option key={d}>{d}</option>)}</select></div>
+                <div className="field"><label>Goal</label><select value={props.filters.goal} onChange={(e) => props.onFilters({ ...props.filters, goal: e.target.value })}><option value="">All goals</option>{allGoalNames.map((g) => <option key={g}>{g}</option>)}</select></div>
+              </div>
+            </section>
+          )}
+          <section>
+            <div className="table-wrap">
+              <table className="data-table">
+                <thead><tr><th>Employee</th><th>Period</th><th>Department</th><th>Location</th><th style={{ textAlign: "right" }}>Achievement</th><th style={{ textAlign: "right" }}>Bonus</th></tr></thead>
+                <tbody>
+                  {props.scorecards.map((sc) => (
+                    <tr key={sc.id}>
+                      <td>{sc.employeeName}</td>
+                      <td style={{ color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: "11px" }}>{sc.scorecardMonth}</td>
+                      <td>{sc.department}</td>
+                      <td>{sc.location}</td>
+                      <td style={{ textAlign: "right", fontFamily: "var(--mono)", fontWeight: 600, color: sc.weightedAchievement >= 100 ? "#2D6B1A" : "var(--brick)" }}>{sc.weightedAchievement.toFixed(1)}%</td>
+                      <td style={{ textAlign: "right", fontFamily: "var(--mono)" }}>{formatCurrency(sc.bonusAmount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+            {!props.scorecards.length && <div className="no-goals-msg" style={{ display: "block" }}>No scorecards match the current filters.</div>}
+          </section>
+          {!props.readonly && (
+            <section style={{ background: "var(--surface2)", borderStyle: "dashed" }}>
+              <div className="section-title">Export</div>
+              <button style={{ width: "100%", padding: "10px", border: "1.5px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "none", fontFamily: "var(--sans)", fontSize: "13px", fontWeight: 500, cursor: "pointer", color: "var(--text)" }} onClick={() => downloadCsv(scorecardsToCsv(props.scorecards), "scorecards-history.csv")}>↓ Export filtered results CSV</button>
+            </section>
+          )}
+        </>
+      )}
+
+      {/* CARDS view */}
+      {props.view === "scorecard" && (
+        <>
+          {!props.readonly && (
+            <section>
+              <div className="fields-grid">
+                <div className="field"><label>Period</label><select value={props.filters.period} onChange={(e) => props.onFilters({ ...props.filters, period: e.target.value })}><option value="">All periods</option>{Array.from(new Set(props.allScorecards.map((sc) => sc.scorecardMonth))).map((p) => <option key={p}>{p}</option>)}</select></div>
+                <div className="field"><label>Location</label><select value={props.filters.location} onChange={(e) => props.onFilters({ ...props.filters, location: e.target.value })}><option value="">All locations</option><option>Utah</option><option>Georgia</option><option>Remote</option></select></div>
+                <div className="field"><label>Department</label><select value={props.filters.department} onChange={(e) => props.onFilters({ ...props.filters, department: e.target.value })}><option value="">All departments</option>{departments.map((d) => <option key={d}>{d}</option>)}</select></div>
+              </div>
+            </section>
+          )}
+          <section>
+            <div className="scorecard-list">{props.scorecards.map((sc) => <ScorecardCard key={sc.id} scorecard={sc} onDeleteGoal={() => {}} />)}</div>
+            {!props.scorecards.length && <div className="no-goals-msg" style={{ display: "block" }}>No scorecards match the current filters.</div>}
+          </section>
+        </>
+      )}
+
+      {/* REPORT BUILDER — Grid & Chart */}
+      {(props.view === "grid" || props.view === "chart") && (
+        <>
+          {/* Config bar */}
+          <section style={{ borderBottom: "1px solid var(--border)" }}>
+            <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", alignItems: "flex-end" }}>
+              <div>
+                <div style={fLabel}>FROM</div>
+                <select style={fSelect} value={fromMonth} onChange={(e) => setFromMonth(e.target.value)}>
+                  <option value="">Earliest</option>
+                  {allMonthIsos.map((m) => <option key={m} value={m}>{formatMonthLabel(m)}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={fLabel}>TO</div>
+                <select style={fSelect} value={toMonth} onChange={(e) => setToMonth(e.target.value)}>
+                  <option value="">Latest</option>
+                  {allMonthIsos.map((m) => <option key={m} value={m}>{formatMonthLabel(m)}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={fLabel}>LOCATION</div>
+                <select style={fSelect} value={selLocation} onChange={(e) => setSelLocation(e.target.value)}>
+                  <option value="">All locations</option>
+                  {allLocations.map((l) => <option key={l}>{l}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={fLabel}>DEPARTMENT</div>
+                <select style={fSelect} value={selDept} onChange={(e) => setSelDept(e.target.value)}>
+                  <option value="">All departments</option>
+                  {allDepts.map((d) => <option key={d}>{d}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={fLabel}>EMPLOYEE</div>
+                <select style={fSelect} value={selEmployee} onChange={(e) => setSelEmployee(e.target.value)}>
+                  <option value="">All employees</option>
+                  {allEmployeeNames.map((n) => <option key={n}>{n}</option>)}
+                </select>
+              </div>
+              <div>
+                <div style={fLabel}>GROUP BY</div>
+                <select style={fSelect} value={groupBy} onChange={(e) => setGroupBy(e.target.value as "employee" | "department" | "location")}>
+                  <option value="employee">Employee</option>
+                  <option value="department">Department</option>
+                  <option value="location">Location</option>
+                </select>
+              </div>
+              <div>
+                <div style={fLabel}>METRIC</div>
+                <select style={fSelect} value={metric} onChange={(e) => { setMetric(e.target.value as "achievement" | "bonus" | "goal"); setMetricGoal(""); }}>
+                  <option value="achievement">Achievement %</option>
+                  <option value="bonus">Bonus Amount</option>
+                  <option value="goal">Goal Achievement</option>
+                </select>
+              </div>
+              {metric === "goal" && (
+                <div>
+                  <div style={fLabel}>GOAL</div>
+                  <select style={fSelect} value={metricGoal} onChange={(e) => setMetricGoal(e.target.value)}>
+                    <option value="">Select a goal…</option>
+                    {allGoalNames.map((g) => <option key={g}>{g}</option>)}
+                  </select>
+                </div>
+              )}
+            </div>
+          </section>
+
+          {/* GRID — pivot table */}
+          {props.view === "grid" && (
+            <section>
+              <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "12px" }}>
+                <div className="section-title" style={{ margin: 0 }}>{metricLabel}</div>
+                <span style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>by {groupBy} × month</span>
+              </div>
+              {reportMonths.length === 0 ? (
+                <div className="no-goals-msg" style={{ display: "block" }}>No submitted scorecards in this range.</div>
+              ) : (
+                <div className="table-wrap" style={{ overflowX: "auto" }}>
+                  <table className="data-table" style={{ minWidth: `${160 + reportMonths.length * 110}px` }}>
+                    <thead>
+                      <tr>
+                        <th style={{ textAlign: "left", minWidth: 150, position: "sticky", left: 0, background: "var(--surface)", zIndex: 2 }}>{groupBy.charAt(0).toUpperCase() + groupBy.slice(1)}</th>
+                        {reportMonths.map((m) => <th key={m} style={{ textAlign: "right", whiteSpace: "nowrap", fontFamily: "var(--mono)", fontSize: "11px" }}>{shortMonthLabel(m)}</th>)}
+                        <th style={{ textAlign: "right", borderLeft: "2px solid var(--border)", fontFamily: "var(--mono)", fontSize: "11px" }}>AVG</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {groupKeys.map((key) => {
+                        const vals = reportMonths.map((m) => getGroupMonthValue(key, m));
+                        const defined = vals.filter((v): v is number => v !== null);
+                        const avg = defined.length ? defined.reduce((a, b) => a + b, 0) / defined.length : null;
+                        return (
+                          <tr key={key}>
+                            <td style={{ fontWeight: 600, position: "sticky", left: 0, background: "var(--surface)", zIndex: 1 }}>{key}</td>
+                            {vals.map((v, i) => (
+                              <td key={i} style={{ textAlign: "right", background: cellBg(v), color: cellFg(v), fontWeight: v !== null ? 600 : 400, fontFamily: "var(--mono)", fontSize: "12px", transition: "background 0.15s" }}>
+                                {formatMetric(v)}
+                              </td>
+                            ))}
+                            <td style={{ textAlign: "right", borderLeft: "2px solid var(--border)", background: cellBg(avg), color: cellFg(avg), fontWeight: 700, fontFamily: "var(--mono)", fontSize: "12px" }}>
+                              {formatMetric(avg)}
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              )}
+            </section>
+          )}
+
+          {/* CHART — SVG line graph */}
+          {props.view === "chart" && (
+            <section>
+              <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "12px" }}>
+                <div className="section-title" style={{ margin: 0 }}>{metricLabel}</div>
+                <span style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>over time · by {groupBy}</span>
+              </div>
+              {reportMonths.length < 2 || groupKeys.length === 0 ? (
+                <div className="no-goals-msg" style={{ display: "block" }}>Select a range with at least 2 months of submitted scorecards to draw a chart.</div>
+              ) : (
+                <ReportLineChart
+                  months={reportMonths}
+                  groupKeys={groupKeys}
+                  getValue={getGroupMonthValue}
+                  formatValue={formatMetric}
+                  isPercent={isPercent}
+                  isCurrency={isCurrency}
+                />
+              )}
+            </section>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function ReportLineChart({
+  months, groupKeys, getValue, formatValue, isPercent, isCurrency,
+}: {
+  months: string[];
+  groupKeys: string[];
+  getValue: (groupKey: string, isoMonth: string) => number | null;
+  formatValue: (v: number | null) => string;
+  isPercent: boolean;
+  isCurrency: boolean;
+}) {
+  const series = groupKeys.map((key, i) => ({
+    key,
+    color: CHART_COLORS[i % CHART_COLORS.length],
+    values: months.map((m) => getValue(key, m)),
+  }));
+
+  const allVals = series.flatMap((s) => s.values).filter((v): v is number => v !== null);
+  if (!allVals.length) return <div className="no-goals-msg" style={{ display: "block" }}>No data to chart.</div>;
+
+  const dataMax = Math.max(...allVals);
+  const dataMin = Math.min(0, ...allVals);
+  const ticks = niceYTicks(dataMin, dataMax * 1.08);
+  const yMin = ticks[0];
+  const yMax = ticks[ticks.length - 1];
+
+  const W = 760, H = 300;
+  const pad = { top: 18, right: 24, bottom: 52, left: 62 };
+  const cW = W - pad.left - pad.right;
+  const cH = H - pad.top - pad.bottom;
+
+  function xPos(i: number) { return pad.left + (months.length > 1 ? (i / (months.length - 1)) * cW : cW / 2); }
+  function yPos(v: number) { return pad.top + cH - ((v - yMin) / (yMax - yMin)) * cH; }
+
+  function yLabel(t: number): string {
+    if (isPercent) return t.toFixed(0) + "%";
+    if (isCurrency) return t >= 1000 ? "$" + (t / 1000).toFixed(0) + "k" : "$" + t;
+    return t.toFixed(0);
+  }
+
+  return (
+    <div>
+      <div style={{ overflowX: "auto" }}>
+        <svg viewBox={`0 0 ${W} ${H}`} style={{ width: "100%", minWidth: 400, display: "block" }}>
+          {/* Horizontal grid lines + Y labels */}
+          {ticks.map((t) => (
+            <g key={t}>
+              <line x1={pad.left} x2={W - pad.right} y1={yPos(t)} y2={yPos(t)} stroke="var(--border)" strokeWidth={1} />
+              <text x={pad.left - 8} y={yPos(t) + 4} textAnchor="end" fontSize={10} fontFamily="monospace" fill="#999">{yLabel(t)}</text>
+            </g>
+          ))}
+          {/* X labels */}
+          {months.map((m, i) => (
+            <text key={m} x={xPos(i)} y={H - pad.bottom + 16} textAnchor="middle" fontSize={10} fontFamily="monospace" fill="#999">{shortMonthLabel(m)}</text>
+          ))}
+          {/* Axes */}
+          <line x1={pad.left} x2={pad.left} y1={pad.top} y2={H - pad.bottom} stroke="#ccc" strokeWidth={1.5} />
+          <line x1={pad.left} x2={W - pad.right} y1={H - pad.bottom} y2={H - pad.bottom} stroke="#ccc" strokeWidth={1.5} />
+          {/* Series */}
+          {series.map((s) => {
+            let d = "";
+            let open = false;
+            s.values.forEach((v, i) => {
+              if (v === null) { open = false; return; }
+              const x = xPos(i), y = yPos(v);
+              d += open ? ` L ${x} ${y}` : `M ${x} ${y}`;
+              open = true;
+            });
+            return (
+              <g key={s.key}>
+                {d && <path d={d} fill="none" stroke={s.color} strokeWidth={2.5} strokeLinejoin="round" strokeLinecap="round" />}
+                {s.values.map((v, i) => v !== null && (
+                  <g key={i}>
+                    <circle cx={xPos(i)} cy={yPos(v)} r={5} fill="#fff" stroke={s.color} strokeWidth={2} />
+                    <title>{s.key} · {shortMonthLabel(months[i])}: {formatValue(v)}</title>
+                  </g>
+                ))}
+              </g>
+            );
+          })}
+        </svg>
+      </div>
+      {/* Legend */}
+      <div style={{ display: "flex", flexWrap: "wrap", gap: "14px", justifyContent: "center", paddingTop: "8px", paddingBottom: "4px" }}>
+        {series.map((s) => (
+          <div key={s.key} style={{ display: "flex", alignItems: "center", gap: "7px", fontSize: "12px", fontFamily: "var(--sans)", color: "var(--text)" }}>
+            <svg width={20} height={3} style={{ flexShrink: 0 }}>
+              <line x1={0} y1={1.5} x2={20} y2={1.5} stroke={s.color} strokeWidth={2.5} />
+              <circle cx={10} cy={1.5} r={3} fill="#fff" stroke={s.color} strokeWidth={2} />
+            </svg>
+            {s.key}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
@@ -954,20 +2583,46 @@ function RipplingScreen(props: {
     if (!file) return;
     props.onPreview(parseRipplingEmployees(await file.text()));
   }
+
+  const today = new Date();
+  const currentMonthVal = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+
+  function uploadBlocked(month: string): string | null {
+    if (!month) return null;
+    const [y, m] = month.split("-").map(Number);
+    const monthStart = new Date(y, m - 1, 1);
+    const monthEnd = new Date(y, m, 0);
+    if (monthStart > today) return "Cannot upload data for a future month.";
+    if (monthEnd < today) {
+      const daysSince = Math.floor((today.getTime() - monthEnd.getTime()) / 86400000);
+      if (daysSince > 7) return `Upload window closed — ${formatMonthLabel(month)} ended ${daysSince} days ago (limit is 7).`;
+    }
+    return null;
+  }
+
+  const blockReason = uploadBlocked(props.month);
   const savedEmployees = props.saved[props.month] || [];
   return (
     <div className="screen active">
       <section>
         <div className="section-title">Upload Rippling CSV</div>
-        <div className="field"><label>Period</label><input type="month" value={props.month} onChange={(event) => props.onMonth(event.target.value)} /></div>
-        <label id="rippling-drop-zone">
-          <span className="drop-icon">CSV</span>
-          <strong>Drop your Rippling CSV here</strong>
-          <small>or click to browse - Active_Employees_with_Hourly_and_Annual_Base_Pay.csv</small>
-          <input type="file" accept=".csv" hidden onChange={(event) => handleFile(event.target.files?.[0])} />
-        </label>
+        <div className="field">
+          <label>Period</label>
+          <input type="month" value={props.month} max={currentMonthVal} onChange={(event) => props.onMonth(event.target.value)} />
+        </div>
+        {blockReason && (
+          <div className="info-banner" style={{ display: "block", background: "#fff3f3", borderColor: "#f5c0c0", color: "#9B2C2C" }}>{blockReason}</div>
+        )}
+        {!blockReason && (
+          <label id="rippling-drop-zone">
+            <span className="drop-icon">CSV</span>
+            <strong>Drop your Rippling CSV here</strong>
+            <small>or click to browse - Active_Employees_with_Hourly_and_Annual_Base_Pay.csv</small>
+            <input type="file" accept=".csv" hidden onChange={(event) => handleFile(event.target.files?.[0])} />
+          </label>
+        )}
       </section>
-      {!!props.preview.length && <EmployeeTable title="Imported employees" employees={props.preview} action={<button className="submit-btn" onClick={props.onSave}>Save to App</button>} />}
+      {!!props.preview.length && !blockReason && <EmployeeTable title="Imported employees" employees={props.preview} action={<button className="submit-btn" onClick={props.onSave}>Save to App</button>} />}
       <EmployeeTable title="Saved employee data" employees={savedEmployees} action={<button onClick={props.onClear}>Clear all</button>} />
     </div>
   );
@@ -988,18 +2643,727 @@ function EmployeeTable({ title, employees, action }: { title: string; employees:
   );
 }
 
-function TodosScreen({ tasks, onMode }: { tasks: { label: string; detail: string; action: Screen }[]; onMode: (mode: Screen) => void }) {
+function TodosScreen({
+  workMonth,
+  bankMonth,
+  profile,
+  hasRippling,
+  missingActuals,
+  goals,
+  allActuals,
+  onSaveTarget,
+  onSaveTargetPair,
+  onSaveCurrentTargetPair,
+  onSaveActual,
+  onRipplingUpload,
+  onBuildEmployee
+}: {
+  workMonth: string;
+  bankMonth: string;
+  profile: ManagerProfile | null;
+  hasRippling: boolean;
+  missingActuals: Goal[];
+  goals: Goal[];
+  allActuals: Record<string, ActualsByKey>;
+  onSaveTarget: (goal: Goal, period: string, type: "target" | "min", value: string) => void;
+  onSaveTargetPair: (goal: Goal, target: string, min: string) => void;
+  onSaveCurrentTargetPair: (goal: Goal, target: string, min: string) => void;
+  onSaveActual: (goal: Goal, value: string) => void;
+  onRipplingUpload: (employees: Employee[]) => void;
+  onBuildEmployee: () => void;
+}) {
+  const [showCompletedAdmin, setShowCompletedAdmin] = useState(false);
+  const [showCompletedTargets, setShowCompletedTargets] = useState(false);
+  const [ripplingFile, setRipplingFile] = useState<File | null>(null);
+  const [ripplingParsed, setRipplingParsed] = useState<Employee[] | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [draftTargets, setDraftTargets] = useState<Record<string, { target: string; min: string }>>({});
+  const [draftCurrentTargets, setDraftCurrentTargets] = useState<Record<string, { target: string; min: string }>>({});
+  const [draftActuals, setDraftActuals] = useState<Record<string, string>>({});
+  const [showCompletedCurrentTargets, setShowCompletedCurrentTargets] = useState(false);
+
+  const workMonthLabel = formatMonthLabel(workMonth);
+  const workActuals = allActuals[workMonthLabel] || {};
+
+  const currentMonthValue = useMemo(() => {
+    const today = new Date();
+    return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
+  }, []);
+  const currentMonthLabel = useMemo(() => formatMonthLabel(currentMonthValue), [currentMonthValue]);
+  const currentActuals = allActuals[currentMonthLabel] || {};
+
+  const nextMonthValue = useMemo(() => {
+    const today = new Date();
+    const next = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+    return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
+  }, []);
+  const nextMonthLabel = useMemo(() => formatMonthLabel(nextMonthValue), [nextMonthValue]);
+  const nextActuals = allActuals[nextMonthLabel] || {};
+
+  const isAdmin = roleAtLeast(profile, "admin");
+  const ripplingDone = hasRippling && !ripplingParsed;
+
+  // All company/dept goals that have targets set for workMonth — each is its own actuals item
+  const actualsGoals = goals.filter((g) =>
+    (isAdmin ? true : g.goalTier !== "company") &&
+    (g.goalTier === "company" || g.goalTier === "department") &&
+    workActuals[metaKey("target", g)] != null &&
+    workActuals[metaKey("min", g)] != null
+  );
+  const actualsDoneCount = actualsGoals.filter((g) => workActuals[actualKey(g)] != null).length;
+
+  const adminTotal = (isAdmin ? 1 : 0) + actualsGoals.length;
+  const adminDoneCount = (isAdmin ? (ripplingDone ? 1 : 0) : 0) + actualsDoneCount;
+
+  const targetGoals = goals.filter((g) => (isAdmin ? true : g.goalTier !== "company") && (g.goalTier === "company" || g.goalTier === "department"));
+
+  // Current month targets (overdue if not set — month already started)
+  const currentTargetGoals = targetGoals;
+  const currentTargetDoneCount = currentTargetGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length;
+  const currentTargetTotal = currentTargetGoals.length;
+  const allCurrentTargetsDone = currentTargetDoneCount === currentTargetTotal && currentTargetTotal > 0;
+
+  // Next month targets
+  const targetDoneCount = targetGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length;
+  const targetTotal = targetGoals.length;
+
+  function dueDate(year: number, month: number, day: number) {
+    const due = new Date(year, month - 1, day);
+    const now = new Date();
+    const diffDays = Math.ceil((due.getTime() - now.getTime()) / 86400000);
+    return { label: due.toLocaleDateString("default", { month: "short", day: "numeric" }), diffDays };
+  }
+
+  const today = new Date();
+  const adminDue = dueDate(today.getFullYear(), today.getMonth() + 1, 17);
+  const [cYear, cMonth] = currentMonthValue.split("-").map(Number);
+  const currentTargetDue = dueDate(cYear, cMonth, 1); // due on the 1st of the current month → always overdue
+  const [nYear, nMonth] = nextMonthValue.split("-").map(Number);
+  const targetDue = dueDate(nYear, nMonth, 1);
+
+  function DaysBadge({ diffDays }: { diffDays: number }) {
+    if (diffDays < 0) return <span className="todo-days-badge overdue">{Math.abs(diffDays)}d overdue</span>;
+    if (diffDays === 0) return <span className="todo-days-badge today">Today</span>;
+    return <span className="todo-days-badge">{diffDays}d</span>;
+  }
+
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setRipplingFile(file);
+    const text = await file.text();
+    setRipplingParsed(parseRipplingEmployees(text));
+  }
+
+  function handleRipplingSave() {
+    if (!ripplingParsed?.length) return;
+    onRipplingUpload(ripplingParsed);
+    setRipplingFile(null);
+    setRipplingParsed(null);
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
+
+  // Build flat list of admin rows: rippling + one row per actual goal
+  type AdminRow = { key: string; done: boolean; node: React.ReactNode };
+
+  const ripplingRow: AdminRow | null = isAdmin ? {
+    key: "rippling",
+    done: ripplingDone,
+    node: (
+      <div className={`todo-task-section${ripplingDone ? " done" : ""}`}>
+        <div className="todo-task-row">
+          <span className={`todo-task-icon${ripplingDone ? " done" : ""}`}>{ripplingDone ? "✓" : "⚠"}</span>
+          <div className="todo-task-body">
+            <span className="todo-task-label">Upload Rippling data</span>
+            <span className="todo-task-detail">{ripplingDone ? `${currentMonthLabel} data loaded — provides ${workMonthLabel} earnings` : `${currentMonthLabel} not uploaded — needed for ${workMonthLabel} earnings.`}</span>
+          </div>
+        </div>
+        {!ripplingDone && (
+          <div className="todo-inline-form">
+            <input ref={fileInputRef} type="file" accept=".csv" className="todo-file-input" onChange={handleFileChange} />
+            {ripplingParsed && (
+              <div className="todo-inline-form-row">
+                <span className="todo-task-detail">{ripplingParsed.length} employees parsed from {ripplingFile?.name}</span>
+                <button className="todo-task-action" onClick={handleRipplingSave}>Save to App</button>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+    )
+  } : null;
+
+  const actualRows: AdminRow[] = actualsGoals.map((goal) => {
+    const done = workActuals[actualKey(goal)] != null;
+    const draft = draftActuals[goal.id] ?? String(workActuals[actualKey(goal)] ?? "");
+    return {
+      key: `actual-${goal.id}`,
+      done,
+      node: (
+        <div key={goal.id} className={`todo-target-row${done ? " done" : ""}`}>
+          <span className="todo-circle">{done ? "●" : "○"}</span>
+          <span className="todo-target-name">{goal.name}</span>
+          <TierBadge tier={goal.goalTier} />
+          {goal.location && <span className="todo-scope-tag">{goal.location}</span>}
+          {goal.department && <span className="todo-scope-tag">{goal.department}</span>}
+          {!done && (
+            <div className="todo-target-inputs">
+              <label className="todo-input-label">
+                <span>Actual</span>
+                <input
+                  type="number"
+                  className="todo-target-input"
+                  value={draft}
+                  onChange={(e) => setDraftActuals((prev) => ({ ...prev, [goal.id]: e.target.value }))}
+                />
+              </label>
+              <button
+                className="todo-target-submit"
+                disabled={draft === ""}
+                onClick={() => onSaveActual(goal, draft)}
+              >Set</button>
+            </div>
+          )}
+        </div>
+      )
+    };
+  });
+
+  const allAdminRows: AdminRow[] = [...(ripplingRow ? [ripplingRow] : []), ...actualRows];
+  const visibleAdminRows = showCompletedAdmin ? allAdminRows : allAdminRows.filter((r) => !r.done);
+
   return (
-    <div className="screen active"><section><div className="section-title">To Do</div>{tasks.map((task) => <div key={task.label} className="todo-card"><strong>{task.label}</strong><span>{task.detail}</span><button onClick={() => onMode(task.action)}>Open</button></div>)}{!tasks.length && <div className="no-goals-msg" style={{ display: "block" }}>No open tasks</div>}</section></div>
+    <div className="screen active">
+      <div className="todo-group-card">
+        <div className="todo-group-header">
+          <div className="todo-group-header-left">
+            <span className="todo-group-title">Admin Tasks · {workMonthLabel}</span>
+            <span className="todo-group-meta">{adminDoneCount}/{adminTotal} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></span>
+          </div>
+          <button className="todo-show-completed" onClick={() => setShowCompletedAdmin((v) => !v)}>
+            {showCompletedAdmin ? "HIDE COMPLETED" : "SHOW COMPLETED"}
+          </button>
+        </div>
+        <div className="todo-group-bar-wrap">
+          <div className="todo-group-bar" style={{ width: `${(adminDoneCount / adminTotal) * 100}%` }} />
+        </div>
+        {visibleAdminRows.length === 0 ? (
+          <div className="todo-empty-row">All admin tasks complete ✓</div>
+        ) : (
+          visibleAdminRows.map((row) => (
+            <React.Fragment key={row.key}>{row.node}</React.Fragment>
+          ))
+        )}
+      </div>
+
+      {/* Current month targets — shown only when any are missing (always overdue) */}
+      {currentTargetTotal > 0 && !allCurrentTargetsDone && (
+        <div className="todo-group-card">
+          <div className="todo-group-header">
+            <div className="todo-group-header-left">
+              <span className="todo-group-title">{currentMonthLabel} Targets</span>
+              <span className="todo-group-meta">{currentTargetDoneCount}/{currentTargetTotal} set · Due {currentTargetDue.label} <DaysBadge diffDays={currentTargetDue.diffDays} /></span>
+            </div>
+            <button className="todo-show-completed" onClick={() => setShowCompletedCurrentTargets((v) => !v)}>
+              {showCompletedCurrentTargets ? "HIDE COMPLETED" : "SHOW COMPLETED"}
+            </button>
+          </div>
+          <div className="todo-group-bar-wrap">
+            <div className="todo-group-bar" style={{ width: `${currentTargetTotal ? (currentTargetDoneCount / currentTargetTotal) * 100 : 0}%`, background: "var(--brick)" }} />
+          </div>
+          {currentTargetGoals
+            .filter((g) => showCompletedCurrentTargets || currentActuals[metaKey("target", g)] == null)
+            .map((goal) => {
+              const saved = currentActuals[metaKey("target", goal)] != null;
+              const draft = draftCurrentTargets[goal.id] ?? {
+                target: String(currentActuals[metaKey("target", goal)] ?? ""),
+                min: String(currentActuals[metaKey("min", goal)] ?? "")
+              };
+              return (
+                <div key={goal.id} className={`todo-target-row${saved ? " done" : ""}`}>
+                  <span className="todo-circle">{saved ? "●" : "○"}</span>
+                  <span className="todo-target-name">{goal.name}</span>
+                  <TierBadge tier={goal.goalTier} />
+                  {goal.department && <span className="todo-scope-tag">{goal.department}</span>}
+                  {!saved && (
+                    <div className="todo-target-inputs">
+                      <label className="todo-input-label">
+                        <span>Target</span>
+                        <input
+                          type="number"
+                          className="todo-target-input"
+                          value={draft.target}
+                          onChange={(e) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: e.target.value } }))}
+                        />
+                      </label>
+                      <label className="todo-input-label">
+                        <span>Min</span>
+                        <input
+                          type="number"
+                          className="todo-target-input"
+                          value={draft.min}
+                          onChange={(e) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: e.target.value } }))}
+                        />
+                      </label>
+                      <button
+                        className="todo-target-submit"
+                        disabled={draft.target === ""}
+                        onClick={() => onSaveCurrentTargetPair(goal, draft.target, draft.min)}
+                      >Set</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+        </div>
+      )}
+
+      <div className="todo-group-card">
+        <div className="todo-group-header">
+          <div className="todo-group-header-left">
+            <span className="todo-group-title">{nextMonthLabel} Targets</span>
+            <span className="todo-group-meta">{targetDoneCount}/{targetTotal} set · Due {targetDue.label} <DaysBadge diffDays={targetDue.diffDays} /></span>
+          </div>
+          <button className="todo-show-completed" onClick={() => setShowCompletedTargets((v) => !v)}>
+            {showCompletedTargets ? "HIDE COMPLETED" : "SHOW COMPLETED"}
+          </button>
+        </div>
+        <div className="todo-group-bar-wrap">
+          <div className="todo-group-bar" style={{ width: `${targetTotal ? (targetDoneCount / targetTotal) * 100 : 0}%` }} />
+        </div>
+        {targetGoals.length === 0 ? (
+          <div className="todo-empty-row">No company or department goals in bank</div>
+        ) : (
+          targetGoals
+            .filter((g) => showCompletedTargets || nextActuals[metaKey("target", g)] == null)
+            .map((goal) => {
+              const saved = nextActuals[metaKey("target", goal)] != null;
+              const draft = draftTargets[goal.id] ?? {
+                target: String(nextActuals[metaKey("target", goal)] ?? ""),
+                min: String(nextActuals[metaKey("min", goal)] ?? "")
+              };
+              return (
+                <div key={goal.id} className={`todo-target-row${saved ? " done" : ""}`}>
+                  <span className="todo-circle">{saved ? "●" : "○"}</span>
+                  <span className="todo-target-name">{goal.name}</span>
+                  <TierBadge tier={goal.goalTier} />
+                  {goal.department && <span className="todo-scope-tag">{goal.department}</span>}
+                  {!saved && (
+                    <div className="todo-target-inputs">
+                      <label className="todo-input-label">
+                        <span>Target</span>
+                        <input
+                          type="number"
+                          className="todo-target-input"
+                          value={draft.target}
+                          onChange={(e) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: e.target.value } }))}
+                        />
+                      </label>
+                      <label className="todo-input-label">
+                        <span>Min</span>
+                        <input
+                          type="number"
+                          className="todo-target-input"
+                          value={draft.min}
+                          onChange={(e) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: e.target.value } }))}
+                        />
+                      </label>
+                      <button
+                        className="todo-target-submit"
+                        disabled={draft.target === ""}
+                        onClick={() => onSaveTargetPair(goal, draft.target, draft.min)}
+                      >Set</button>
+                    </div>
+                  )}
+                </div>
+              );
+            })
+        )}
+      </div>
+    </div>
   );
 }
 
+const guideSteps = [
+  {
+    title: "Upload Rippling Data",
+    bg: "var(--brick-light)", border: "var(--taupe)", numBg: "var(--brick)",
+    body: "Start each month by uploading your Rippling CSV. This pre-loads employee names, roles, departments, locations, and pay rates so you don't have to enter them manually.",
+    bullets: ["Go to Rippling Data in the sidebar", "Select the payroll month", "Upload the Active_Employees_with_Hourly_and_Annual_Base_Pay.csv file", "Review the preview and click Save to App"]
+  },
+  {
+    title: "Build Your Goal Bank",
+    bg: "#f0f7fa", border: "#b8d4e0", numBg: "#185FA5",
+    body: "The Goal Bank is your permanent library of goals. Goals don't expire — they're reused month to month and pulled into scorecards. Set this up once and update as needed.",
+    bullets: ["Go to Goals & Actuals in the sidebar", "Click + Add Goal to Bank at the bottom", "Set the type: Company (everyone), Department (dept-wide), or Individual (role-specific)", "Goals can be deactivated without being deleted"]
+  },
+  {
+    title: "Enter Company & Department Actuals",
+    bg: "#f0f7fa", border: "#b8d4e0", numBg: "#185FA5",
+    body: "At month end, enter the actual results for company and department goals. These are shared across all employees — enter them once and they'll be available when building scorecards.",
+    bullets: ["Go to Goals & Actuals in the sidebar", "Select the month from the filter at the top", "Use the ⋮ menu on each goal row and choose Enter actual", "Individual goal actuals are entered per-employee in the scorecard builder"]
+  },
+  {
+    title: "Build Individual Scorecards",
+    bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
+    body: "For each employee, build their scorecard by selecting goals, setting weights, entering individual actuals, and submitting. Company and department actuals you already entered will pre-fill automatically.",
+    bullets: ["Go to Team Scorecards in the sidebar", "Select the employee and scorecard month", "Goals load automatically based on their role and department", "Set a weight for each goal (all weights must total 100%)", "Enter actuals for individual goals — company and dept actuals are pre-filled", "Review the calculated bonus summary, then click Submit Scorecard"]
+  },
+  {
+    title: "Review Historical Data",
+    bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
+    body: "Search and review all submitted scorecards. Filter by period, employee, department, or location. Export to CSV for payroll or further analysis.",
+    bullets: ["Go to Historical Data in the sidebar", "Select a period and optionally filter by location or department", "Each card shows goal-level detail — achievement, actuals, and bonus contribution", "Click ↓ Export filtered results CSV to download a full spreadsheet"]
+  }
+];
+
 function GuideScreen() {
-  const steps = ["Upload Rippling Data", "Build Your Goal Bank", "Enter Company & Department Actuals", "Build Individual Scorecards", "Review Historical Data"];
   return (
     <div className="screen active">
-      <section><div className="section-title">How to use this app</div><p>Follow these steps each month to set up goals, enter actuals, and build employee scorecards.</p></section>
-      {steps.map((step, index) => <section key={step} className="guide-step"><div className="step-number">{index + 1}</div><div><div className="section-title">{step}</div><p>Use the matching sidebar area to complete this monthly scorecard workflow while preserving historical data.</p></div></section>)}
+      <section>
+        <div className="section-title">How to use this app</div>
+        <p style={{ fontSize: "13px", color: "var(--text-muted)", lineHeight: 1.7 }}>Follow these steps each month to set up goals, enter actuals, and build employee scorecards.</p>
+      </section>
+      {guideSteps.map((step, index) => (
+        <section key={step.title} style={{ background: step.bg, borderColor: step.border }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px" }}>
+            <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: step.numBg, color: "#fff", fontSize: "13px", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{index + 1}</div>
+            <div className="section-title" style={{ margin: 0 }}>{step.title}</div>
+          </div>
+          <p style={{ fontSize: "13px", color: "var(--text)", lineHeight: 1.7, marginBottom: "8px" }}>{step.body}</p>
+          <ul style={{ fontSize: "13px", color: "var(--text-muted)", lineHeight: 1.9, paddingLeft: "18px" }}>
+            {step.bullets.map((b) => <li key={b}>{b}</li>)}
+          </ul>
+        </section>
+      ))}
+      <section style={{ background: "var(--surface2)", borderStyle: "dashed" }}>
+        <div className="section-title">Tips</div>
+        <ul style={{ fontSize: "13px", color: "var(--text-muted)", lineHeight: 1.9, paddingLeft: "18px" }}>
+          <li>All goal weights on a scorecard must total exactly <strong>100%</strong> — the builder warns you if they don't</li>
+          <li>Scorecards are <strong>capped at 200%</strong> total weighted achievement</li>
+          <li>Achievements of <strong>120%+</strong> are flagged for review but not capped</li>
+          <li>If a goal's actual doesn't meet the <strong>minimum threshold</strong>, that goal contributes $0 to the bonus</li>
+          <li>Company and department actuals only need to be entered once — they apply to all scorecards for that month</li>
+          <li>Goals can be <strong>deactivated</strong> in the Goal Bank without deleting them, keeping history intact</li>
+        </ul>
+      </section>
+    </div>
+  );
+}
+
+type PlayGoal = {
+  id: string;
+  name: string;
+  goalTier: GoalTier;
+  location?: string;
+  department?: string;
+  role?: string;
+  lowerBetter: boolean;
+  capped: "yes" | "no";
+  capPct: number;
+  target: string;
+  min: string;
+  actual: string;
+  weight: string;
+};
+
+function WhatIfScreen(props: {
+  allGoals: Goal[];
+  profile: ManagerProfile | null;
+  latestEmployees: Employee[];
+  allEmployees: Employee[];
+}) {
+  const isUser = props.profile?.role === "user";
+  const defaultEmpName = isUser ? (props.profile?.linkedEmployeeName || "") : "";
+  const [selectedEmpName, setSelectedEmpName] = useState(defaultEmpName);
+  const [earningsInput, setEarningsInput] = useState("");
+  const [hourlyRateInput, setHourlyRateInput] = useState("");
+  const [playGoals, setPlayGoals] = useState<PlayGoal[]>([]);
+  const [addGoalOpen, setAddGoalOpen] = useState(false);
+
+  const teamEmployees = useMemo(
+    () => scopedEmployeesForProfile(props.latestEmployees, props.profile, props.allEmployees),
+    [props.latestEmployees, props.profile, props.allEmployees]
+  );
+  const employeeOptions = useMemo(() => {
+    if (isUser) return props.latestEmployees.filter((e) => e.name === props.profile?.linkedEmployeeName);
+    const opts = [...teamEmployees];
+    if (props.profile?.linkedEmployeeName) {
+      const self = props.latestEmployees.find((e) => e.name === props.profile!.linkedEmployeeName);
+      if (self && !opts.some((e) => e.name === self.name)) opts.unshift(self);
+    }
+    return opts;
+  }, [isUser, teamEmployees, props.latestEmployees, props.profile]);
+  const selectedEmp = props.latestEmployees.find((e) => e.name === selectedEmpName);
+
+  useEffect(() => {
+    if (!selectedEmpName) {
+      setPlayGoals([]);
+      setEarningsInput("");
+      return;
+    }
+    const emp = props.latestEmployees.find((e) => e.name === selectedEmpName);
+    setEarningsInput("");
+    setHourlyRateInput(emp?.hourlyRate ? String(emp.hourlyRate) : "");
+    const applicable = props.allGoals.filter((g) => {
+      if (g.goalTier === "company") return true;
+      if (g.goalTier === "department") return !g.department || g.department === emp?.department;
+      if (g.goalTier === "individual") return !g.role || g.role === emp?.role;
+      return false;
+    });
+    const n = applicable.length;
+    const equalWeight = n > 0 ? Number((100 / n).toFixed(2)) : 0;
+    setPlayGoals(applicable.map((g, i) => ({
+      id: g.id, name: g.name, goalTier: g.goalTier, location: g.location, department: g.department,
+      role: g.role, lowerBetter: g.lowerBetter, capped: g.capped, capPct: g.capPct,
+      target: String(g.goalValue || ""), min: String(g.minValue || ""), actual: "",
+      weight: i === n - 1 ? String(100 - equalWeight * (n - 1)) : String(equalWeight)
+    })));
+  }, [selectedEmpName]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const earnings = Number(earningsInput) || 0;
+  const hourlyRate = Number(hourlyRateInput) || 0;
+  const impliedHours = hourlyRate > 0 && earnings > 0 ? earnings / hourlyRate : 0;
+  const liveGoals = playGoals.map((pg) =>
+    calculateGoal({
+      goal: { name: pg.name, goalTier: pg.goalTier, location: pg.location, department: pg.department, role: pg.role, lowerBetter: pg.lowerBetter, capped: pg.capped, capPct: pg.capPct },
+      target: Number(pg.target) || 0, min: Number(pg.min) || 0,
+      actual: pg.actual === "" ? null : Number(pg.actual),
+      weight: Number(pg.weight) || 0, baseEarnings: earnings, bonusPotentialPct: 10
+    })
+  );
+  const totalWeight = playGoals.reduce((sum, pg) => sum + (Number(pg.weight) || 0), 0);
+  const weightedAchievement = liveGoals.reduce((sum, g) => sum + g.weighted, 0);
+  const cappedAch = Math.min(weightedAchievement, 200);
+  const bonusAmount = earnings * (cappedAch / 100) * 0.1;
+  const effectiveHourly = impliedHours > 0 ? (earnings + bonusAmount) / impliedHours : null;
+
+  const availableToAdd = props.allGoals.filter((g) => {
+    if (playGoals.some((pg) => pg.id === g.id)) return false;
+    if (g.goalTier === "company") return true;
+    if (g.goalTier === "department") return !g.department || g.department === selectedEmp?.department;
+    if (g.goalTier === "individual") return !g.role || g.role === selectedEmp?.role;
+    return false;
+  });
+
+  function updateGoal(id: string, field: keyof PlayGoal, value: string) {
+    setPlayGoals((prev) => prev.map((pg) => pg.id === id ? { ...pg, [field]: value } : pg));
+  }
+
+  const thS: React.CSSProperties = { padding: "6px 10px", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", textAlign: "left", borderBottom: "1.5px solid var(--border)", whiteSpace: "nowrap", background: "var(--surface2)" };
+  const thC: React.CSSProperties = { ...thS, textAlign: "center" };
+
+  return (
+    <div className="screen active">
+      <section>
+        <div className="section-title">What If Scorecard</div>
+        <p style={{ fontSize: "13px", color: "var(--text-muted)", lineHeight: 1.7, marginTop: "4px" }}>
+          Explore how changes to targets, actuals, and weights affect bonus calculations. Nothing here is saved.
+        </p>
+      </section>
+
+      <section>
+        <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", alignItems: "flex-end" }}>
+          {!isUser && (
+            <div className="field" style={{ flex: "1 1 220px", minWidth: 0 }}>
+              <label>Employee</label>
+              <select value={selectedEmpName} onChange={(e) => setSelectedEmpName(e.target.value)}>
+                <option value="">— select employee —</option>
+                {employeeOptions.map((emp) => (
+                  <option key={emp.id} value={emp.name}>{emp.name}</option>
+                ))}
+              </select>
+            </div>
+          )}
+          {isUser && props.profile?.linkedEmployeeName && (
+            <div className="field" style={{ flex: "1 1 220px", minWidth: 0 }}>
+              <label>Employee</label>
+              <div style={{ padding: "8px 10px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", fontSize: "13px", background: "var(--surface2)" }}>
+                {props.profile.linkedEmployeeName}
+              </div>
+            </div>
+          )}
+          <div className="field" style={{ flex: "1 1 160px", minWidth: 0 }}>
+            <label>Base Earnings</label>
+            <input
+              type="number"
+              value={earningsInput}
+              onChange={(e) => setEarningsInput(e.target.value)}
+              placeholder="0.00"
+              style={{ fontFamily: "var(--mono)" }}
+            />
+          </div>
+          <div className="field" style={{ flex: "1 1 140px", minWidth: 0 }}>
+            <label>Hourly Rate</label>
+            <input
+              type="number"
+              value={hourlyRateInput}
+              onChange={(e) => setHourlyRateInput(e.target.value)}
+              placeholder="0.00"
+              style={{ fontFamily: "var(--mono)" }}
+            />
+          </div>
+          {selectedEmp && (
+            <div style={{ flex: "1 1 auto", fontSize: "12px", color: "var(--text-muted)", paddingBottom: "8px" }}>
+              {selectedEmp.role}{selectedEmp.department ? ` · ${selectedEmp.department}` : ""}{selectedEmp.location ? ` · ${selectedEmp.location}` : ""}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {selectedEmpName && (
+        <section>
+          {playGoals.length > 0 ? (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+                <thead>
+                  <tr>
+                    <th style={thS}>Type</th>
+                    <th style={thS}>Goal</th>
+                    <th style={thC}>Target</th>
+                    <th style={thC}>Min</th>
+                    <th style={thC}>Actual</th>
+                    <th style={thC}>Weight %</th>
+                    <th style={thC}>Achieve %</th>
+                    <th style={thC}>Bonus $</th>
+                    <th style={{ ...thC, width: "28px" }}></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {playGoals.map((pg, i) => {
+                    const sc = liveGoals[i];
+                    const isCustom = pg.id.startsWith("custom-");
+                    return (
+                      <tr key={pg.id} style={{ borderBottom: "1px solid var(--border)" }}>
+                        <td style={{ padding: "4px 6px" }}>
+                          {isCustom ? (
+                            <select
+                              value={pg.goalTier}
+                              onChange={(e) => updateGoal(pg.id, "goalTier", e.target.value)}
+                              style={{ fontSize: "10px", padding: "2px 4px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", fontFamily: "var(--sans)", background: "var(--surface)", cursor: "pointer" }}
+                            >
+                              <option value="company">Company</option>
+                              <option value="department">Dept</option>
+                              <option value="individual">Individual</option>
+                            </select>
+                          ) : <TierBadge tier={pg.goalTier} />}
+                        </td>
+                        <td style={{ padding: "4px 6px", fontWeight: 600, minWidth: "140px" }}>
+                          {isCustom ? (
+                            <input
+                              type="text"
+                              className="actual-inline-input"
+                              value={pg.name}
+                              onChange={(e) => updateGoal(pg.id, "name", e.target.value)}
+                              placeholder="Goal name"
+                              style={{ width: "140px" }}
+                            />
+                          ) : <>{pg.name}<GoalScopeTags location={pg.location} department={pg.department} /></>}
+                        </td>
+                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
+                          <input type="number" className="actual-inline-input" value={pg.target}
+                            onChange={(e) => updateGoal(pg.id, "target", e.target.value)} style={{ width: "68px" }} />
+                        </td>
+                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
+                          <input type="number" className="actual-inline-input" value={pg.min}
+                            onChange={(e) => updateGoal(pg.id, "min", e.target.value)} style={{ width: "68px" }} />
+                        </td>
+                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
+                          <input type="number" className="actual-inline-input" value={pg.actual}
+                            onChange={(e) => updateGoal(pg.id, "actual", e.target.value)} style={{ width: "68px" }} placeholder="—" />
+                        </td>
+                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
+                          <input type="number" className="actual-inline-input" value={pg.weight}
+                            onChange={(e) => updateGoal(pg.id, "weight", e.target.value)} style={{ width: "60px" }} />
+                        </td>
+                        <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center", fontWeight: 700 }}>
+                          {sc.actual != null
+                            ? (sc.metMin
+                              ? <span style={{ color: sc.achievement >= 100 ? "#2D6B1A" : "var(--brick)" }}>{sc.achievement.toFixed(1)}%</span>
+                              : <span style={{ color: "#9B2C2C" }}>Below min</span>)
+                            : <span style={{ color: "var(--text-faint)" }}>—</span>}
+                        </td>
+                        <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{formatCurrency(sc.bonusContribution)}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
+                          <button
+                            onClick={() => setPlayGoals((prev) => prev.filter((g) => g.id !== pg.id))}
+                            style={{ border: "none", background: "none", color: "#9B2C2C", fontSize: "14px", cursor: "pointer", padding: 0, lineHeight: 1, opacity: 0.6 }}
+                            title="Remove goal"
+                          >✕</button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+          ) : (
+            <div className="no-goals-msg" style={{ display: "block" }}>No goals found for this employee. Add one below.</div>
+          )}
+
+          <div style={{ padding: "10px 0", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <div style={{ position: "relative" }}>
+              <button
+                style={{ fontSize: "12px", padding: "5px 10px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", background: "none", cursor: "pointer", fontFamily: "var(--sans)" }}
+                onClick={() => setAddGoalOpen(!addGoalOpen)}
+              >+ Add Goal</button>
+              {addGoalOpen && (
+                <div style={{ position: "absolute", bottom: "calc(100% + 4px)", left: 0, background: "var(--surface)", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", boxShadow: "0 4px 12px rgba(0,0,0,0.12)", zIndex: 100, minWidth: "220px", maxHeight: "260px", overflowY: "auto" }}>
+                  {availableToAdd.map((g) => (
+                    <button key={g.id}
+                      style={{ display: "block", width: "100%", padding: "7px 12px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "12px" }}
+                      onClick={() => {
+                        const n = playGoals.length + 1;
+                        const equalWeight = Number((100 / n).toFixed(2));
+                        setPlayGoals((prev) => [...prev, {
+                          id: g.id, name: g.name, goalTier: g.goalTier, location: g.location, department: g.department,
+                          role: g.role, lowerBetter: g.lowerBetter, capped: g.capped, capPct: g.capPct,
+                          target: String(g.goalValue || ""), min: String(g.minValue || ""), actual: "", weight: String(equalWeight)
+                        }]);
+                        setAddGoalOpen(false);
+                      }}>
+                      {g.name}<GoalScopeTags location={g.location} department={g.department} />
+                    </button>
+                  ))}
+                  {availableToAdd.length > 0 && (
+                    <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
+                  )}
+                  <button
+                    style={{ display: "block", width: "100%", padding: "7px 12px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "12px", color: "var(--brick)", fontWeight: 600 }}
+                    onClick={() => {
+                      const n = playGoals.length + 1;
+                      const equalWeight = Number((100 / n).toFixed(2));
+                      setPlayGoals((prev) => [...prev, {
+                        id: `custom-${Date.now()}`, name: "", goalTier: "individual",
+                        lowerBetter: false, capped: "no", capPct: 100,
+                        target: "", min: "", actual: "", weight: String(equalWeight)
+                      }]);
+                      setAddGoalOpen(false);
+                    }}>
+                    + Custom goal
+                  </button>
+                </div>
+              )}
+            </div>
+            <div style={{ marginLeft: "auto", fontSize: "12px", color: totalWeight !== 100 ? "var(--brick)" : "var(--text-muted)", fontFamily: "var(--mono)" }}>
+              Total weight: {totalWeight.toFixed(1)}%{totalWeight !== 100 ? " ⚠ must equal 100" : ""}
+            </div>
+          </div>
+        </section>
+      )}
+
+      {selectedEmpName && playGoals.length > 0 && (
+        <div className="results-section">
+          <div className="section-title" style={{ marginBottom: "12px" }}>Live Results</div>
+          <div className="metrics-grid">
+            <Metric label="Base Earnings" value={formatCurrency(earnings)} />
+            <Metric label="Weighted Achievement" value={`${weightedAchievement.toFixed(1)}%${weightedAchievement > 200 ? " → capped 200%" : ""}`} highlight />
+            <Metric label="Estimated Bonus" value={formatCurrency(bonusAmount)} highlight />
+            <Metric label="Total Pay" value={formatCurrency(earnings + bonusAmount)} />
+            {effectiveHourly !== null && <Metric label="Effective Hourly Rate" value={`$${effectiveHourly.toFixed(2)}/hr`} />}
+          </div>
+        </div>
+      )}
     </div>
   );
 }

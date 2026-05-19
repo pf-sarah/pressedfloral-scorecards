@@ -73,24 +73,25 @@ export function parseRipplingEmployees(text: string): Employee[] {
   const headers = rows[0].map(normalizeHeader);
   return rows.slice(1).map((values, index) => {
     const row = Object.fromEntries(headers.map((header, idx) => [header, values[idx] || ""]));
-    const annualPay = Number(getColumn(row, ["Annual Base Pay", "Annual Pay", "Salary"]).replace(/[$,]/g, "")) || undefined;
-    const hourlyRate = Number(getColumn(row, ["Hourly Rate", "Base Hourly Rate"]).replace(/[$,]/g, "")) || undefined;
-    const grossEarnings = Number(getColumn(row, ["Gross Earnings", "Gross Pay"]).replace(/[$,]/g, "")) || undefined;
-    const hoursWorked = Number(getColumn(row, ["Hours Worked", "Hours"]).replace(/[$,]/g, "")) || undefined;
+    const annualPay = Number(getColumn(row, ["Annual Base Pay", "Annual Pay", "Salary", "annual_base_pay"]).replace(/[$,]/g, "")) || undefined;
+    const hourlyRate = Number(getColumn(row, ["Hourly Rate", "Base Hourly Rate", "hourly_rate"]).replace(/[$,]/g, "")) || undefined;
+    const grossEarnings = Number(getColumn(row, ["Gross Earnings", "Gross Pay", "Base Pay"]).replace(/[$,]/g, "")) || undefined;
+    const hoursWorked = Number(getColumn(row, ["Hours Worked", "Total hours worked", "Hours"]).replace(/[$,]/g, "")) || undefined;
     const payType: PayType = annualPay ? "salary" : "hourly";
     return {
       id: `csv-employee-${index}`,
-      name: getColumn(row, ["Name", "Full Name", "Employee Name"]),
+      name: getColumn(row, ["Full Name", "Full name", "Name", "Employee Name"]),
       role: getColumn(row, ["Title", "Job Title", "Role"]),
-      department: getColumn(row, ["Department", "Team"]),
-      location: normalizeLocation(getColumn(row, ["Location", "Work Location"])),
+      department: getColumn(row, ["Department name", "Department", "Team"]),
+      location: normalizeLocation(getColumn(row, ["Work location name", "Work Location", "Location"])),
       manager: getColumn(row, ["Manager", "Supervisor"]),
       payType,
       annualPay,
       hourlyRate,
       grossEarnings,
       hoursWorked,
-      employmentType: getColumn(row, ["Employment Type"])
+      isManager: getColumn(row, ["Is a manager", "Is Manager?", "Is Manager"]).toLowerCase() === "true",
+      employmentType: getColumn(row, ["Employment type name", "Employment Type"])
     };
   }).filter((employee) => employee.name);
 }
