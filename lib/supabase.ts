@@ -98,7 +98,7 @@ export function actualsFromRows(rows: Record<string, any>[]): ActualsByKey {
   const map: ActualsByKey = {};
   for (const row of rows) {
     const goalName = row.goal_name || "";
-    if (goalName.startsWith("__target__") || goalName.startsWith("__min__")) {
+    if (goalName.startsWith("__target__") || goalName.startsWith("__min__") || goalName.startsWith("__monthly_inactive__")) {
       map[goalName] = row.actual_value;
     } else {
       map[[row.goal_tier, row.location || "", row.department || "", goalName].join("|")] = row.actual_value;

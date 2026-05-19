@@ -459,6 +459,28 @@ export default function ScorecardsApp() {
     await saveGoal({ ...goal, active: !goal.active });
   }
 
+  async function toggleGoalForMonth(goal: Goal) {
+    const period = formatMonthLabel(bankMonth);
+    const key = "__monthly_inactive__" + actualKey(goal);
+    const currentPeriodActuals = appData.actuals[period] || {};
+    const isCurrentlyInactive = !!currentPeriodActuals[key];
+    const nextVal = isCurrentlyInactive ? null : 1;
+    const nextPeriodActuals = { ...currentPeriodActuals, [key]: nextVal };
+    setAppData((prev) => ({ ...prev, actuals: { ...prev.actuals, [period]: nextPeriodActuals } }));
+    persistActuals(period, nextPeriodActuals);
+    if (!isFixture && sb) {
+      await sb.from("actuals").upsert({
+        period,
+        goal_tier: "__meta__",
+        location: null,
+        department: null,
+        goal_name: key,
+        actual_value: nextVal
+      }, { onConflict: "period,goal_tier,location,department,goal_name" });
+    }
+    showToast(isCurrentlyInactive ? "Goal activated for this month" : "Goal deactivated for this month");
+  }
+
   async function saveActual(goal: Goal, value: string, periodOverride?: string) {
     const period = periodOverride ?? formatMonthLabel(bankMonth);
     const key = actualKey(goal);
@@ -614,6 +636,7 @@ export default function ScorecardsApp() {
               onSaveTargetPair={(goal, target, min, period) => saveMonthTargetPair(goal, period ?? formatMonthLabel(bankMonth), target, min)}
               onDelete={deleteGoal}
               onToggle={toggleGoal}
+              onToggleMonth={toggleGoalForMonth}
               isAdmin={profile?.role === "admin"}
               allowedDepartments={profile?.role === "admin" ? undefined : (profile?.departments || [])}
             />
@@ -885,6 +908,7 @@ function GoalsScreen(props: {
   onSaveTargetPair: (goal: Goal, target: string, min: string, period?: string) => void;
   onDelete: (id: string) => void;
   onToggle: (id: string) => void;
+  onToggleMonth: (goal: Goal) => void;
   isAdmin?: boolean;
   allowedDepartments?: string[];
 }) {
@@ -925,6 +949,8 @@ function GoalsScreen(props: {
     const a = goal.periodType === "quarterly" ? quarterActuals : props.actuals;
     return a[metaKey("target", goal)] != null && a[metaKey("min", goal)] != null;
   };
+
+  const isMonthlyInactive = (goal: Goal) => !!props.actuals["__monthly_inactive__" + actualKey(goal)];
 
   const handleSaveTargetPair = (goal: Goal, target: string, min: string) => {
     const period = goal.periodType === "quarterly" ? quarterKey : undefined;
@@ -1043,7 +1069,7 @@ function GoalsScreen(props: {
                 const a = props.actuals;
                 return (
                 <React.Fragment key={goal.id}>
-                <tr style={!goal.active ? { opacity: 0.45 } : undefined}>
+                <tr style={(!goal.active || isMonthlyInactive(goal)) ? { opacity: 0.45 } : undefined}>
                   <td style={thCtx}><TierBadge tier={goal.goalTier} /></td>
                   <td style={{ ...thCtx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{locLabel(goal.location)}</td>
                   <td style={{ ...thCtx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{goal.department || "—"}</td>
@@ -1073,9 +1099,11 @@ function GoalsScreen(props: {
                     )}
                   </td>
                   <td style={thStatus}>
-                    <span style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "99px", fontWeight: 600, background: goal.active ? "#eef5ec" : "#f0ece6", color: goal.active ? "#1a5c1a" : "#7a7268" }}>
-                      {goal.active ? "Active" : "Inactive"}
-                    </span>
+                    {(() => { const on = goal.active && !isMonthlyInactive(goal); return (
+                      <span style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "99px", fontWeight: 600, background: on ? "#eef5ec" : "#f0ece6", color: on ? "#1a5c1a" : "#7a7268" }}>
+                        {on ? "Active" : "Inactive"}
+                      </span>
+                    ); })()}
                   </td>
                   {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && (
                     <td style={{ ...thStatus, textAlign: "center" }} className="row-menu-cell" onClick={(e) => e.stopPropagation()}>
@@ -1118,7 +1146,7 @@ function GoalsScreen(props: {
                 const a = quarterActuals;
                 return (
                 <React.Fragment key={goal.id}>
-                <tr style={!goal.active ? { opacity: 0.45 } : undefined}>
+                <tr style={(!goal.active || isMonthlyInactive(goal)) ? { opacity: 0.45 } : undefined}>
                   <td style={thCtx}><TierBadge tier={goal.goalTier} /></td>
                   <td style={{ ...thCtx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{locLabel(goal.location)}</td>
                   <td style={{ ...thCtx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{goal.department || "—"}</td>
@@ -1148,9 +1176,11 @@ function GoalsScreen(props: {
                     )}
                   </td>
                   <td style={thStatus}>
-                    <span style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "99px", fontWeight: 600, background: goal.active ? "#eef5ec" : "#f0ece6", color: goal.active ? "#1a5c1a" : "#7a7268" }}>
-                      {goal.active ? "Active" : "Inactive"}
-                    </span>
+                    {(() => { const on = goal.active && !isMonthlyInactive(goal); return (
+                      <span style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "99px", fontWeight: 600, background: on ? "#eef5ec" : "#f0ece6", color: on ? "#1a5c1a" : "#7a7268" }}>
+                        {on ? "Active" : "Inactive"}
+                      </span>
+                    ); })()}
                   </td>
                   {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && (
                     <td style={{ ...thStatus, textAlign: "center" }} className="row-menu-cell" onClick={(e) => e.stopPropagation()}>
@@ -1211,7 +1241,7 @@ function GoalsScreen(props: {
             {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && <button onClick={() => { props.onEdit(goal); setMenuOpenId(null); setMenuPos(null); }}>Edit goal</button>}
             {!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && goalHasTargets(goal) && <button onClick={() => { setActualEditId(goal.id); setMenuOpenId(null); setMenuPos(null); }}>Enter actual</button>}
             {!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && !goalHasTargets(goal) && <span style={{ display: "block", padding: "8px 12px", fontSize: "12px", color: "var(--text-faint)" }}>Set target first</span>}
-            {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && <button onClick={() => { props.onToggle(goal.id); setMenuOpenId(null); setMenuPos(null); }}>{goal.active ? "Deactivate" : "Activate"}</button>}
+            {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && <button onClick={() => { props.onToggleMonth(goal); setMenuOpenId(null); setMenuPos(null); }}>{isMonthlyInactive(goal) ? "Activate for this month" : "Deactivate for this month"}</button>}
             {(!props.isAdmin && goal.goalTier === "company") && <span style={{ display: "block", padding: "8px 12px", fontSize: "12px", color: "var(--text-faint)" }}>No edits allowed</span>}
           </div>
         );
@@ -1507,8 +1537,9 @@ function ScorecardsScreen(props: {
   const showDeptFilter = teamDepts.length > 1;
   const showLocationFilter = teamLocations.length > 1;
 
-  function goalsForEmployee(employee: Employee): Goal[] {
+  function goalsForEmployee(employee: Employee, actuals: Record<string, number | null> = periodActuals): Goal[] {
     return props.allGoals.filter((goal) => {
+      if (actuals["__monthly_inactive__" + actualKey(goal)]) return false;
       if (goal.goalTier === "company") return true;
       if (goal.goalTier === "department") return goal.department === employee.department && (!goal.location || goal.location === employee.location);
       return goal.role === employee.role && goal.department === employee.department && (!goal.location || goal.location === employee.location);
@@ -1743,7 +1774,7 @@ function ScorecardsScreen(props: {
                         key={`${m}-${emp.id || emp.name}`}
                         employee={empWithEarnings}
                         month={mLabel}
-                        baseGoals={goalsForEmployee(emp)}
+                        baseGoals={goalsForEmployee(emp, mActuals)}
                         allGoals={props.allGoals}
                         periodActuals={mActuals}
                         submittedScorecard={submitted}
