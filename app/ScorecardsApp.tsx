@@ -267,10 +267,11 @@ export default function ScorecardsApp() {
       return;
     }
 
-    const [goalsResult, scorecardsResult, ripplingResult] = await Promise.all([
+    const [goalsResult, scorecardsResult, ripplingResult, actualsResult] = await Promise.all([
       client.from("goals_bank").select("*").order("goal_tier").order("department").order("name"),
       client.from("scorecards").select("*").order("scorecard_month", { ascending: false }).order("employee_name"),
-      client.from("rippling_employees").select("*").order("period", { ascending: false })
+      client.from("rippling_employees").select("*").order("period", { ascending: false }),
+      client.from("actuals").select("*")
     ]);
 
     const rippling: Record<string, Employee[]> = {};
@@ -281,9 +282,22 @@ export default function ScorecardsApp() {
       rippling[period] = [...(rippling[period] || []), emp];
       allEmployees.push(emp);
     }
+
+    // Group actuals rows by period and convert to ActualsByKey maps
+    const actualsByPeriod: Record<string, Record<string, any>[]> = {};
+    for (const row of actualsResult.data || []) {
+      const period = row.period || "";
+      if (!actualsByPeriod[period]) actualsByPeriod[period] = [];
+      actualsByPeriod[period].push(row);
+    }
+    const actuals: Record<string, ActualsByKey> = {};
+    for (const [period, rows] of Object.entries(actualsByPeriod)) {
+      actuals[period] = actualsFromRows(rows);
+    }
+
     const goals = scopedForProfile((goalsResult.data || []).map(goalFromRow), loadedProfile);
     const scorecards = scopedScorecardsForProfile((scorecardsResult.data || []).map(scorecardFromRow), loadedProfile, allEmployees);
-    setAppData((current) => ({ ...current, goals, scorecards, rippling }));
+    setAppData((current) => ({ ...current, goals, scorecards, rippling, actuals: { ...current.actuals, ...actuals } }));
   }
 
   async function signIn() {
