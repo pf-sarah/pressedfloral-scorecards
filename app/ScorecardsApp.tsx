@@ -375,6 +375,21 @@ export default function ScorecardsApp() {
     return result;
   }, [appData.rippling]);
 
+  // Scorecards belonging to the logged-in user (for the Personal Scorecard panel on the landing page)
+  const myOwnScorecards = useMemo(() => {
+    if (!profile?.linkedEmployeeName) return [];
+    return [...appData.scorecards.filter((sc) => sc.employeeName === profile.linkedEmployeeName)]
+      .sort((a, b) => {
+        function key(period: string) {
+          const qm = period.match(/^Q(\d) (\d{4})$/);
+          if (qm) return `${qm[2]}-${String((parseInt(qm[1]) - 1) * 3 + 1).padStart(2, "0")}`;
+          const d = new Date(`${period} 1`);
+          return isNaN(d.getTime()) ? period : `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+        }
+        return key(a.scorecardMonth).localeCompare(key(b.scorecardMonth));
+      });
+  }, [profile, appData.scorecards]);
+
   const filteredHistory = useMemo(() => {
     return scopedScorecardsForProfile(appData.scorecards, profile, allRipplingEmployees).filter((scorecard) => {
       if (historyFilters.period && scorecard.scorecardMonth !== historyFilters.period) return false;
@@ -634,7 +649,7 @@ export default function ScorecardsApp() {
           </div>
         </header>
         <main>
-          {mode === "landing" && <LandingScreen onMode={setMode} profile={profile} />}
+          {mode === "landing" && <LandingScreen onMode={setMode} profile={profile} myOwnScorecards={myOwnScorecards} />}
           {mode === "setup" && (
             <GoalsScreen
               month={bankMonth}
@@ -852,7 +867,129 @@ function Sidebar(props: {
   );
 }
 
-function LandingScreen({ onMode, profile }: { onMode: (mode: Screen) => void; profile: ManagerProfile | null }) {
+function PersonalScorecardPanel({ scorecards, employeeName }: { scorecards: Scorecard[]; employeeName: string }) {
+  // Convert a mixed period label ("May 2026" or "Q2 2026") to an ISO-ish sort key
+  function periodSortKey(period: string): string {
+    const qm = period.match(/^Q(\d) (\d{4})$/);
+    if (qm) return `${qm[2]}-${String((parseInt(qm[1]) - 1) * 3 + 1).padStart(2, "0")}`;
+    const d = new Date(`${period} 1`);
+    if (!isNaN(d.getTime())) return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    return period;
+  }
+
+  const today = new Date();
+  const currentLabel = formatMonthLabel(`${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`);
+
+  const submittedSet = new Set(scorecards.map((sc) => sc.scorecardMonth));
+  const allPeriods = [...submittedSet];
+  if (!submittedSet.has(currentLabel)) allPeriods.push(currentLabel);
+  const sortedPeriods = [...allPeriods].sort((a, b) => periodSortKey(a).localeCompare(periodSortKey(b)));
+
+  const [idx, setIdx] = useState(() => sortedPeriods.length - 1);
+
+  // Keep idx in bounds if scorecards prop changes
+  const safeIdx = Math.min(idx, Math.max(0, sortedPeriods.length - 1));
+  const currentPeriod = sortedPeriods[safeIdx] || currentLabel;
+  const scorecard = scorecards.find((sc) => sc.scorecardMonth === currentPeriod) || null;
+  const isPending = !scorecard;
+
+  const thS: React.CSSProperties = { padding: "5px 10px", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", textAlign: "left", borderBottom: "1.5px solid var(--border)", whiteSpace: "nowrap", background: "var(--surface2)" };
+  const thC: React.CSSProperties = { ...thS, textAlign: "center" };
+  const navBtnStyle = (disabled: boolean): React.CSSProperties => ({
+    border: "none", background: "none", cursor: disabled ? "default" : "pointer",
+    color: disabled ? "var(--text-faint)" : "var(--text)", fontSize: "18px",
+    padding: "0 6px", lineHeight: 1, flexShrink: 0
+  });
+
+  return (
+    <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", background: "var(--surface)" }}>
+      {/* Navigation header */}
+      <div style={{ display: "flex", alignItems: "center", gap: "4px", padding: "10px 14px", background: "var(--surface2)", borderBottom: "1px solid var(--border)" }}>
+        <button style={navBtnStyle(safeIdx === 0)} disabled={safeIdx === 0} onClick={() => setIdx(safeIdx - 1)}>◀</button>
+        <div style={{ flex: 1, textAlign: "center", fontWeight: 700, fontSize: "13px" }}>{currentPeriod}</div>
+        <button style={navBtnStyle(safeIdx === sortedPeriods.length - 1)} disabled={safeIdx === sortedPeriods.length - 1} onClick={() => setIdx(safeIdx + 1)}>▶</button>
+        <span style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "99px", fontWeight: 700, fontFamily: "var(--mono)", background: isPending ? "#f0ece6" : "#e8f5e2", color: isPending ? "#7a7268" : "#2D6B1A", flexShrink: 0, marginLeft: "6px" }}>
+          {isPending ? "PENDING" : "SUBMITTED"}
+        </span>
+      </div>
+
+      {isPending ? (
+        <div style={{ padding: "28px 16px", textAlign: "center", color: "var(--text-muted)", fontSize: "13px" }}>
+          No scorecard submitted yet for {currentPeriod}.
+        </div>
+      ) : scorecard && (
+        <>
+          {/* Employee info */}
+          <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)" }}>
+            <div style={{ fontSize: "13px", fontWeight: 700 }}>{scorecard.employeeName}</div>
+            <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+              {scorecard.role}{scorecard.department ? ` · ${scorecard.department}` : ""}{scorecard.location ? ` · ${scorecard.location}` : ""}
+            </div>
+          </div>
+
+          {/* Key metrics */}
+          <div style={{ display: "flex", gap: "20px", padding: "10px 16px", background: "var(--surface2)", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
+            {[
+              { label: "BASE EARNINGS", value: formatCurrency(scorecard.baseEarnings), color: undefined },
+              scorecard.hours ? { label: "HOURS", value: scorecard.hours.toFixed(2), color: undefined } : null,
+              { label: "ACHIEVEMENT", value: `${scorecard.weightedAchievement.toFixed(1)}%${scorecard.scorecardCapped ? " cap" : ""}`, color: scorecard.weightedAchievement >= 100 ? "#2D6B1A" : "var(--brick)" },
+              { label: "BONUS", value: formatCurrency(scorecard.bonusAmount), color: "var(--brick)" },
+            ].filter(Boolean).map((item) => item && (
+              <div key={item.label}>
+                <div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>{item.label}</div>
+                <div style={{ fontSize: "13px", fontWeight: 700, color: item.color || "var(--text)" }}>{item.value}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Goals table */}
+          {scorecard.goals.length > 0 && (
+            <div style={{ overflowX: "auto" }}>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
+                <thead>
+                  <tr>
+                    <th style={thS}>Type</th>
+                    <th style={thS}>Goal</th>
+                    <th style={thC}>Target</th>
+                    <th style={thC}>Actual</th>
+                    <th style={thC}>Weight</th>
+                    <th style={thC}>Achieve%</th>
+                    <th style={thC}>Bonus $</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {scorecard.goals.map((g) => (
+                    <tr key={g.name} style={{ borderBottom: "1px solid var(--border)" }}>
+                      <td style={{ padding: "5px 10px" }}><TierBadge tier={g.goalTier} /></td>
+                      <td style={{ padding: "5px 10px", fontWeight: 600, minWidth: "140px" }}>
+                        {g.name}<GoalScopeTags location={g.location} department={g.department} />
+                      </td>
+                      <td style={{ padding: "5px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{formatNumber(g.target)}</td>
+                      <td style={{ padding: "5px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>
+                        {g.actual != null ? formatNumber(g.actual) : <span style={{ color: "var(--text-faint)" }}>—</span>}
+                      </td>
+                      <td style={{ padding: "5px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{g.weight.toFixed(1)}%</td>
+                      <td style={{ padding: "5px 10px", fontFamily: "var(--mono)", textAlign: "center", fontWeight: 700 }}>
+                        {g.actual != null
+                          ? (g.metMin
+                            ? <span style={{ color: g.achievement >= 100 ? "#2D6B1A" : "var(--brick)" }}>{g.achievement.toFixed(1)}%</span>
+                            : <span style={{ color: "#9B2C2C" }}>Below min</span>)
+                          : <span style={{ color: "var(--text-faint)" }}>—</span>}
+                      </td>
+                      <td style={{ padding: "5px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{formatCurrency(g.bonusContribution)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function LandingScreen({ onMode, profile, myOwnScorecards }: { onMode: (mode: Screen) => void; profile: ManagerProfile | null; myOwnScorecards: Scorecard[] }) {
   const isUser = profile?.role === "user";
   const isAdmin = profile?.role === "admin";
   const manageCards: { mode: Screen; label: string; text: string; icon: string }[] = [
@@ -869,9 +1006,15 @@ function LandingScreen({ onMode, profile }: { onMode: (mode: Screen) => void; pr
     <div className="screen active">
       <div className="landing-wrap">
         <div className="landing-kicker">{isUser ? `Welcome, ${profile?.linkedEmployeeName || ""}` : "Where would you like to go?"}</div>
+        {profile?.linkedEmployeeName && myOwnScorecards.length >= 0 && (
+          <>
+            <div className="landing-section-label">My Scorecard</div>
+            <PersonalScorecardPanel scorecards={myOwnScorecards} employeeName={profile.linkedEmployeeName} />
+          </>
+        )}
         {!isUser && (
           <>
-            <div className="landing-section-label">Manage</div>
+            <div className="landing-section-label" style={{ marginTop: "18px" }}>Manage</div>
             <div className="landing-grid">
               {manageCards.map((card) => (
                 <button key={card.mode} className="landing-card" onClick={() => onMode(card.mode)}>
@@ -883,7 +1026,7 @@ function LandingScreen({ onMode, profile }: { onMode: (mode: Screen) => void; pr
             </div>
           </>
         )}
-        <div className="landing-section-label">Review</div>
+        <div className="landing-section-label" style={{ marginTop: "18px" }}>Review</div>
         <div className="landing-grid landing-grid-review">
           {visibleReview.map((card) => (
             <button key={card.mode} className="landing-card" onClick={() => onMode(card.mode)}>
