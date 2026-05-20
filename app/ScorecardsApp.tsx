@@ -1720,10 +1720,12 @@ function ScorecardsScreen(props: {
                 <LiveScorecardCard
                   key={emp.id || emp.name}
                   employee={withActualEarnings(emp)}
+                  isoMonth={selectedMonth}
                   month={periodLabel}
                   baseGoals={goalsForEmployee(emp)}
                   allGoals={props.allGoals}
                   periodActuals={periodActuals}
+                  allRippling={props.rippling}
                   submittedScorecard={submitted}
                   onSubmit={props.onSubmitScorecard}
                   onDeleteGoal={props.onDeleteGoal}
@@ -1787,10 +1789,12 @@ function ScorecardsScreen(props: {
                       <LiveScorecardCard
                         key={`${m}-${emp.id || emp.name}`}
                         employee={empWithEarnings}
+                        isoMonth={m}
                         month={mLabel}
                         baseGoals={goalsForEmployee(emp, mActuals)}
                         allGoals={props.allGoals}
                         periodActuals={mActuals}
+                        allRippling={props.rippling}
                         submittedScorecard={submitted}
                         onSubmit={props.onSubmitScorecard}
                         onDeleteGoal={props.onDeleteGoal}
@@ -1809,28 +1813,73 @@ function ScorecardsScreen(props: {
 }
 
 function LiveScorecardCard({
-  employee, month, baseGoals, allGoals, periodActuals, submittedScorecard, onSubmit, onDeleteGoal, currentUserEmail
+  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, onSubmit, onDeleteGoal, currentUserEmail
 }: {
   employee: Employee;
+  isoMonth: string;
   month: string;
   baseGoals: Goal[];
   allGoals: Goal[];
   periodActuals: ActualsByKey;
+  allRippling: Record<string, Employee[]>;
   submittedScorecard: Scorecard | undefined;
   onSubmit: (scorecard: Scorecard) => void;
   onDeleteGoal: (value: { scorecardId: string; goalName: string }) => void;
   currentUserEmail: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [goalIds, setGoalIds] = useState<string[]>(() => baseGoals.map((g) => g.id));
+  const [cardPeriodType, setCardPeriodType] = useState<"monthly" | "quarterly">("monthly");
+  const [goalIds, setGoalIds] = useState<string[]>(() => baseGoals.filter((g) => g.periodType !== "quarterly").map((g) => g.id));
   const [indActuals, setIndActuals] = useState<Record<string, string>>({});
   const [addGoalOpen, setAddGoalOpen] = useState(false);
   const [lastSubmitted, setLastSubmitted] = useState<Scorecard | null>(null);
+
+  const quarterKey = quarterKeyForMonth(isoMonth);
+
+  // Sum earnings across all 3 months of the quarter from Rippling uploads
+  const quarterlyEmployee = useMemo(() => {
+    const [y, m] = isoMonth.split("-").map(Number);
+    if (!y || !m) return employee;
+    const q = Math.ceil(m / 3);
+    const start = (q - 1) * 3 + 1;
+    const qMonths = [0, 1, 2].map((i) => `${y}-${String(start + i).padStart(2, "0")}`);
+    let totalGross = 0;
+    let totalHours = 0;
+    for (const qm of qMonths) {
+      const [qy, qmm] = qm.split("-").map(Number);
+      const earningsKey = `${qmm === 12 ? qy + 1 : qy}-${String(qmm === 12 ? 1 : qmm + 1).padStart(2, "0")}`;
+      const src = (allRippling[earningsKey] || []).find((e) => e.name === employee.name);
+      if (src?.grossEarnings) totalGross += src.grossEarnings;
+      if (src?.hoursWorked) totalHours += src.hoursWorked;
+    }
+    return { ...employee, grossEarnings: totalGross > 0 ? totalGross : undefined, hoursWorked: totalHours > 0 ? totalHours : undefined };
+  }, [isoMonth, employee, allRippling]);
+
+  function isGoalApplicable(goal: Goal): boolean {
+    if (goal.goalTier === "company") return true;
+    if (goal.goalTier === "department") return goal.department === employee.department && (!goal.location || goal.location === employee.location);
+    return goal.role === employee.role && goal.department === employee.department && (!goal.location || goal.location === employee.location);
+  }
+
+  const hasQuarterlyGoals = allGoals.some((g) => g.periodType === "quarterly" && isGoalApplicable(g));
+
+  function handlePeriodTypeChange(newType: "monthly" | "quarterly") {
+    setCardPeriodType(newType);
+    setIndActuals({});
+    if (newType === "monthly") {
+      setGoalIds(baseGoals.filter((g) => g.periodType !== "quarterly").map((g) => g.id));
+    } else {
+      setGoalIds(baseGoals.filter((g) => g.periodType === "quarterly").map((g) => g.id));
+    }
+  }
 
   const displayedSubmitted = submittedScorecard || lastSubmitted;
   if (displayedSubmitted) {
     return <ScorecardCard scorecard={displayedSubmitted} onDeleteGoal={onDeleteGoal} />;
   }
+
+  const activeEmployee = cardPeriodType === "quarterly" ? quarterlyEmployee : employee;
+  const activeMonth = cardPeriodType === "quarterly" ? quarterKey : month;
 
   const currentGoals: EditableGoal[] = (() => {
     const goals = goalIds
@@ -1852,10 +1901,14 @@ function LiveScorecardCard({
     });
   })();
 
-  const liveScorecard = buildScorecard({ employee, month, periodType: "monthly", goals: currentGoals, submittedBy: currentUserEmail });
+  const liveScorecard = buildScorecard({ employee: activeEmployee, month: activeMonth, periodType: cardPeriodType, goals: currentGoals, submittedBy: currentUserEmail });
 
   const hasNoTarget = currentGoals.some((g) => periodActuals[metaKey("target", g)] == null || periodActuals[metaKey("min", g)] == null);
-  const availableToAdd = allGoals.filter((g) => !goalIds.includes(g.id));
+  const availableToAdd = allGoals.filter((g) => {
+    if (goalIds.includes(g.id)) return false;
+    if (!isGoalApplicable(g)) return false;
+    return cardPeriodType === "quarterly" ? g.periodType === "quarterly" : g.periodType !== "quarterly";
+  });
   const achColor = liveScorecard.weightedAchievement >= 100 ? "#2D6B1A" : "var(--brick)";
 
   const thS: React.CSSProperties = { padding: "6px 10px", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", textAlign: "left", borderBottom: "1.5px solid var(--border)", whiteSpace: "nowrap", background: "var(--surface2)" };
@@ -1883,6 +1936,12 @@ function LiveScorecardCard({
             </div>
           </>
         )}
+        {hasQuarterlyGoals && (
+          <div style={{ display: "flex", borderRadius: "99px", border: "1.5px solid var(--border)", overflow: "hidden", flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+            <button style={{ padding: "2px 8px", fontSize: "10px", fontWeight: 700, fontFamily: "var(--mono)", border: "none", cursor: "pointer", background: cardPeriodType === "monthly" ? "var(--brick)" : "transparent", color: cardPeriodType === "monthly" ? "#fff" : "var(--text-muted)", transition: "background 0.15s" }} onClick={() => handlePeriodTypeChange("monthly")}>MO</button>
+            <button style={{ padding: "2px 8px", fontSize: "10px", fontWeight: 700, fontFamily: "var(--mono)", border: "none", cursor: "pointer", background: cardPeriodType === "quarterly" ? "var(--brick)" : "transparent", color: cardPeriodType === "quarterly" ? "#fff" : "var(--text-muted)", transition: "background 0.15s" }} onClick={() => handlePeriodTypeChange("quarterly")}>QTR</button>
+          </div>
+        )}
         <span style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "99px", background: "#f0ece6", color: "#7a7268", fontWeight: 700, fontFamily: "var(--mono)", flexShrink: 0 }}>DRAFT</span>
       </div>
 
@@ -1890,20 +1949,20 @@ function LiveScorecardCard({
         <>
           <div style={{ display: "flex", gap: "24px", padding: "10px 16px", background: "var(--surface2)", borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
             <div>
-              <div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>BASE EARNINGS</div>
+              <div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>{cardPeriodType === "quarterly" ? `QUARTERLY EARNINGS · ${quarterKey}` : "BASE EARNINGS"}</div>
               <div style={{ fontSize: "13px", fontWeight: 700 }}>{formatCurrency(liveScorecard.baseEarnings)}</div>
             </div>
-            {employee.hoursWorked ? (
+            {activeEmployee.hoursWorked ? (
               <div>
-                <div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>HOURS WORKED</div>
-                <div style={{ fontSize: "13px", fontWeight: 700 }}>{employee.hoursWorked.toFixed(2)}</div>
+                <div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>HOURS WORKED{cardPeriodType === "quarterly" ? " (QTR)" : ""}</div>
+                <div style={{ fontSize: "13px", fontWeight: 700 }}>{activeEmployee.hoursWorked.toFixed(2)}</div>
               </div>
             ) : null}
           </div>
 
           {hasNoTarget && (
             <div style={{ padding: "8px 16px", background: "#fffbf0", borderTop: "1px solid #f0e0a0", fontSize: "11px", color: "#7a5c00" }}>
-              ⚠ Some goals are missing targets or minimums for {month}. Set them in Goals & Actuals before submitting.
+              ⚠ Some goals are missing targets or minimums for {activeMonth}. Set them in Goals & Actuals before submitting.
             </div>
           )}
 
@@ -1980,7 +2039,9 @@ function LiveScorecardCard({
               </table>
             </div>
           ) : (
-            <div className="no-goals-msg" style={{ display: "block", margin: "12px 16px" }}>No goals assigned for this employee and month.</div>
+            <div className="no-goals-msg" style={{ display: "block", margin: "12px 16px" }}>
+              {cardPeriodType === "quarterly" ? `No quarterly goals assigned for ${employee.name}.` : "No goals assigned for this employee and month."}
+            </div>
           )}
 
           <div style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px", borderTop: "1px solid var(--border)", flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
