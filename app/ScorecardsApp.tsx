@@ -32,6 +32,14 @@ import type { ActualsByKey, AppData, Employee, Goal, GoalTier, HistoryFilters, M
 type Screen = "landing" | "setup" | "scorecard" | "history" | "rippling" | "guide" | "todos" | "migrate" | "whatif";
 type HistoryView = "table" | "scorecard" | "grid" | "chart";
 
+/** Derive a "First Last" candidate name from an email like kanon.foote@domain.com */
+function nameFromEmail(email: string): string {
+  const local = (email || "").split("@")[0];
+  const parts = local.split(/[._-]/);
+  if (parts.length < 2) return "";
+  return parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(" ");
+}
+
 const departments = [
   "Client Care",
   "Design",
@@ -79,7 +87,10 @@ function actualKey(goal: Pick<Goal, "goalTier" | "location" | "department" | "na
 }
 
 function metaKey(type: "target" | "min", goal: Pick<Goal, "goalTier" | "location" | "department" | "name">) {
-  return `__${type}__${actualKey(goal)}`;
+  // Department goal targets are shared across all locations within a department —
+  // strip location so that setting a target once covers all employees in that dept.
+  const loc = goal.goalTier === "department" ? "" : (goal.location || "");
+  return `__${type}__${[goal.goalTier, loc, goal.department || "", goal.name].join("|")}`;
 }
 
 function quarterKeyForMonth(isoMonth: string): string {
@@ -247,7 +258,23 @@ export default function ScorecardsApp() {
     setCurrentUserEmail(email);
     localStorage.setItem(PROFILE_EMAIL_KEY, email);
     const { data } = await client.from("manager_profiles").select("*").eq("id", userId).maybeSingle();
-    const loadedProfile = data ? profileFromRow(email, data) : { id: userId, email, role: "manager" as const, departments: [], locations: [] };
+    let loadedProfile: ManagerProfile = data ? profileFromRow(email, data) : { id: userId, email, role: "manager" as const, departments: [], locations: [] };
+
+    // Auto-link: if no employee link yet, try to match email → "First Last" against Rippling
+    if (!loadedProfile.linkedEmployeeName) {
+      const candidateName = nameFromEmail(email);
+      if (candidateName) {
+        const { data: ripplingRows } = await client.from("rippling_employees").select("full_name").limit(1000);
+        const match = (ripplingRows || []).find((r: Record<string, any>) =>
+          (r.full_name || "").toLowerCase() === candidateName.toLowerCase()
+        );
+        if (match?.full_name) {
+          await client.from("manager_profiles").update({ linked_employee_name: match.full_name }).eq("id", userId);
+          loadedProfile = { ...loadedProfile, linkedEmployeeName: match.full_name };
+        }
+      }
+    }
+
     setProfile(loadedProfile);
     localStorage.setItem(PROFILE_ROLE_KEY, JSON.stringify(loadedProfile));
     setAuthenticated(true);
@@ -1128,7 +1155,8 @@ function LandingScreen({ onMode, profile, myOwnScorecards, myEmployee, allGoals,
             <div className="landing-section-label">My Scorecard</div>
             {profile.linkedEmployeeName ? (
               <PersonalScorecardPanel scorecards={myOwnScorecards} employeeName={profile.linkedEmployeeName} myEmployee={myEmployee} allGoals={allGoals} allActuals={allActuals} rippling={rippling} />
-            ) : (
+            ) : isAdmin ? (
+              /* Admins can link their own profile */
               <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", padding: "20px 20px", background: "var(--surface)", display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" }}>
                 <div style={{ flex: 1, minWidth: "180px" }}>
                   <div style={{ fontWeight: 700, fontSize: "13px", marginBottom: "4px" }}>Link your employee profile</div>
@@ -1157,6 +1185,13 @@ function LandingScreen({ onMode, profile, myOwnScorecards, myEmployee, allGoals,
                   >
                     {linking ? "Saving…" : "Link"}
                   </button>
+                </div>
+              </div>
+            ) : (
+              /* Non-admins see a placeholder — auto-link didn't find a match */
+              <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", padding: "20px 20px", background: "var(--surface)" }}>
+                <div style={{ fontSize: "13px", color: "var(--text-muted)", textAlign: "center" }}>
+                  Your scorecard will appear here once your admin links your employee profile.
                 </div>
               </div>
             )}
