@@ -345,6 +345,8 @@ export default function ScorecardsApp() {
 
   const visibleGoals = useMemo(() => {
     let goals = scopedForProfile(appData.goals, profile);
+    // Only admins see company goals on the Goals & Actuals page
+    if (!roleAtLeast(profile, "admin")) goals = goals.filter((g) => g.goalTier !== "company");
     if (!bankFilters.showInactive) goals = goals.filter((goal) => goal.active);
     if (bankFilters.types.length > 0 && bankFilters.types.length < 3) goals = goals.filter((goal) => bankFilters.types.includes(goal.goalTier));
     if (bankFilters.location) goals = goals.filter((goal) => !goal.location || goal.location === bankFilters.location);
@@ -1020,9 +1022,13 @@ function GoalsScreen(props: {
         <div className="filter-row" style={{ gap: 8 }}>
           <MultiSelectDropdown
             label="All types"
-            options={[{ value: "company", label: "Company" }, { value: "department", label: "Department" }, { value: "individual", label: "Individual" }]}
-            selected={props.filters.types}
-            onChange={(types) => props.onFilters({ ...props.filters, types })}
+            options={[
+              ...(props.isAdmin ? [{ value: "company", label: "Company" }] : []),
+              { value: "department", label: "Department" },
+              { value: "individual", label: "Individual" }
+            ]}
+            selected={props.filters.types.filter((t) => props.isAdmin || t !== "company")}
+            onChange={(types) => props.onFilters({ ...props.filters, types: props.isAdmin ? types : types.filter((t) => t !== "company") })}
           />
           <select className="bank-filter-select" value={props.filters.location} onChange={(e) => props.onFilters({ ...props.filters, location: e.target.value })}>
             <option value="">All locations</option>
@@ -1042,7 +1048,7 @@ function GoalsScreen(props: {
             <option value="location">Sort: Location</option>
             <option value="name">Sort: Name</option>
           </select>
-          <button className="reset-filters-btn" onClick={() => props.onFilters({ types: ["company", "department", "individual"], location: "", departments: [...departments], sort: "goalTier", showInactive: false })}>Reset</button>
+          <button className="reset-filters-btn" onClick={() => props.onFilters({ types: props.isAdmin ? ["company", "department", "individual"] : ["department", "individual"], location: "", departments: [...departments], sort: "goalTier", showInactive: false })}>Reset</button>
         </div>
       </section>
       <section style={{ padding: 0 }}>
