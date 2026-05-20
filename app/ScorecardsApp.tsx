@@ -332,6 +332,16 @@ export default function ScorecardsApp() {
     setToast({ message, type });
   }
 
+  async function linkEmployeeProfile(name: string) {
+    if (!profile || !sb) return;
+    const { error } = await sb.from("manager_profiles").update({ linked_employee_name: name }).eq("id", profile.id);
+    if (error) { showToast("Could not save — check Supabase RLS policies.", "error"); return; }
+    const updated = { ...profile, linkedEmployeeName: name };
+    setProfile(updated);
+    localStorage.setItem(PROFILE_ROLE_KEY, JSON.stringify(updated));
+    showToast(`Linked to ${name}`);
+  }
+
   const months = useMemo(() => {
     const values = new Set<string>([fixtureMonth, ...Object.keys(appData.rippling)]);
     // include 24 months back through 12 months forward so every month is always selectable
@@ -655,7 +665,7 @@ export default function ScorecardsApp() {
           </div>
         </header>
         <main>
-          {mode === "landing" && <LandingScreen onMode={setMode} profile={profile} myOwnScorecards={myOwnScorecards} myEmployee={myEmployee} allGoals={appData.goals.filter((g) => g.active)} allActuals={appData.actuals} rippling={appData.rippling} />}
+          {mode === "landing" && <LandingScreen onMode={setMode} profile={profile} myOwnScorecards={myOwnScorecards} myEmployee={myEmployee} allGoals={appData.goals.filter((g) => g.active)} allActuals={appData.actuals} rippling={appData.rippling} allEmployeeNames={latestRipplingEmployees.map((e) => e.name).sort()} onLinkEmployee={linkEmployeeProfile} />}
           {mode === "setup" && (
             <GoalsScreen
               month={bankMonth}
@@ -1082,7 +1092,7 @@ function PersonalScorecardPanel({
   );
 }
 
-function LandingScreen({ onMode, profile, myOwnScorecards, myEmployee, allGoals, allActuals, rippling }: {
+function LandingScreen({ onMode, profile, myOwnScorecards, myEmployee, allGoals, allActuals, rippling, allEmployeeNames, onLinkEmployee }: {
   onMode: (mode: Screen) => void;
   profile: ManagerProfile | null;
   myOwnScorecards: Scorecard[];
@@ -1090,7 +1100,12 @@ function LandingScreen({ onMode, profile, myOwnScorecards, myEmployee, allGoals,
   allGoals: Goal[];
   allActuals: Record<string, ActualsByKey>;
   rippling: Record<string, Employee[]>;
+  allEmployeeNames: string[];
+  onLinkEmployee: (name: string) => Promise<void>;
 }) {
+  const [linkName, setLinkName] = useState("");
+  const [linking, setLinking] = useState(false);
+
   const isUser = profile?.role === "user";
   const isAdmin = profile?.role === "admin";
   const manageCards: { mode: Screen; label: string; text: string; icon: string }[] = [
@@ -1107,10 +1122,44 @@ function LandingScreen({ onMode, profile, myOwnScorecards, myEmployee, allGoals,
     <div className="screen active">
       <div className="landing-wrap">
         <div className="landing-kicker">{isUser ? `Welcome, ${profile?.linkedEmployeeName || ""}` : "Where would you like to go?"}</div>
-        {profile?.linkedEmployeeName && myOwnScorecards.length >= 0 && (
+        {/* Personal Scorecard section — shows for everyone with a profile */}
+        {profile && (
           <>
             <div className="landing-section-label">My Scorecard</div>
-            <PersonalScorecardPanel scorecards={myOwnScorecards} employeeName={profile.linkedEmployeeName} myEmployee={myEmployee} allGoals={allGoals} allActuals={allActuals} rippling={rippling} />
+            {profile.linkedEmployeeName ? (
+              <PersonalScorecardPanel scorecards={myOwnScorecards} employeeName={profile.linkedEmployeeName} myEmployee={myEmployee} allGoals={allGoals} allActuals={allActuals} rippling={rippling} />
+            ) : (
+              <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", padding: "20px 20px", background: "var(--surface)", display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" }}>
+                <div style={{ flex: 1, minWidth: "180px" }}>
+                  <div style={{ fontWeight: 700, fontSize: "13px", marginBottom: "4px" }}>Link your employee profile</div>
+                  <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>Select your name to see your live scorecard here.</div>
+                </div>
+                <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
+                  <select
+                    className="bank-filter-select"
+                    value={linkName}
+                    onChange={(e) => setLinkName(e.target.value)}
+                    style={{ minWidth: "180px" }}
+                  >
+                    <option value="">— select your name —</option>
+                    {allEmployeeNames.map((n) => <option key={n} value={n}>{n}</option>)}
+                  </select>
+                  <button
+                    className="submit-btn"
+                    style={{ padding: "7px 18px", fontSize: "12px" }}
+                    disabled={!linkName || linking}
+                    onClick={async () => {
+                      if (!linkName) return;
+                      setLinking(true);
+                      await onLinkEmployee(linkName);
+                      setLinking(false);
+                    }}
+                  >
+                    {linking ? "Saving…" : "Link"}
+                  </button>
+                </div>
+              </div>
+            )}
           </>
         )}
         {!isUser && (
