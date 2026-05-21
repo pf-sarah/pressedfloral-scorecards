@@ -14,6 +14,7 @@ Production mode requires:
 
 - `NEXT_PUBLIC_SUPABASE_URL`
 - `NEXT_PUBLIC_SUPABASE_ANON_KEY`
+- `SUPABASE_SERVICE_ROLE_KEY` for the server-only admin user invite API
 - `NEXT_PUBLIC_SCORECARDS_DATA_MODE=supabase`
 
 For local fixture-mode testing without Supabase credentials:
@@ -54,3 +55,5 @@ For Vercel, set the production env vars above and use the default Next.js build 
 ```sh
 npm run build
 ```
+
+The service-role key must only be configured as a server-side environment variable. It is used by `/api/admin/users` to invite Auth users and update `manager_profiles`; browser clients still cannot write profiles directly. Configure the Supabase Auth Site URL and redirect URLs to include the deployed app URL so invite links return users to the scorecards app.

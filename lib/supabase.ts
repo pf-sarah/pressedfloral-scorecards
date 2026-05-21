@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { isConfiguredProfile, parseProfileRole } from "./adminUsers";
 import type { ActualsByKey, Employee, Goal, ManagerProfile, Scorecard } from "./types";
 
 export const dataMode = process.env.NEXT_PUBLIC_SCORECARDS_DATA_MODE === "fixture" ? "fixture" : "supabase";
@@ -90,14 +91,21 @@ export function employeeToRow(period: string, employee: Employee) {
 }
 
 export function profileFromRow(email: string, row: Record<string, any>): ManagerProfile {
+  const role = parseProfileRole(row.role) ?? "user";
   return {
     id: String(row.id),
     email,
-    role: row.role || "manager",
-    departments: row.departments || [],
-    locations: row.locations || [],
-    linkedEmployeeName: row.linked_employee_name || undefined
+    role,
+    departments: Array.isArray(row.departments) ? row.departments : [],
+    locations: Array.isArray(row.locations) ? row.locations : [],
+    linkedEmployeeName: typeof row.linked_employee_name === "string" && row.linked_employee_name.trim() ? row.linked_employee_name.trim() : undefined
   };
+}
+
+export function configuredProfileFromRow(email: string, row: Record<string, any> | null | undefined): ManagerProfile | null {
+  if (!row || !parseProfileRole(row.role)) return null;
+  const profile = profileFromRow(email, row);
+  return isConfiguredProfile(profile) ? profile : null;
 }
 
 export function actualsFromRows(rows: Record<string, any>[]): ActualsByKey {

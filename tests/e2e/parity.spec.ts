@@ -6,6 +6,7 @@ test("@parity fixture auth lands on Home with admin access", async ({ page }) =>
   await expect(page.getByText("Where would you like to go?")).toBeVisible();
   await expect(page.getByText("local-dev@pressedfloral.com")).toBeVisible();
   await expect(page.getByTestId("nav-rippling")).toBeVisible();
+  await expect(page.getByTestId("nav-users")).toBeVisible();
 });
 
 test("@parity goals and actuals show fixture goals and save actuals", async ({ page }) => {
@@ -59,4 +60,28 @@ test("@parity rippling upload previews employees", async ({ page }) => {
     buffer: Buffer.from(csv)
   });
   await expect(page.getByText("Test Person")).toBeVisible();
+});
+
+test("@parity admin can invite and edit users in fixture mode", async ({ page }) => {
+  await page.goto("/");
+  await page.getByTestId("nav-users").click();
+  await expect(page.getByRole("heading", { name: "Users" })).toBeVisible();
+  await expect(page.getByText("Invite User")).toBeVisible();
+  await expect(page.getByText("manager@pressedfloral.com")).toBeVisible();
+
+  await page.getByLabel("Invite email").fill("new.viewer@pressedfloral.com");
+  await page.getByLabel("User role").first().selectOption("user");
+  await page.getByLabel("Linked employee").selectOption("Ava Jensen");
+  await page.getByRole("button", { name: "Send Invite" }).click();
+  await expect(page.getByText("Invite simulated")).toBeVisible();
+  await expect(page.getByText("new.viewer@pressedfloral.com")).toBeVisible();
+
+  const managerRow = page.getByRole("row").filter({ hasText: "manager@pressedfloral.com" }).first();
+  await managerRow.getByRole("button", { name: "Edit" }).click();
+  const editRow = page.locator(".user-edit-row");
+  await editRow.getByLabel("User role").selectOption("user");
+  await editRow.getByLabel("Linked employee").selectOption("Mia Carter");
+  await editRow.getByRole("button", { name: "Save User" }).click();
+  await expect(page.getByText("User updated")).toBeVisible();
+  await expect(page.getByRole("row").filter({ hasText: "manager@pressedfloral.com" }).first()).toContainText("Viewer for Mia Carter");
 });

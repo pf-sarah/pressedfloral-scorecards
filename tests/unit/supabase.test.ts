@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fixtureGoals, fixtureScorecards } from "../../lib/fixtures";
-import { actualsFromRows, goalFromRow, goalToRow, isSupabaseUuid, profileFromRow, scorecardFromRow, scorecardToRow } from "../../lib/supabase";
+import { actualsFromRows, configuredProfileFromRow, goalFromRow, goalToRow, isSupabaseUuid, profileFromRow, scorecardFromRow, scorecardToRow } from "../../lib/supabase";
 
 describe("supabase mappers", () => {
   it("round trips goals through legacy table columns", () => {
@@ -34,6 +34,23 @@ describe("supabase mappers", () => {
       role: "user",
       linkedEmployeeName: "Ava Jensen"
     });
+  });
+
+  it("does not configure missing, invalid, or unlinked user profiles", () => {
+    expect(configuredProfileFromRow("missing@example.com", null)).toBeNull();
+    expect(configuredProfileFromRow("invalid@example.com", {
+      id: "user-2",
+      role: "owner",
+      departments: [],
+      locations: []
+    })).toBeNull();
+    expect(configuredProfileFromRow("viewer@example.com", {
+      id: "user-3",
+      role: "user",
+      departments: [],
+      locations: [],
+      linked_employee_name: null
+    })).toBeNull();
   });
 
   it("maps actual rows to legacy actual keys", () => {
