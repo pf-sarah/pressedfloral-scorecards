@@ -115,10 +115,10 @@ export const fixtureActuals = {
     "department|Utah|Design|Design Rework Rate": 4.7,
     "__target__company|||Company Revenue": 120000,
     "__min__company|||Company Revenue": 90000,
-    "__target__department|Utah|Client Care|Average First Response Hours": 2,
-    "__min__department|Utah|Client Care|Average First Response Hours": 4,
-    "__target__department|Utah|Design|Design Rework Rate": 5,
-    "__min__department|Utah|Design|Design Rework Rate": 8,
+    "__target__department||Client Care|Average First Response Hours": 2,
+    "__min__department||Client Care|Average First Response Hours": 4,
+    "__target__department||Design|Design Rework Rate": 5,
+    "__min__department||Design|Design Rework Rate": 8,
     "__target__individual|Utah|Design|Completed Designs": 42,
     "__min__individual|Utah|Design|Completed Designs": 30
   }
