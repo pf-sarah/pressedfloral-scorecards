@@ -29,7 +29,7 @@ import {
 } from "../lib/supabase";
 import type { ActualsByKey, AppData, Employee, Goal, GoalTier, HistoryFilters, ManagerProfile, Scorecard } from "../lib/types";
 
-type Screen = "landing" | "setup" | "scorecard" | "history" | "rippling" | "guide" | "todos" | "migrate" | "whatif";
+type Screen = "landing" | "setup" | "scorecard" | "history" | "rippling" | "guide" | "todos" | "migrate" | "whatif" | "personal";
 type HistoryView = "table" | "scorecard" | "grid" | "chart";
 
 /** Derive a "First Last" candidate name from an email like kanon.foote@domain.com */
@@ -692,7 +692,21 @@ export default function ScorecardsApp() {
           </div>
         </header>
         <main>
-          {mode === "landing" && <LandingScreen onMode={setMode} profile={profile} myOwnScorecards={myOwnScorecards} myEmployee={myEmployee} allGoals={appData.goals.filter((g) => g.active)} allActuals={appData.actuals} rippling={appData.rippling} allEmployeeNames={latestRipplingEmployees.map((e) => e.name).sort()} onLinkEmployee={linkEmployeeProfile} />}
+          {mode === "landing" && <LandingScreen onMode={setMode} profile={profile} />}
+          {mode === "personal" && (
+            <div className="screen active">
+              <div style={{ maxWidth: "680px", margin: "0 auto", padding: "16px" }}>
+                <PersonalScorecardPanel
+                  scorecards={myOwnScorecards}
+                  employeeName={profile?.linkedEmployeeName || ""}
+                  myEmployee={myEmployee}
+                  allGoals={appData.goals.filter((g) => g.active)}
+                  allActuals={appData.actuals}
+                  rippling={appData.rippling}
+                />
+              </div>
+            </div>
+          )}
           {mode === "setup" && (
             <GoalsScreen
               month={bankMonth}
@@ -820,7 +834,8 @@ function pageLabel(mode: Screen) {
     guide: "How To Use",
     todos: "To Do",
     migrate: "Migrate Data",
-    whatif: "What If Scorecard"
+    whatif: "What If Scorecard",
+    personal: "My Scorecard"
   }[mode];
 }
 
@@ -865,8 +880,10 @@ function Sidebar(props: {
   const role = props.profile?.role ?? "user";
   const isAdmin = role === "admin";
   const isManager = role === "manager" || isAdmin;
-  const nav: { mode: Screen; label: string; icon: string; minRole?: "manager" | "admin" }[] = [
+  const hasLinkedEmployee = !!props.profile?.linkedEmployeeName;
+  const nav: { mode: Screen; label: string; icon: string; minRole?: "manager" | "admin"; hidden?: boolean }[] = [
     { mode: "landing", label: "Home", icon: "⌂" },
+    { mode: "personal", label: "My Scorecard", icon: "◉", hidden: !hasLinkedEmployee },
     { mode: "setup", label: "Goals & Actuals", icon: "☰", minRole: "manager" },
     { mode: "scorecard", label: "Team Scorecards", icon: "👥", minRole: "manager" },
     { mode: "history", label: "Historical Data", icon: "◷" },
@@ -883,13 +900,15 @@ function Sidebar(props: {
         <p>Scorecards</p>
       </div>
       <nav id="sidebar-nav">
-        {nav.map((item, index) => {
+        {nav.map((item) => {
+          if (item.hidden) return null;
           if (item.minRole === "admin" && !isAdmin) return null;
           if (item.minRole === "manager" && !isManager) return null;
-          const sectionBreak = index === 1 || index === 3 || index === 5;
+          const sectionBreak = item.mode === "setup" || item.mode === "history" || item.mode === "rippling";
+          const sectionLabel = item.mode === "setup" ? "MANAGE" : item.mode === "history" ? "REVIEW" : "";
           return (
             <div key={item.mode}>
-              {sectionBreak && <div className="nav-section">{index === 1 ? "MANAGE" : index === 3 ? "REVIEW" : ""}</div>}
+              {sectionBreak && <div className="nav-section">{sectionLabel}</div>}
               <button data-testid={`nav-${item.mode}`} className={`nav-item ${props.mode === item.mode ? "active" : ""}`} onClick={() => props.onMode(item.mode)}>
                 <span className="nav-icon">{item.icon}</span>
                 {item.label}
@@ -1119,20 +1138,10 @@ function PersonalScorecardPanel({
   );
 }
 
-function LandingScreen({ onMode, profile, myOwnScorecards, myEmployee, allGoals, allActuals, rippling, allEmployeeNames, onLinkEmployee }: {
+function LandingScreen({ onMode, profile }: {
   onMode: (mode: Screen) => void;
   profile: ManagerProfile | null;
-  myOwnScorecards: Scorecard[];
-  myEmployee: Employee | null;
-  allGoals: Goal[];
-  allActuals: Record<string, ActualsByKey>;
-  rippling: Record<string, Employee[]>;
-  allEmployeeNames: string[];
-  onLinkEmployee: (name: string) => Promise<void>;
 }) {
-  const [linkName, setLinkName] = useState("");
-  const [linking, setLinking] = useState(false);
-
   const isUser = profile?.role === "user";
   const isAdmin = profile?.role === "admin";
   const manageCards: { mode: Screen; label: string; text: string; icon: string }[] = [
@@ -1149,52 +1158,17 @@ function LandingScreen({ onMode, profile, myOwnScorecards, myEmployee, allGoals,
     <div className="screen active">
       <div className="landing-wrap">
         <div className="landing-kicker">{isUser ? `Welcome, ${profile?.linkedEmployeeName || ""}` : "Where would you like to go?"}</div>
-        {/* Personal Scorecard section — shows for everyone with a profile */}
+        {/* Personal Scorecard card */}
         {profile && (
           <>
             <div className="landing-section-label">My Scorecard</div>
-            {profile.linkedEmployeeName ? (
-              <PersonalScorecardPanel scorecards={myOwnScorecards} employeeName={profile.linkedEmployeeName} myEmployee={myEmployee} allGoals={allGoals} allActuals={allActuals} rippling={rippling} />
-            ) : isAdmin ? (
-              /* Admins can link their own profile */
-              <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", padding: "20px 20px", background: "var(--surface)", display: "flex", alignItems: "center", gap: "14px", flexWrap: "wrap" }}>
-                <div style={{ flex: 1, minWidth: "180px" }}>
-                  <div style={{ fontWeight: 700, fontSize: "13px", marginBottom: "4px" }}>Link your employee profile</div>
-                  <div style={{ fontSize: "12px", color: "var(--text-muted)" }}>Select your name to see your live scorecard here.</div>
-                </div>
-                <div style={{ display: "flex", gap: "8px", alignItems: "center", flexWrap: "wrap" }}>
-                  <select
-                    className="bank-filter-select"
-                    value={linkName}
-                    onChange={(e) => setLinkName(e.target.value)}
-                    style={{ minWidth: "180px" }}
-                  >
-                    <option value="">— select your name —</option>
-                    {allEmployeeNames.map((n) => <option key={n} value={n}>{n}</option>)}
-                  </select>
-                  <button
-                    className="submit-btn"
-                    style={{ padding: "7px 18px", fontSize: "12px" }}
-                    disabled={!linkName || linking}
-                    onClick={async () => {
-                      if (!linkName) return;
-                      setLinking(true);
-                      await onLinkEmployee(linkName);
-                      setLinking(false);
-                    }}
-                  >
-                    {linking ? "Saving…" : "Link"}
-                  </button>
-                </div>
-              </div>
-            ) : (
-              /* Non-admins see a placeholder — auto-link didn't find a match */
-              <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", padding: "20px 20px", background: "var(--surface)" }}>
-                <div style={{ fontSize: "13px", color: "var(--text-muted)", textAlign: "center" }}>
-                  Your scorecard will appear here once your admin links your employee profile.
-                </div>
-              </div>
-            )}
+            <div className="landing-grid">
+              <button className="landing-card" onClick={() => onMode("personal")}>
+                <span>◉</span>
+                <strong>My Scorecard</strong>
+                <small>{profile.linkedEmployeeName ? `View your scorecard — ${profile.linkedEmployeeName}` : "View your personal scorecard and past submissions."}</small>
+              </button>
+            </div>
           </>
         )}
         {!isUser && (
