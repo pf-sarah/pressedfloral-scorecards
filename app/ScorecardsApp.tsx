@@ -2,8 +2,16 @@
 
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import type { SupabaseClient } from "@supabase/supabase-js";
+import {
+  normalizeAdminUserPayload,
+  scopeSummary,
+  SCORECARD_DEPARTMENTS,
+  SCORECARD_LOCATIONS,
+  type AdminManagedUser,
+  type AdminUserPayload
+} from "../lib/adminUsers";
 import { downloadCsv, parseRipplingEmployees, scorecardsToCsv, toCsv } from "../lib/csv";
-import { fixtureData, fixtureMonth, fixturePeriod } from "../lib/fixtures";
+import { fixtureData, fixtureManager, fixtureMonth, fixturePeriod } from "../lib/fixtures";
 import { currentMonthValue, formatMonthLabel } from "../lib/periods";
 import { baseEarnings, buildScorecard, calculateGoal, formatCurrency, formatNumber, type EditableGoal } from "../lib/score";
 import {
@@ -17,19 +25,20 @@ import {
 } from "../lib/storage";
 import {
   actualsFromRows,
+  configuredProfileFromRow,
   dataMode,
   employeeFromRow,
   employeeToRow,
   goalFromRow,
   goalToRow,
-  profileFromRow,
+  isSupabaseUuid,
   scorecardFromRow,
   scorecardToRow,
   supabaseClient
 } from "../lib/supabase";
-import type { ActualsByKey, AppData, Employee, Goal, GoalTier, HistoryFilters, ManagerProfile, Scorecard } from "../lib/types";
+import type { ActualsByKey, AppData, Employee, Goal, GoalTier, HistoryFilters, ManagerProfile, ProfileRole, Scorecard } from "../lib/types";
 
-type Screen = "landing" | "setup" | "scorecard" | "history" | "rippling" | "guide" | "todos" | "migrate" | "whatif" | "personal";
+type Screen = "landing" | "setup" | "scorecard" | "history" | "rippling" | "guide" | "todos" | "migrate" | "whatif" | "personal" | "users";
 type HistoryView = "table" | "scorecard" | "grid" | "chart";
 
 /** Derive a "First Last" candidate name from an email like kanon.foote@domain.com */
@@ -40,19 +49,8 @@ function nameFromEmail(email: string): string {
   return parts.map((p) => p.charAt(0).toUpperCase() + p.slice(1).toLowerCase()).join(" ");
 }
 
-const departments = [
-  "Client Care",
-  "Design",
-  "Experience",
-  "Fulfillment",
-  "General & Administrative",
-  "Growth",
-  "Marketing",
-  "Operations",
-  "Preservation",
-  "Recreation",
-  "Resin"
-];
+const departments = SCORECARD_DEPARTMENTS;
+const locations = SCORECARD_LOCATIONS;
 
 const rolesByDepartment: Record<string, string[]> = {
   "Client Care": ["Client Care Manager", "Client Care Specialist", "Client Experience Manager", "Senior Client Care Specialist"],
@@ -81,6 +79,35 @@ const emptyGoal: Omit<Goal, "id"> = {
   capPct: 100,
   active: true
 };
+
+const fixtureManagedUsers: AdminManagedUser[] = [
+  {
+    ...fixtureData.profile,
+    hasProfile: true,
+    status: "active",
+    confirmedAt: "2026-05-01T12:00:00.000Z",
+    createdAt: "2026-05-01T12:00:00.000Z"
+  },
+  {
+    ...fixtureManager,
+    hasProfile: true,
+    status: "active",
+    confirmedAt: "2026-05-02T12:00:00.000Z",
+    createdAt: "2026-05-02T12:00:00.000Z"
+  },
+  {
+    id: "fixture-viewer",
+    email: "viewer@pressedfloral.com",
+    role: "user",
+    departments: [],
+    locations: [],
+    linkedEmployeeName: "Ava Jensen",
+    hasProfile: true,
+    status: "invited",
+    invitedAt: "2026-05-03T12:00:00.000Z",
+    createdAt: "2026-05-03T12:00:00.000Z"
+  }
+];
 
 function actualKey(goal: Pick<Goal, "goalTier" | "location" | "department" | "name">) {
   return [goal.goalTier, goal.location || "", goal.department || "", goal.name].join("|");
@@ -188,6 +215,8 @@ export default function ScorecardsApp() {
   const [sb, setSb] = useState<SupabaseClient | null>(null);
   const [appData, setAppData] = useState<AppData>(() => cloneData(fixtureData));
   const [toast, setToast] = useState<{ message: string; type?: "success" | "error" } | null>(null);
+  const [adminUsers, setAdminUsers] = useState<AdminManagedUser[]>([]);
+  const [adminUsersLoading, setAdminUsersLoading] = useState(false);
 
   const [bankMonth, setBankMonth] = useState(fixtureMonth);
   const [bankFilters, setBankFilters] = useState({ types: ["company", "department", "individual"] as string[], location: "", departments: [...departments] as string[], sort: "goalTier", showInactive: false });
@@ -222,7 +251,13 @@ export default function ScorecardsApp() {
       return;
     }
 
-    const client = supabaseClient();
+    let client: SupabaseClient;
+    try {
+      client = supabaseClient();
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Supabase is not configured.");
+      return;
+    }
     setSb(client);
     client.auth.getSession().then(async ({ data }) => {
       if (data.session?.user) await loadSupabaseProfile(client, data.session.user.id, data.session.user.email || "");
@@ -242,11 +277,16 @@ export default function ScorecardsApp() {
 
   useEffect(() => {
     if (!authenticated) return;
-    const managerScreens: Screen[] = ["setup", "scorecard", "todos", "rippling", "migrate"];
-    const adminScreens: Screen[] = ["rippling", "migrate"];
+    const managerScreens: Screen[] = ["setup", "scorecard", "todos", "rippling", "migrate", "users"];
+    const adminScreens: Screen[] = ["rippling", "migrate", "users"];
     if (profile?.role === "user" && managerScreens.includes(mode)) setMode("history");
     else if (profile?.role === "manager" && adminScreens.includes(mode)) setMode("landing");
   }, [authenticated, mode, profile]);
+
+  useEffect(() => {
+    if (!authenticated || profile?.role !== "admin" || mode !== "users") return;
+    void loadAdminUsers();
+  }, [authenticated, profile?.role, mode, isFixture, sb]);
 
   useEffect(() => {
     if (!toast) return;
@@ -257,10 +297,25 @@ export default function ScorecardsApp() {
   async function loadSupabaseProfile(client: SupabaseClient, userId: string, email: string) {
     setCurrentUserEmail(email);
     localStorage.setItem(PROFILE_EMAIL_KEY, email);
-    const { data } = await client.from("manager_profiles").select("*").eq("id", userId).maybeSingle();
-    let loadedProfile: ManagerProfile = data ? profileFromRow(email, data) : { id: userId, email, role: "manager" as const, departments: [], locations: [] };
+    const { data, error } = await client.from("manager_profiles").select("*").eq("id", userId).maybeSingle();
+    if (error) {
+      setAuthError("Could not load your access profile. Try again or ask an admin to check your role.");
+      await client.auth.signOut();
+      return;
+    }
+    let loadedProfile = configuredProfileFromRow(email, data);
+    if (!loadedProfile) {
+      setProfile(null);
+      setAuthenticated(false);
+      setCurrentUserEmail("");
+      localStorage.removeItem(PROFILE_EMAIL_KEY);
+      localStorage.removeItem(PROFILE_ROLE_KEY);
+      setAuthError("Your account exists but has not been assigned access. Ask an admin to assign your role.");
+      await client.auth.signOut();
+      return;
+    }
 
-    // Auto-link: if no employee link yet, try to match email → "First Last" against Rippling
+    // Auto-link valid profiles when email matches an employee name.
     if (!loadedProfile.linkedEmployeeName) {
       const candidateName = nameFromEmail(email);
       if (candidateName) {
@@ -269,8 +324,8 @@ export default function ScorecardsApp() {
           (r.full_name || "").toLowerCase() === candidateName.toLowerCase()
         );
         if (match?.full_name) {
-          await client.from("manager_profiles").update({ linked_employee_name: match.full_name }).eq("id", userId);
-          loadedProfile = { ...loadedProfile, linkedEmployeeName: match.full_name };
+          const updateResult = await client.from("manager_profiles").update({ linked_employee_name: match.full_name }).eq("id", userId);
+          if (!updateResult.error) loadedProfile = { ...loadedProfile, linkedEmployeeName: match.full_name };
         }
       }
     }
@@ -359,14 +414,119 @@ export default function ScorecardsApp() {
     setToast({ message, type });
   }
 
+  function showSupabaseError(error: unknown, fallback: string) {
+    const message = error && typeof error === "object" && "message" in error && typeof error.message === "string"
+      ? error.message
+      : fallback;
+    showToast(message, "error");
+  }
+
   async function linkEmployeeProfile(name: string) {
     if (!profile || !sb) return;
     const { error } = await sb.from("manager_profiles").update({ linked_employee_name: name }).eq("id", profile.id);
-    if (error) { showToast("Could not save — check Supabase RLS policies.", "error"); return; }
+    if (error) {
+      showSupabaseError(error, "Could not save. Check Supabase RLS policies.");
+      return;
+    }
     const updated = { ...profile, linkedEmployeeName: name };
     setProfile(updated);
     localStorage.setItem(PROFILE_ROLE_KEY, JSON.stringify(updated));
     showToast(`Linked to ${name}`);
+  }
+
+  async function adminUsersRequest(method: "GET" | "POST" | "PATCH", payload?: unknown) {
+    if (!sb) {
+      showToast("Supabase is not connected.", "error");
+      return null;
+    }
+    const sessionResult = await sb.auth.getSession();
+    const token = sessionResult.data.session?.access_token;
+    if (sessionResult.error || !token) {
+      showToast("Sign in again to manage users.", "error");
+      return null;
+    }
+    let response: Response;
+    try {
+      response = await fetch("/api/admin/users", {
+        method,
+        headers: {
+          Authorization: `Bearer ${token}`,
+          ...(payload ? { "Content-Type": "application/json" } : {})
+        },
+        body: payload ? JSON.stringify(payload) : undefined
+      });
+    } catch {
+      showToast("User management request failed.", "error");
+      return null;
+    }
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      showToast(typeof body.error === "string" ? body.error : "User management request failed.", "error");
+      return null;
+    }
+    return body;
+  }
+
+  async function loadAdminUsers() {
+    if (isFixture) {
+      setAdminUsers(fixtureManagedUsers);
+      return;
+    }
+    setAdminUsersLoading(true);
+    try {
+      const body = await adminUsersRequest("GET");
+      if (body?.users) setAdminUsers(body.users);
+    } finally {
+      setAdminUsersLoading(false);
+    }
+  }
+
+  async function inviteAdminUser(payload: AdminUserPayload) {
+    const normalized = normalizeAdminUserPayload(payload, { requireEmail: true });
+    if (!normalized.ok) {
+      showToast(normalized.error, "error");
+      return false;
+    }
+    if (isFixture) {
+      const invited: AdminManagedUser = {
+        id: `fixture-${normalized.value.email}`,
+        email: normalized.value.email!,
+        role: normalized.value.role,
+        departments: normalized.value.departments,
+        locations: normalized.value.locations,
+        linkedEmployeeName: normalized.value.linkedEmployeeName,
+        hasProfile: true,
+        status: "invited",
+        invitedAt: new Date().toISOString(),
+        createdAt: new Date().toISOString()
+      };
+      setAdminUsers((current) => [invited, ...current.filter((user) => user.email !== invited.email)]);
+      showToast("Invite simulated");
+      return true;
+    }
+    const body = await adminUsersRequest("POST", normalized.value);
+    if (!body?.user) return false;
+    setAdminUsers((current) => [body.user, ...current.filter((user) => user.id !== body.user.id)]);
+    showToast("Invite sent");
+    return true;
+  }
+
+  async function updateAdminUser(payload: AdminUserPayload) {
+    const normalized = normalizeAdminUserPayload(payload, { requireId: true });
+    if (!normalized.ok) {
+      showToast(normalized.error, "error");
+      return false;
+    }
+    if (isFixture) {
+      setAdminUsers((current) => current.map((user) => user.id === normalized.value.id ? { ...user, ...normalized.value, hasProfile: true } : user));
+      showToast("User updated");
+      return true;
+    }
+    const body = await adminUsersRequest("PATCH", normalized.value);
+    if (!body?.user) return false;
+    setAdminUsers((current) => current.map((user) => user.id === body.user.id ? body.user : user));
+    showToast("User updated");
+    return true;
   }
 
   const months = useMemo(() => {
@@ -508,22 +668,40 @@ export default function ScorecardsApp() {
     return ripplingPending + missingActuals.length + missingCurrentTargets.length + missingNextTargets.length;
   }, [profile, appData.rippling, currentMonth, missingActuals, missingCurrentTargets, missingNextTargets]);
 
-  async function saveGoal(goal: Goal) {
+  async function saveGoal(goal: Goal): Promise<Goal | null> {
+    let savedGoal = goal;
+    if (!isFixture && sb) {
+      const result = isSupabaseUuid(goal.id)
+        ? await sb.from("goals_bank").upsert(goalToRow(goal), { onConflict: "id" }).select().single()
+        : await sb.from("goals_bank").insert(goalToRow(goal, { includeId: false })).select().single();
+      if (result.error || !result.data) {
+        showSupabaseError(result.error, "Goal could not be saved.");
+        return null;
+      }
+      savedGoal = goalFromRow(result.data);
+    }
+
     const nextGoals = appData.goals.some((item) => item.id === goal.id)
-      ? appData.goals.map((item) => item.id === goal.id ? goal : item)
-      : [...appData.goals, goal];
+      ? appData.goals.map((item) => item.id === goal.id ? savedGoal : item)
+      : [...appData.goals, savedGoal];
     setAppData((current) => ({ ...current, goals: nextGoals }));
     persistGoals(nextGoals);
-    if (!isFixture && sb) await sb.from("goals_bank").upsert(goalToRow(goal));
     setEditingGoal(null);
     showToast("Goal saved");
+    return savedGoal;
   }
 
   async function deleteGoal(id: string) {
+    if (!isFixture && sb) {
+      const result = await sb.from("goals_bank").delete().eq("id", id);
+      if (result.error) {
+        showSupabaseError(result.error, "Goal could not be deleted.");
+        return;
+      }
+    }
     const nextGoals = appData.goals.filter((goal) => goal.id !== id);
     setAppData((current) => ({ ...current, goals: nextGoals }));
     persistGoals(nextGoals);
-    if (!isFixture && sb) await sb.from("goals_bank").delete().eq("id", id);
     showToast("Goal deleted");
   }
 
@@ -540,10 +718,8 @@ export default function ScorecardsApp() {
     const isCurrentlyInactive = !!currentPeriodActuals[key];
     const nextVal = isCurrentlyInactive ? null : 1;
     const nextPeriodActuals = { ...currentPeriodActuals, [key]: nextVal };
-    setAppData((prev) => ({ ...prev, actuals: { ...prev.actuals, [period]: nextPeriodActuals } }));
-    persistActuals(period, nextPeriodActuals);
     if (!isFixture && sb) {
-      await sb.from("actuals").upsert({
+      const result = await sb.from("actuals").upsert({
         period,
         goal_tier: "__meta__",
         location: null,
@@ -551,7 +727,13 @@ export default function ScorecardsApp() {
         goal_name: key,
         actual_value: nextVal
       }, { onConflict: "period,goal_tier,location,department,goal_name" });
+      if (result.error) {
+        showSupabaseError(result.error, "Monthly goal status could not be saved.");
+        return;
+      }
     }
+    setAppData((prev) => ({ ...prev, actuals: { ...prev.actuals, [period]: nextPeriodActuals } }));
+    persistActuals(period, nextPeriodActuals);
     showToast(isCurrentlyInactive ? "Goal activated for this month" : "Goal deactivated for this month");
   }
 
@@ -559,11 +741,9 @@ export default function ScorecardsApp() {
     const period = periodOverride ?? formatMonthLabel(bankMonth);
     const key = actualKey(goal);
     const nextActuals = { ...(appData.actuals[period] || {}), [key]: value === "" ? null : Number(value) };
-    setAppData((current) => ({ ...current, actuals: { ...current.actuals, [period]: nextActuals } }));
-    persistActuals(period, nextActuals);
     if (!isFixture && sb) {
       const [goalTier, location, department, goalName] = key.split("|");
-      await sb.from("actuals").upsert({
+      const result = await sb.from("actuals").upsert({
         period,
         goal_tier: goalTier,
         location: location || null,
@@ -571,17 +751,21 @@ export default function ScorecardsApp() {
         goal_name: goalName,
         actual_value: value === "" ? null : Number(value)
       }, { onConflict: "period,goal_tier,location,department,goal_name" });
+      if (result.error) {
+        showSupabaseError(result.error, "Actual could not be saved.");
+        return;
+      }
     }
+    setAppData((current) => ({ ...current, actuals: { ...current.actuals, [period]: nextActuals } }));
+    persistActuals(period, nextActuals);
     showToast("Actual saved");
   }
 
   async function saveMonthTarget(goal: Goal, period: string, type: "target" | "min", value: string) {
     const key = metaKey(type, goal);
     const nextActuals = { ...(appData.actuals[period] || {}), [key]: value === "" ? null : Number(value) };
-    setAppData((current) => ({ ...current, actuals: { ...current.actuals, [period]: nextActuals } }));
-    persistActuals(period, nextActuals);
     if (!isFixture && sb) {
-      await sb.from("actuals").upsert({
+      const result = await sb.from("actuals").upsert({
         period,
         goal_tier: "__meta__",
         location: null,
@@ -589,7 +773,13 @@ export default function ScorecardsApp() {
         goal_name: key,
         actual_value: value === "" ? null : Number(value)
       }, { onConflict: "period,goal_tier,location,department,goal_name" });
+      if (result.error) {
+        showSupabaseError(result.error, "Target could not be saved.");
+        return;
+      }
     }
+    setAppData((current) => ({ ...current, actuals: { ...current.actuals, [period]: nextActuals } }));
+    persistActuals(period, nextActuals);
   }
 
   async function saveMonthTargetPair(goal: Goal, period: string, target: string, min: string) {
@@ -600,23 +790,35 @@ export default function ScorecardsApp() {
       [targetKey]: target === "" ? null : Number(target),
       [minKey]: min === "" ? null : Number(min)
     };
-    setAppData((current) => ({ ...current, actuals: { ...current.actuals, [period]: nextActuals } }));
-    persistActuals(period, nextActuals);
     if (!isFixture && sb) {
-      await sb.from("actuals").upsert([
+      const result = await sb.from("actuals").upsert([
         { period, goal_tier: "__meta__", location: null, department: null, goal_name: targetKey, actual_value: target === "" ? null : Number(target) },
         { period, goal_tier: "__meta__", location: null, department: null, goal_name: minKey, actual_value: min === "" ? null : Number(min) }
       ], { onConflict: "period,goal_tier,location,department,goal_name" });
+      if (result.error) {
+        showSupabaseError(result.error, "Target and minimum could not be saved.");
+        return;
+      }
     }
+    setAppData((current) => ({ ...current, actuals: { ...current.actuals, [period]: nextActuals } }));
+    persistActuals(period, nextActuals);
   }
 
   async function saveRipplingForMonth(month: string, employees: Employee[]) {
+    if (!isFixture && sb) {
+      const deleteResult = await sb.from("rippling_employees").delete().eq("period", month);
+      if (deleteResult.error) {
+        showSupabaseError(deleteResult.error, "Existing Rippling data could not be cleared.");
+        return;
+      }
+      const insertResult = await sb.from("rippling_employees").insert(employees.map((employee) => employeeToRow(month, employee)));
+      if (insertResult.error) {
+        showSupabaseError(insertResult.error, "Rippling data could not be saved.");
+        return;
+      }
+    }
     setAppData((current) => ({ ...current, rippling: { ...current.rippling, [month]: employees } }));
     persistRippling(month, employees);
-    if (!isFixture && sb) {
-      await sb.from("rippling_employees").delete().eq("period", month);
-      await sb.from("rippling_employees").insert(employees.map((employee) => employeeToRow(month, employee)));
-    }
     showToast("Rippling data saved");
   }
 
@@ -625,23 +827,46 @@ export default function ScorecardsApp() {
       showToast("Upload a CSV before saving", "error");
       return;
     }
+    if (!isFixture && sb) {
+      const deleteResult = await sb.from("rippling_employees").delete().eq("period", ripplingMonth);
+      if (deleteResult.error) {
+        showSupabaseError(deleteResult.error, "Existing Rippling data could not be cleared.");
+        return;
+      }
+      const insertResult = await sb.from("rippling_employees").insert(ripplingPreview.map((employee) => employeeToRow(ripplingMonth, employee)));
+      if (insertResult.error) {
+        showSupabaseError(insertResult.error, "Rippling data could not be saved.");
+        return;
+      }
+    }
     setAppData((current) => ({ ...current, rippling: { ...current.rippling, [ripplingMonth]: ripplingPreview } }));
     persistRippling(ripplingMonth, ripplingPreview);
-    if (!isFixture && sb) {
-      await sb.from("rippling_employees").delete().eq("period", ripplingMonth);
-      await sb.from("rippling_employees").insert(ripplingPreview.map((employee) => employeeToRow(ripplingMonth, employee)));
-    }
     setRipplingPreview([]);
     showToast("Rippling data saved");
   }
 
   async function submitScorecardDirect(scorecard: Scorecard) {
+    let savedScorecard = scorecard;
+    if (!isFixture && sb) {
+      const result = await sb
+        .from("scorecards")
+        .upsert(scorecardToRow(scorecard), { onConflict: "employee_name,scorecard_month" })
+        .select()
+        .single();
+      if (result.error || !result.data) {
+        showSupabaseError(result.error, "Scorecard could not be submitted.");
+        return;
+      }
+      savedScorecard = scorecardFromRow(result.data);
+    }
     setAppData((current) => ({
       ...current,
-      scorecards: [...current.scorecards.filter((item) => item.id !== scorecard.id), scorecard]
+      scorecards: [
+        ...current.scorecards.filter((item) => !(item.employeeName === savedScorecard.employeeName && item.scorecardMonth === savedScorecard.scorecardMonth)),
+        savedScorecard
+      ]
     }));
-    persistScorecard(scorecard);
-    if (!isFixture && sb) await sb.from("scorecards").upsert(scorecardToRow(scorecard));
+    persistScorecard(savedScorecard);
     showToast("Scorecard submitted");
   }
 
@@ -779,6 +1004,18 @@ export default function ScorecardsApp() {
               allEmployees={allRipplingEmployees}
             />
           )}
+          {mode === "users" && (
+            <UsersScreen
+              users={adminUsers}
+              loading={adminUsersLoading}
+              employees={latestRipplingEmployees}
+              fixtureMode={isFixture}
+              currentUserId={profile?.id || ""}
+              onRefresh={loadAdminUsers}
+              onInvite={inviteAdminUser}
+              onUpdate={updateAdminUser}
+            />
+          )}
           {mode === "todos" && (
             <TodosScreen
               workMonth={workMonth}
@@ -835,7 +1072,8 @@ function pageLabel(mode: Screen) {
     todos: "To Do",
     migrate: "Migrate Data",
     whatif: "What If Scorecard",
-    personal: "My Scorecard"
+    personal: "My Scorecard",
+    users: "Users"
   }[mode];
 }
 
@@ -889,6 +1127,7 @@ function Sidebar(props: {
     { mode: "history", label: "Historical Data", icon: "◷" },
     { mode: "whatif", label: "What If Scorecard", icon: "◆" },
     { mode: "rippling", label: "Rippling Data", icon: "⇅", minRole: "admin" },
+    { mode: "users", label: "Users", icon: "◇", minRole: "admin" },
     { mode: "guide", label: "How To Use", icon: "ⓘ" },
     { mode: "todos", label: "To Do", icon: "☐", minRole: "manager" },
     { mode: "migrate", label: "Migrate Data", icon: "↑", minRole: "admin" }
@@ -1151,7 +1390,8 @@ function LandingScreen({ onMode, profile }: {
   const reviewCards: { mode: Screen; label: string; text: string; icon: string; adminOnly?: boolean }[] = [
     { mode: "history", label: "Historical Data", text: isUser ? "View your submitted scorecards." : "Search and review submitted scorecards across all employees and time periods.", icon: "◷" },
     { mode: "whatif", label: "What If Scorecard", text: "Explore how targets, actuals, and weights affect bonus calculations. Nothing here is saved.", icon: "◆" },
-    { mode: "rippling", label: "Rippling Data", text: "Upload monthly CSV exports to auto-fill employee pay, title, and location data.", icon: "⇅", adminOnly: true }
+    { mode: "rippling", label: "Rippling Data", text: "Upload monthly CSV exports to auto-fill employee pay, title, and location data.", icon: "⇅", adminOnly: true },
+    { mode: "users", label: "Users", text: "Invite users and assign scorecard access.", icon: "◇", adminOnly: true }
   ];
   const visibleReview = reviewCards.filter((card) => !card.adminOnly || isAdmin);
   return (
@@ -1209,6 +1449,243 @@ function LandingScreen({ onMode, profile }: {
   );
 }
 
+function UsersScreen(props: {
+  users: AdminManagedUser[];
+  loading: boolean;
+  employees: Employee[];
+  fixtureMode: boolean;
+  currentUserId: string;
+  onRefresh: () => void;
+  onInvite: (payload: AdminUserPayload) => Promise<boolean>;
+  onUpdate: (payload: AdminUserPayload) => Promise<boolean>;
+}) {
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const sortedUsers = [...props.users].sort((a, b) => a.email.localeCompare(b.email));
+
+  return (
+    <div className="screen active users-screen">
+      {props.fixtureMode && <div className="info-banner" style={{ display: "block" }}>Fixture mode simulates invites and permission updates locally.</div>}
+      <section>
+        <div className="toolbar-row">
+          <div className="section-title" style={{ margin: 0, borderBottom: "none", paddingBottom: 0 }}>Invite User</div>
+          <button onClick={props.onRefresh} disabled={props.loading}>{props.loading ? "Refreshing..." : "Refresh"}</button>
+        </div>
+        <UserPermissionForm
+          mode="invite"
+          employees={props.employees}
+          submitLabel="Send Invite"
+          onSubmit={props.onInvite}
+        />
+      </section>
+
+      <section>
+        <div className="section-title">Current Users</div>
+        <div className="table-wrap">
+          <table className="data-table users-table">
+            <thead>
+              <tr>
+                <th>Email</th>
+                <th>Status</th>
+                <th>Role</th>
+                <th>Scope</th>
+                <th></th>
+              </tr>
+            </thead>
+            <tbody>
+              {!sortedUsers.length && (
+                <tr><td colSpan={5}>{props.loading ? "Loading users..." : "No users found."}</td></tr>
+              )}
+              {sortedUsers.map((user) => (
+                <React.Fragment key={user.id}>
+                  <tr>
+                    <td>
+                      <strong>{user.email}</strong>
+                      {user.id === props.currentUserId && <span className="user-self-badge">You</span>}
+                      {!user.hasProfile && <span className="user-warning">No profile</span>}
+                    </td>
+                    <td><span className={`user-status ${user.status}`}>{statusLabel(user)}</span></td>
+                    <td>{roleLabel(user.role)}</td>
+                    <td>{scopeSummary(user)}</td>
+                    <td className="row-menu-cell">
+                      <button onClick={() => setEditingId(editingId === user.id ? null : user.id)}>{editingId === user.id ? "Close" : "Edit"}</button>
+                    </td>
+                  </tr>
+                  {editingId === user.id && (
+                    <tr className="user-edit-row">
+                      <td colSpan={5}>
+                        <UserPermissionForm
+                          mode="edit"
+                          user={user}
+                          employees={props.employees}
+                          submitLabel="Save User"
+                          onCancel={() => setEditingId(null)}
+                          onSubmit={async (payload) => {
+                            const saved = await props.onUpdate(payload);
+                            if (saved) setEditingId(null);
+                            return saved;
+                          }}
+                        />
+                      </td>
+                    </tr>
+                  )}
+                </React.Fragment>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function UserPermissionForm(props: {
+  mode: "invite" | "edit";
+  user?: AdminManagedUser;
+  employees: Employee[];
+  submitLabel: string;
+  onSubmit: (payload: AdminUserPayload) => Promise<boolean>;
+  onCancel?: () => void;
+}) {
+  const [draft, setDraft] = useState(() => userDraftFromUser(props.user));
+
+  useEffect(() => {
+    setDraft(userDraftFromUser(props.user));
+  }, [props.user?.id]);
+
+  const employeeNames = useMemo(() => Array.from(new Set(props.employees.map((employee) => employee.name))).sort(), [props.employees]);
+  const departmentOptions = departments.map((department) => ({ value: department, label: department }));
+  const locationOptions = locations.map((location) => ({ value: location, label: location }));
+
+  function setRole(role: ProfileRole) {
+    setDraft((current) => ({
+      ...current,
+      role,
+      departments: role === "manager" ? current.departments : [],
+      locations: role === "manager" ? current.locations : [],
+      linkedEmployeeName: role === "admin" ? "" : current.linkedEmployeeName,
+      allDepartments: role === "manager" ? current.allDepartments : true,
+      allLocations: role === "manager" ? current.allLocations : true
+    }));
+  }
+
+  async function handleSubmit() {
+    const saved = await props.onSubmit({
+      id: draft.id,
+      email: draft.email,
+      role: draft.role,
+      departments: draft.departments,
+      locations: draft.locations,
+      linkedEmployeeName: draft.linkedEmployeeName || undefined,
+      allDepartments: draft.allDepartments,
+      allLocations: draft.allLocations
+    });
+    if (saved && props.mode === "invite") setDraft(userDraftFromUser());
+  }
+
+  return (
+    <div className="user-form">
+      <div className="fields-grid">
+        {props.mode === "invite" && (
+          <div className="field half">
+            <label>Email</label>
+            <input aria-label="Invite email" type="email" value={draft.email} onChange={(event) => setDraft({ ...draft, email: event.target.value })} placeholder="name@pressedfloral.com" />
+          </div>
+        )}
+        <div className="field">
+          <label>Role</label>
+          <select aria-label="User role" value={draft.role} onChange={(event) => setRole(event.target.value as ProfileRole)}>
+            <option value="manager">Manager</option>
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
+          </select>
+        </div>
+        {draft.role === "manager" && (
+          <>
+            <div className="field">
+              <label>Departments</label>
+              <label className="check-label user-check">
+                <input type="checkbox" checked={draft.allDepartments} onChange={(event) => setDraft({ ...draft, allDepartments: event.target.checked, departments: event.target.checked ? [] : draft.departments })} />
+                All departments
+              </label>
+              {!draft.allDepartments && (
+                <MultiSelectDropdown label="Choose departments" options={departmentOptions} selected={draft.departments} onChange={(values) => setDraft({ ...draft, departments: values })} emptyLabel="No departments" />
+              )}
+            </div>
+            <div className="field">
+              <label>Locations</label>
+              <label className="check-label user-check">
+                <input type="checkbox" checked={draft.allLocations} onChange={(event) => setDraft({ ...draft, allLocations: event.target.checked, locations: event.target.checked ? [] : draft.locations })} />
+                All locations
+              </label>
+              {!draft.allLocations && (
+                <MultiSelectDropdown label="Choose locations" options={locationOptions} selected={draft.locations} onChange={(values) => setDraft({ ...draft, locations: values })} emptyLabel="No locations" />
+              )}
+            </div>
+            <div className="field">
+              <label>Reporting Tree Root</label>
+              <select aria-label="Reporting tree root" value={draft.linkedEmployeeName} onChange={(event) => setDraft({ ...draft, linkedEmployeeName: event.target.value })}>
+                <option value="">No linked employee</option>
+                {employeeNames.map((name) => <option key={name} value={name}>{name}</option>)}
+              </select>
+            </div>
+          </>
+        )}
+        {draft.role === "user" && (
+          <div className="field">
+            <label>Linked Employee</label>
+            <select aria-label="Linked employee" value={draft.linkedEmployeeName} onChange={(event) => setDraft({ ...draft, linkedEmployeeName: event.target.value })}>
+              <option value="">Choose employee</option>
+              {employeeNames.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </div>
+        )}
+      </div>
+      <div className="button-row user-form-actions">
+        {props.onCancel && <button onClick={props.onCancel}>Cancel</button>}
+        <button className="submit-btn user-submit" onClick={handleSubmit}>{props.submitLabel}</button>
+      </div>
+    </div>
+  );
+}
+
+function userDraftFromUser(user?: AdminManagedUser): AdminUserPayload & { email: string; linkedEmployeeName: string; allDepartments: boolean; allLocations: boolean } {
+  if (!user) {
+    return {
+      email: "",
+      role: "manager",
+      departments: ["Design"],
+      locations: ["Utah"],
+      linkedEmployeeName: "",
+      allDepartments: false,
+      allLocations: false
+    };
+  }
+  return {
+    id: user.id,
+    email: user.email,
+    role: user.role,
+    departments: user.departments,
+    locations: user.locations,
+    linkedEmployeeName: user.linkedEmployeeName || "",
+    allDepartments: user.role !== "manager" || user.departments.length === 0,
+    allLocations: user.role !== "manager" || user.locations.length === 0
+  };
+}
+
+function roleLabel(role: ProfileRole) {
+  return role === "admin" ? "Admin" : role === "manager" ? "Manager" : "User";
+}
+
+function statusLabel(user: AdminManagedUser) {
+  if (user.status === "active") return user.lastSignInAt ? `Active · ${shortDate(user.lastSignInAt)}` : "Active";
+  if (user.status === "invited") return user.invitedAt ? `Invited · ${shortDate(user.invitedAt)}` : "Invited";
+  return "Unconfirmed";
+}
+
+function shortDate(value: string) {
+  return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
 function GoalsScreen(props: {
   month: string;
   months: string[];
@@ -1222,7 +1699,7 @@ function GoalsScreen(props: {
   onFilters: (value: { types: string[]; location: string; departments: string[]; sort: string; showInactive: boolean }) => void;
   onActual: (goal: Goal, value: string, period?: string) => void;
   onEdit: (goal: Goal | null) => void;
-  onSave: (goal: Goal) => void;
+  onSave: (goal: Goal) => Goal | null | void | Promise<Goal | null | void>;
   onSaveTargetPair: (goal: Goal, target: string, min: string, period?: string) => void;
   onDelete: (id: string) => void;
   onToggle: (id: string) => void;
@@ -1653,7 +2130,7 @@ function GoalScopeTags({ location, department }: { location?: string; department
   );
 }
 
-function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, onSave, onSaveTargetPair, onCancel }: { goal: Goal; actuals: ActualsByKey; isAdmin?: boolean; allowedDepartments?: string[]; onSave: (goal: Goal) => void; onSaveTargetPair: (goal: Goal, target: string, min: string) => void; onCancel: () => void }) {
+function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, onSave, onSaveTargetPair, onCancel }: { goal: Goal; actuals: ActualsByKey; isAdmin?: boolean; allowedDepartments?: string[]; onSave: (goal: Goal) => Goal | null | void | Promise<Goal | null | void>; onSaveTargetPair: (goal: Goal, target: string, min: string) => void | Promise<void>; onCancel: () => void }) {
   const isNew = goal.name === "";
   const [draft, setDraft] = useState(goal);
   const [target, setTarget] = useState(actuals[metaKey("target", goal)] != null ? String(actuals[metaKey("target", goal)]) : String(goal.goalValue || ""));
@@ -1684,7 +2161,7 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, onSave, onSave
   if (!periodVal) missing.push("Period Type");
   const canSave = missing.length === 0;
 
-  function handleSave() {
+  async function handleSave() {
     if (!canSave) return;
     const finalGoal: Goal = {
       ...draft,
@@ -1696,8 +2173,9 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, onSave, onSave
       capped: cappedVal as "yes" | "no",
       periodType: periodVal as "monthly" | "quarterly",
     };
-    onSave(finalGoal);
-    onSaveTargetPair(finalGoal, target, min);
+    const savedGoal = await onSave(finalGoal);
+    if (savedGoal === null) return;
+    await onSaveTargetPair(savedGoal || finalGoal, target, min);
   }
 
   const reqStyle: React.CSSProperties = { color: "var(--brick)", marginLeft: 2 };

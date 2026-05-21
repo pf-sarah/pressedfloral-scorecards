@@ -230,7 +230,8 @@ button {
 .export-section button,
 .todo-card button,
 .scorecard-card button,
-.modal-actions button {
+.modal-actions button,
+.users-screen button {
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
   background: var(--surface);
@@ -442,6 +443,83 @@ button {
 .data-table input {
   padding: 5px 7px;
   font-size: 12px;
+}
+
+.users-table td {
+  vertical-align: top;
+}
+
+.users-table strong {
+  display: inline-block;
+  margin-right: 6px;
+}
+
+.user-form {
+  background: var(--surface2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 14px;
+}
+
+.user-edit-row td {
+  background: var(--bg);
+  padding: 12px !important;
+}
+
+.user-form-actions {
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
+.user-submit {
+  width: auto;
+  min-width: 120px;
+  margin-top: 0;
+  padding: 8px 14px;
+  font-size: 13px;
+  background: var(--brick) !important;
+  color: #fff !important;
+  border-color: var(--brick) !important;
+}
+
+.user-check {
+  margin-bottom: 8px;
+}
+
+.user-self-badge,
+.user-warning,
+.user-status {
+  display: inline-block;
+  font-size: 9px;
+  font-family: var(--mono);
+  padding: 2px 7px;
+  border-radius: 99px;
+  font-weight: 700;
+}
+
+.user-self-badge {
+  background: var(--sage-light);
+  color: var(--sage-dark);
+}
+
+.user-warning {
+  background: var(--brick-light);
+  color: var(--brick);
+}
+
+.user-status.active {
+  background: var(--sage-light);
+  color: var(--sage-dark);
+}
+
+.user-status.invited {
+  background: var(--linen);
+  color: var(--brick);
+}
+
+.user-status.unconfirmed {
+  background: var(--surface2);
+  color: var(--text-muted);
 }
 
 .actual-value { color: var(--text); }
