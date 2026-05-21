@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { fixtureGoals, fixtureScorecards } from "../../lib/fixtures";
-import { actualsFromRows, goalFromRow, goalToRow, scorecardFromRow, scorecardToRow } from "../../lib/supabase";
+import { actualsFromRows, goalFromRow, goalToRow, isSupabaseUuid, profileFromRow, scorecardFromRow, scorecardToRow } from "../../lib/supabase";
 
 describe("supabase mappers", () => {
   it("round trips goals through legacy table columns", () => {
@@ -13,6 +13,29 @@ describe("supabase mappers", () => {
     });
   });
 
+  it("omits client-only goal ids for new Supabase inserts", () => {
+    const row = goalToRow({ ...fixtureGoals[0], id: "goal-123" }, { includeId: false });
+    expect(row).not.toHaveProperty("id");
+  });
+
+  it("detects Supabase UUID ids", () => {
+    expect(isSupabaseUuid("a84729d3-c4c3-4e98-ab5d-5d3ba91ec332")).toBe(true);
+    expect(isSupabaseUuid("goal-123")).toBe(false);
+  });
+
+  it("maps user profiles for read-only linked employee access", () => {
+    expect(profileFromRow("viewer@example.com", {
+      id: "user-1",
+      role: "user",
+      departments: [],
+      locations: [],
+      linked_employee_name: "Ava Jensen"
+    })).toMatchObject({
+      role: "user",
+      linkedEmployeeName: "Ava Jensen"
+    });
+  });
+
   it("maps actual rows to legacy actual keys", () => {
     expect(actualsFromRows([{ goal_tier: "department", location: "Utah", department: "Design", goal_name: "Rework", actual_value: 4 }]))
       .toEqual({ "department|Utah|Design|Rework": 4 });
@@ -21,6 +44,7 @@ describe("supabase mappers", () => {
   it("round trips scorecards through legacy table columns", () => {
     const row = scorecardToRow(fixtureScorecards[0]);
     expect(row.employee_name).toBe("Ava Jensen");
+    expect(row).not.toHaveProperty("id");
     expect(scorecardFromRow({ ...row, id: "row-1", submitted_at: "now" })).toMatchObject({
       id: "row-1",
       employeeName: "Ava Jensen",

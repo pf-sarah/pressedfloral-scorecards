@@ -22,6 +22,7 @@ import {
   employeeToRow,
   goalFromRow,
   goalToRow,
+  isSupabaseUuid,
   profileFromRow,
   scorecardFromRow,
   scorecardToRow,
@@ -211,7 +212,13 @@ export default function ScorecardsApp() {
       return;
     }
 
-    const client = supabaseClient();
+    let client: SupabaseClient;
+    try {
+      client = supabaseClient();
+    } catch (error) {
+      setAuthError(error instanceof Error ? error.message : "Supabase is not configured.");
+      return;
+    }
     setSb(client);
     client.auth.getSession().then(async ({ data }) => {
       if (data.session?.user) await loadSupabaseProfile(client, data.session.user.id, data.session.user.email || "");
@@ -332,6 +339,13 @@ export default function ScorecardsApp() {
     setToast({ message, type });
   }
 
+  function showSupabaseError(error: unknown, fallback: string) {
+    const message = error && typeof error === "object" && "message" in error && typeof error.message === "string"
+      ? error.message
+      : fallback;
+    showToast(message, "error");
+  }
+
   const months = useMemo(() => {
     const values = new Set<string>([fixtureMonth, ...Object.keys(appData.rippling)]);
     // include 24 months back through 12 months forward so every month is always selectable
@@ -448,22 +462,40 @@ export default function ScorecardsApp() {
     return ripplingPending + missingActuals.length + missingCurrentTargets.length + missingNextTargets.length;
   }, [profile, appData.rippling, currentMonth, missingActuals, missingCurrentTargets, missingNextTargets]);
 
-  async function saveGoal(goal: Goal) {
+  async function saveGoal(goal: Goal): Promise<Goal | null> {
+    let savedGoal = goal;
+    if (!isFixture && sb) {
+      const result = isSupabaseUuid(goal.id)
+        ? await sb.from("goals_bank").upsert(goalToRow(goal), { onConflict: "id" }).select().single()
+        : await sb.from("goals_bank").insert(goalToRow(goal, { includeId: false })).select().single();
+      if (result.error || !result.data) {
+        showSupabaseError(result.error, "Goal could not be saved.");
+        return null;
+      }
+      savedGoal = goalFromRow(result.data);
+    }
+
     const nextGoals = appData.goals.some((item) => item.id === goal.id)
-      ? appData.goals.map((item) => item.id === goal.id ? goal : item)
-      : [...appData.goals, goal];
+      ? appData.goals.map((item) => item.id === goal.id ? savedGoal : item)
+      : [...appData.goals, savedGoal];
     setAppData((current) => ({ ...current, goals: nextGoals }));
     persistGoals(nextGoals);
-    if (!isFixture && sb) await sb.from("goals_bank").upsert(goalToRow(goal));
     setEditingGoal(null);
     showToast("Goal saved");
+    return savedGoal;
   }
 
   async function deleteGoal(id: string) {
+    if (!isFixture && sb) {
+      const result = await sb.from("goals_bank").delete().eq("id", id);
+      if (result.error) {
+        showSupabaseError(result.error, "Goal could not be deleted.");
+        return;
+      }
+    }
     const nextGoals = appData.goals.filter((goal) => goal.id !== id);
     setAppData((current) => ({ ...current, goals: nextGoals }));
     persistGoals(nextGoals);
-    if (!isFixture && sb) await sb.from("goals_bank").delete().eq("id", id);
     showToast("Goal deleted");
   }
 
@@ -480,10 +512,8 @@ export default function ScorecardsApp() {
     const isCurrentlyInactive = !!currentPeriodActuals[key];
     const nextVal = isCurrentlyInactive ? null : 1;
     const nextPeriodActuals = { ...currentPeriodActuals, [key]: nextVal };
-    setAppData((prev) => ({ ...prev, actuals: { ...prev.actuals, [period]: nextPeriodActuals } }));
-    persistActuals(period, nextPeriodActuals);
     if (!isFixture && sb) {
-      await sb.from("actuals").upsert({
+      const result = await sb.from("actuals").upsert({
         period,
         goal_tier: "__meta__",
         location: null,
@@ -491,7 +521,13 @@ export default function ScorecardsApp() {
         goal_name: key,
         actual_value: nextVal
       }, { onConflict: "period,goal_tier,location,department,goal_name" });
+      if (result.error) {
+        showSupabaseError(result.error, "Monthly goal status could not be saved.");
+        return;
+      }
     }
+    setAppData((prev) => ({ ...prev, actuals: { ...prev.actuals, [period]: nextPeriodActuals } }));
+    persistActuals(period, nextPeriodActuals);
     showToast(isCurrentlyInactive ? "Goal activated for this month" : "Goal deactivated for this month");
   }
 
@@ -499,11 +535,9 @@ export default function ScorecardsApp() {
     const period = periodOverride ?? formatMonthLabel(bankMonth);
     const key = actualKey(goal);
     const nextActuals = { ...(appData.actuals[period] || {}), [key]: value === "" ? null : Number(value) };
-    setAppData((current) => ({ ...current, actuals: { ...current.actuals, [period]: nextActuals } }));
-    persistActuals(period, nextActuals);
     if (!isFixture && sb) {
       const [goalTier, location, department, goalName] = key.split("|");
-      await sb.from("actuals").upsert({
+      const result = await sb.from("actuals").upsert({
         period,
         goal_tier: goalTier,
         location: location || null,
@@ -511,17 +545,21 @@ export default function ScorecardsApp() {
         goal_name: goalName,
         actual_value: value === "" ? null : Number(value)
       }, { onConflict: "period,goal_tier,location,department,goal_name" });
+      if (result.error) {
+        showSupabaseError(result.error, "Actual could not be saved.");
+        return;
+      }
     }
+    setAppData((current) => ({ ...current, actuals: { ...current.actuals, [period]: nextActuals } }));
+    persistActuals(period, nextActuals);
     showToast("Actual saved");
   }
 
   async function saveMonthTarget(goal: Goal, period: string, type: "target" | "min", value: string) {
     const key = metaKey(type, goal);
     const nextActuals = { ...(appData.actuals[period] || {}), [key]: value === "" ? null : Number(value) };
-    setAppData((current) => ({ ...current, actuals: { ...current.actuals, [period]: nextActuals } }));
-    persistActuals(period, nextActuals);
     if (!isFixture && sb) {
-      await sb.from("actuals").upsert({
+      const result = await sb.from("actuals").upsert({
         period,
         goal_tier: "__meta__",
         location: null,
@@ -529,7 +567,13 @@ export default function ScorecardsApp() {
         goal_name: key,
         actual_value: value === "" ? null : Number(value)
       }, { onConflict: "period,goal_tier,location,department,goal_name" });
+      if (result.error) {
+        showSupabaseError(result.error, "Target could not be saved.");
+        return;
+      }
     }
+    setAppData((current) => ({ ...current, actuals: { ...current.actuals, [period]: nextActuals } }));
+    persistActuals(period, nextActuals);
   }
 
   async function saveMonthTargetPair(goal: Goal, period: string, target: string, min: string) {
@@ -540,23 +584,35 @@ export default function ScorecardsApp() {
       [targetKey]: target === "" ? null : Number(target),
       [minKey]: min === "" ? null : Number(min)
     };
-    setAppData((current) => ({ ...current, actuals: { ...current.actuals, [period]: nextActuals } }));
-    persistActuals(period, nextActuals);
     if (!isFixture && sb) {
-      await sb.from("actuals").upsert([
+      const result = await sb.from("actuals").upsert([
         { period, goal_tier: "__meta__", location: null, department: null, goal_name: targetKey, actual_value: target === "" ? null : Number(target) },
         { period, goal_tier: "__meta__", location: null, department: null, goal_name: minKey, actual_value: min === "" ? null : Number(min) }
       ], { onConflict: "period,goal_tier,location,department,goal_name" });
+      if (result.error) {
+        showSupabaseError(result.error, "Target and minimum could not be saved.");
+        return;
+      }
     }
+    setAppData((current) => ({ ...current, actuals: { ...current.actuals, [period]: nextActuals } }));
+    persistActuals(period, nextActuals);
   }
 
   async function saveRipplingForMonth(month: string, employees: Employee[]) {
+    if (!isFixture && sb) {
+      const deleteResult = await sb.from("rippling_employees").delete().eq("period", month);
+      if (deleteResult.error) {
+        showSupabaseError(deleteResult.error, "Existing Rippling data could not be cleared.");
+        return;
+      }
+      const insertResult = await sb.from("rippling_employees").insert(employees.map((employee) => employeeToRow(month, employee)));
+      if (insertResult.error) {
+        showSupabaseError(insertResult.error, "Rippling data could not be saved.");
+        return;
+      }
+    }
     setAppData((current) => ({ ...current, rippling: { ...current.rippling, [month]: employees } }));
     persistRippling(month, employees);
-    if (!isFixture && sb) {
-      await sb.from("rippling_employees").delete().eq("period", month);
-      await sb.from("rippling_employees").insert(employees.map((employee) => employeeToRow(month, employee)));
-    }
     showToast("Rippling data saved");
   }
 
@@ -565,23 +621,46 @@ export default function ScorecardsApp() {
       showToast("Upload a CSV before saving", "error");
       return;
     }
+    if (!isFixture && sb) {
+      const deleteResult = await sb.from("rippling_employees").delete().eq("period", ripplingMonth);
+      if (deleteResult.error) {
+        showSupabaseError(deleteResult.error, "Existing Rippling data could not be cleared.");
+        return;
+      }
+      const insertResult = await sb.from("rippling_employees").insert(ripplingPreview.map((employee) => employeeToRow(ripplingMonth, employee)));
+      if (insertResult.error) {
+        showSupabaseError(insertResult.error, "Rippling data could not be saved.");
+        return;
+      }
+    }
     setAppData((current) => ({ ...current, rippling: { ...current.rippling, [ripplingMonth]: ripplingPreview } }));
     persistRippling(ripplingMonth, ripplingPreview);
-    if (!isFixture && sb) {
-      await sb.from("rippling_employees").delete().eq("period", ripplingMonth);
-      await sb.from("rippling_employees").insert(ripplingPreview.map((employee) => employeeToRow(ripplingMonth, employee)));
-    }
     setRipplingPreview([]);
     showToast("Rippling data saved");
   }
 
   async function submitScorecardDirect(scorecard: Scorecard) {
+    let savedScorecard = scorecard;
+    if (!isFixture && sb) {
+      const result = await sb
+        .from("scorecards")
+        .upsert(scorecardToRow(scorecard), { onConflict: "employee_name,scorecard_month" })
+        .select()
+        .single();
+      if (result.error || !result.data) {
+        showSupabaseError(result.error, "Scorecard could not be submitted.");
+        return;
+      }
+      savedScorecard = scorecardFromRow(result.data);
+    }
     setAppData((current) => ({
       ...current,
-      scorecards: [...current.scorecards.filter((item) => item.id !== scorecard.id), scorecard]
+      scorecards: [
+        ...current.scorecards.filter((item) => !(item.employeeName === savedScorecard.employeeName && item.scorecardMonth === savedScorecard.scorecardMonth)),
+        savedScorecard
+      ]
     }));
-    persistScorecard(scorecard);
-    if (!isFixture && sb) await sb.from("scorecards").upsert(scorecardToRow(scorecard));
+    persistScorecard(savedScorecard);
     showToast("Scorecard submitted");
   }
 
@@ -918,7 +997,7 @@ function GoalsScreen(props: {
   onFilters: (value: { types: string[]; location: string; departments: string[]; sort: string; showInactive: boolean }) => void;
   onActual: (goal: Goal, value: string, period?: string) => void;
   onEdit: (goal: Goal | null) => void;
-  onSave: (goal: Goal) => void;
+  onSave: (goal: Goal) => Goal | null | void | Promise<Goal | null | void>;
   onSaveTargetPair: (goal: Goal, target: string, min: string, period?: string) => void;
   onDelete: (id: string) => void;
   onToggle: (id: string) => void;
@@ -1345,7 +1424,7 @@ function GoalScopeTags({ location, department }: { location?: string; department
   );
 }
 
-function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, onSave, onSaveTargetPair, onCancel }: { goal: Goal; actuals: ActualsByKey; isAdmin?: boolean; allowedDepartments?: string[]; onSave: (goal: Goal) => void; onSaveTargetPair: (goal: Goal, target: string, min: string) => void; onCancel: () => void }) {
+function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, onSave, onSaveTargetPair, onCancel }: { goal: Goal; actuals: ActualsByKey; isAdmin?: boolean; allowedDepartments?: string[]; onSave: (goal: Goal) => Goal | null | void | Promise<Goal | null | void>; onSaveTargetPair: (goal: Goal, target: string, min: string) => void | Promise<void>; onCancel: () => void }) {
   const isNew = goal.name === "";
   const [draft, setDraft] = useState(goal);
   const [target, setTarget] = useState(actuals[metaKey("target", goal)] != null ? String(actuals[metaKey("target", goal)]) : String(goal.goalValue || ""));
@@ -1376,7 +1455,7 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, onSave, onSave
   if (!periodVal) missing.push("Period Type");
   const canSave = missing.length === 0;
 
-  function handleSave() {
+  async function handleSave() {
     if (!canSave) return;
     const finalGoal: Goal = {
       ...draft,
@@ -1388,8 +1467,9 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, onSave, onSave
       capped: cappedVal as "yes" | "no",
       periodType: periodVal as "monthly" | "quarterly",
     };
-    onSave(finalGoal);
-    onSaveTargetPair(finalGoal, target, min);
+    const savedGoal = await onSave(finalGoal);
+    if (savedGoal === null) return;
+    await onSaveTargetPair(savedGoal || finalGoal, target, min);
   }
 
   const reqStyle: React.CSSProperties = { color: "var(--brick)", marginLeft: 2 };

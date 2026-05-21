@@ -1,16 +1,19 @@
 import { createClient } from "@supabase/supabase-js";
 import type { ActualsByKey, Employee, Goal, ManagerProfile, Scorecard } from "./types";
 
-const DEFAULT_SUPABASE_URL = "https://mwwqeakjxmpticvbpinc.supabase.co";
-const DEFAULT_SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im13d3FlYWtqeG1wdGljdmJwaW5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5NjIxMjUsImV4cCI6MjA5MjUzODEyNX0.sqOElnGDRM2X2-TT1iMrnPBa_HK0ndDZ_31iP40jsiE";
-
 export const dataMode = process.env.NEXT_PUBLIC_SCORECARDS_DATA_MODE === "fixture" ? "fixture" : "supabase";
 
 export function supabaseClient() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY
-  );
+  const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
+  const anonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
+  if (!url || !anonKey) {
+    throw new Error("Missing NEXT_PUBLIC_SUPABASE_URL or NEXT_PUBLIC_SUPABASE_ANON_KEY");
+  }
+  return createClient(url, anonKey);
+}
+
+export function isSupabaseUuid(value: string | undefined) {
+  return !!value && /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(value);
 }
 
 export function goalFromRow(row: Record<string, any>): Goal {
@@ -31,9 +34,8 @@ export function goalFromRow(row: Record<string, any>): Goal {
   };
 }
 
-export function goalToRow(goal: Goal) {
-  return {
-    id: goal.id,
+export function goalToRow(goal: Goal, options: { includeId?: boolean } = {}) {
+  const row: Record<string, unknown> = {
     goal_tier: goal.goalTier,
     location: goal.location || null,
     department: goal.department || null,
@@ -47,6 +49,8 @@ export function goalToRow(goal: Goal) {
     active: goal.active,
     period_type: goal.periodType || "monthly"
   };
+  if (options.includeId !== false) row.id = goal.id;
+  return row;
 }
 
 export function employeeFromRow(row: Record<string, any>): Employee {
@@ -158,4 +162,3 @@ export function scorecardFromRow(row: Record<string, any>): Scorecard {
     submittedBy: row.submitted_by
   };
 }
-
