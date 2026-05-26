@@ -40,7 +40,7 @@ export async function POST(request: NextRequest) {
   if (existing) return jsonError("A user with that email already exists.", 409);
 
   const inviteResult = await admin.client.auth.admin.inviteUserByEmail(payload.value.email!, {
-    redirectTo: request.nextUrl.origin,
+    redirectTo: `${request.nextUrl.origin}/accept-invite`,
     data: { scorecards_role: payload.value.role }
   });
   if (inviteResult.error) {
