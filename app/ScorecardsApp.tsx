@@ -1519,12 +1519,13 @@ function UsersScreen(props: {
                 <th>Status</th>
                 <th>Role</th>
                 <th>Scope</th>
+                <th>Last Activity</th>
                 <th></th>
               </tr>
             </thead>
             <tbody>
               {!sortedUsers.length && (
-                <tr><td colSpan={5}>{props.loading ? "Loading users..." : "No users found."}</td></tr>
+                <tr><td colSpan={6}>{props.loading ? "Loading users..." : "No users found."}</td></tr>
               )}
               {sortedUsers.map((user) => (
                 <React.Fragment key={user.id}>
@@ -1537,6 +1538,13 @@ function UsersScreen(props: {
                     <td><span className={`user-status ${user.status}`}>{statusLabel(user)}</span></td>
                     <td>{roleLabel(user.role)}</td>
                     <td>{scopeSummary(user)}</td>
+                    <td style={{ fontSize: "12px", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
+                      {user.lastSignInAt
+                        ? <>Last sign in<br />{formatTimestamp(user.lastSignInAt)}</>
+                        : user.invitedAt
+                        ? <>Invited<br />{formatTimestamp(user.invitedAt)}</>
+                        : "—"}
+                    </td>
                     <td className="row-menu-cell" style={{ display: "flex", gap: "6px", alignItems: "center" }}>
                       <button
                         disabled={resendingId === user.id}
@@ -1553,7 +1561,7 @@ function UsersScreen(props: {
                   </tr>
                   {editingId === user.id && (
                     <tr className="user-edit-row">
-                      <td colSpan={5}>
+                      <td colSpan={6}>
                         <UserPermissionForm
                           mode="edit"
                           user={user}
@@ -1725,6 +1733,12 @@ function statusLabel(user: AdminManagedUser) {
 
 function shortDate(value: string) {
   return new Date(value).toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" });
+}
+
+function formatTimestamp(value: string) {
+  const d = new Date(value);
+  return d.toLocaleDateString(undefined, { month: "short", day: "numeric", year: "numeric" }) +
+    " " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
 function GoalsScreen(props: {
