@@ -525,7 +525,7 @@ export default function ScorecardsApp() {
       response = await fetch("/api/admin/users?resend=true", {
         method: "POST",
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify({ email: user.email, role: user.role, departments: user.departments, locations: user.locations, linkedEmployeeName: user.linkedEmployeeName })
+        body: JSON.stringify({ email: user.email, role: user.role, departments: user.departments, locations: user.locations, linkedEmployeeName: user.linkedEmployeeName, allDepartments: user.departments.length === 0, allLocations: user.locations.length === 0 })
       });
     } catch {
       showToast("Failed to resend invite.", "error");
