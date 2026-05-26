@@ -41,6 +41,18 @@ export async function POST(request: NextRequest) {
   const isResend = request.nextUrl.searchParams.get("resend") === "true";
   if (existing && !isResend) return jsonError("A user with that email already exists.", 409);
 
+  // For resends on already-confirmed users, send a password reset instead of a new invite.
+  if (isResend && existing) {
+    const isConfirmed = !!(existing.confirmed_at || existing.email_confirmed_at || existing.last_sign_in_at);
+    if (isConfirmed) {
+      const { error: resetError } = await admin.client.auth.resetPasswordForEmail(payload.value.email!, {
+        redirectTo: `${request.nextUrl.origin}/accept-invite`
+      });
+      if (resetError) return jsonError(resetError.message, 400);
+      return NextResponse.json({ message: "Password reset email sent." });
+    }
+  }
+
   const inviteResult = await admin.client.auth.admin.inviteUserByEmail(payload.value.email!, {
     redirectTo: `${request.nextUrl.origin}/accept-invite`,
     data: { scorecards_role: payload.value.role }
