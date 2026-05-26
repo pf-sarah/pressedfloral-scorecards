@@ -251,6 +251,19 @@ export default function ScorecardsApp() {
       return;
     }
 
+    // Surface any error Supabase drops into the URL hash (e.g. expired invite link).
+    if (typeof window !== "undefined") {
+      const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      const hashError = hash.get("error_description") || hash.get("error");
+      if (hashError) {
+        const msg = decodeURIComponent(hashError).replace(/\+/g, " ");
+        setAuthError(msg.includes("expired") || msg.includes("invalid")
+          ? "This invite or reset link has expired. Ask an admin to send a new one."
+          : msg);
+        window.history.replaceState(null, "", window.location.pathname);
+      }
+    }
+
     let client: SupabaseClient;
     try {
       client = supabaseClient();
