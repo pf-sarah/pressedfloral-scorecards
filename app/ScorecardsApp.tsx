@@ -1538,18 +1538,16 @@ function UsersScreen(props: {
                     <td>{roleLabel(user.role)}</td>
                     <td>{scopeSummary(user)}</td>
                     <td className="row-menu-cell" style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                      {(user.status === "invited" || user.status === "unconfirmed") && (
-                        <button
-                          disabled={resendingId === user.id}
-                          onClick={async () => {
-                            setResendingId(user.id);
-                            await props.onResendInvite(user);
-                            setResendingId(null);
-                          }}
-                        >
-                          {resendingId === user.id ? "Sending…" : "Resend Invite"}
-                        </button>
-                      )}
+                      <button
+                        disabled={resendingId === user.id}
+                        onClick={async () => {
+                          setResendingId(user.id);
+                          await props.onResendInvite(user);
+                          setResendingId(null);
+                        }}
+                      >
+                        {resendingId === user.id ? "Sending…" : "Resend Invite"}
+                      </button>
                       <button onClick={() => setEditingId(editingId === user.id ? null : user.id)}>{editingId === user.id ? "Close" : "Edit"}</button>
                     </td>
                   </tr>
