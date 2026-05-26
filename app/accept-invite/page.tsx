@@ -1,17 +1,25 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { createClient } from "@supabase/supabase-js";
+import { useEffect, useRef, useState } from "react";
+import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 
-const DEFAULT_SUPABASE_URL = "https://mwwqeakjxmpticvbpinc.supabase.co";
-const DEFAULT_SUPABASE_ANON_KEY =
+const SUPABASE_URL =
+  process.env.NEXT_PUBLIC_SUPABASE_URL ||
+  "https://mwwqeakjxmpticvbpinc.supabase.co";
+const SUPABASE_ANON_KEY =
+  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY ||
   "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im13d3FlYWtqeG1wdGljdmJwaW5jIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzY5NjIxMjUsImV4cCI6MjA5MjUzODEyNX0.sqOElnGDRM2X2-TT1iMrnPBa_HK0ndDZ_31iP40jsiE";
 
-function supabase() {
-  return createClient(
-    process.env.NEXT_PUBLIC_SUPABASE_URL || DEFAULT_SUPABASE_URL,
-    process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || DEFAULT_SUPABASE_ANON_KEY
-  );
+/** A Supabase client that won't auto-process or strip the URL tokens. */
+function makeClient(): SupabaseClient {
+  return createClient(SUPABASE_URL, SUPABASE_ANON_KEY, {
+    auth: {
+      // Turn off auto-detection so we can handle the token ourselves
+      // and keep it in the URL until we're done.
+      detectSessionInUrl: false,
+      persistSession: true,
+    },
+  });
 }
 
 type Stage = "loading" | "form" | "success" | "error";
@@ -23,34 +31,83 @@ export default function AcceptInvitePage() {
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState("");
   const [submitting, setSubmitting] = useState(false);
+  const clientRef = useRef<SupabaseClient | null>(null);
 
-  // On mount: read the invite token from the URL hash and establish a session
   useEffect(() => {
-    const hash = window.location.hash.slice(1); // strip leading #
-    const params = new URLSearchParams(hash);
-    const accessToken = params.get("access_token");
-    const refreshToken = params.get("refresh_token");
-    const type = params.get("type");
+    const client = makeClient();
+    clientRef.current = client;
 
-    if (!accessToken || type !== "invite") {
-      setStage("error");
-      setError("This invite link is invalid or has already been used. Please ask your admin to send a new one.");
-      return;
+    // Supabase can deliver the invite token in three different ways depending
+    // on the project's auth flow setting:
+    //   1. PKCE (modern default):   ?code=AUTHORIZATION_CODE
+    //   2. OTP hash:                ?token_hash=...&type=invite
+    //   3. Implicit (legacy):       #access_token=...&type=invite
+    const searchParams = new URLSearchParams(window.location.search);
+    const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+
+    const code = searchParams.get("code");
+    const tokenHash = searchParams.get("token_hash");
+    const queryType = searchParams.get("type");
+    const accessToken = hashParams.get("access_token");
+    const refreshToken = hashParams.get("refresh_token") ?? "";
+    const hashType = hashParams.get("type");
+
+    async function processInvite() {
+      try {
+        if (code) {
+          // ── PKCE flow ──────────────────────────────────────────────────────
+          const { data, error: err } = await client.auth.exchangeCodeForSession(code);
+          if (err || !data.session) {
+            showExpiredError();
+            return;
+          }
+          setEmail(data.session.user.email ?? "");
+          setStage("form");
+        } else if (tokenHash && queryType === "invite") {
+          // ── OTP / token_hash flow ──────────────────────────────────────────
+          const { data, error: err } = await client.auth.verifyOtp({
+            token_hash: tokenHash,
+            type: "invite",
+          });
+          if (err || !data.user) {
+            showExpiredError();
+            return;
+          }
+          setEmail(data.user.email ?? "");
+          setStage("form");
+        } else if (accessToken && hashType === "invite") {
+          // ── Implicit / hash flow ───────────────────────────────────────────
+          const { data, error: err } = await client.auth.setSession({
+            access_token: accessToken,
+            refresh_token: refreshToken,
+          });
+          if (err || !data.user) {
+            showExpiredError();
+            return;
+          }
+          setEmail(data.user.email ?? "");
+          setStage("form");
+        } else {
+          // No recognisable token in the URL
+          setError(
+            "This invite link is invalid or has already been used. Ask your admin to send a new one."
+          );
+          setStage("error");
+        }
+      } catch {
+        showExpiredError();
+      }
     }
 
-    const client = supabase();
-    client.auth
-      .setSession({ access_token: accessToken, refresh_token: refreshToken || "" })
-      .then(({ data, error: sessionError }) => {
-        if (sessionError || !data.user) {
-          setStage("error");
-          setError("This invite link has expired or is no longer valid. Please ask your admin to send a new invite.");
-          return;
-        }
-        setEmail(data.user.email || "");
-        setStage("form");
-      });
+    processInvite();
   }, []);
+
+  function showExpiredError() {
+    setError(
+      "This invite link has expired or is no longer valid. Ask your admin to send a new invite."
+    );
+    setStage("error");
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -66,7 +123,8 @@ export default function AcceptInvitePage() {
     }
 
     setSubmitting(true);
-    const { error: updateError } = await supabase().auth.updateUser({ password });
+    const client = clientRef.current ?? makeClient();
+    const { error: updateError } = await client.auth.updateUser({ password });
     setSubmitting(false);
 
     if (updateError) {
@@ -75,11 +133,32 @@ export default function AcceptInvitePage() {
     }
 
     setStage("success");
-    // Brief pause so the user sees the success message, then go to the app
     setTimeout(() => {
-      window.location.href = "/";
-    }, 1800);
+      window.location.replace("/");
+    }, 1600);
   }
+
+  // ── Styles shared with the main auth card ─────────────────────────────────
+  const inputStyle: React.CSSProperties = {
+    width: "100%",
+    padding: "10px 12px",
+    border: "1.5px solid var(--border)",
+    borderRadius: "var(--radius-sm)",
+    fontSize: "14px",
+    fontFamily: "var(--sans)",
+    background: "var(--surface)",
+    color: "var(--text)",
+    outline: "none",
+  };
+  const labelStyle: React.CSSProperties = {
+    display: "block",
+    fontSize: "11px",
+    fontWeight: 700,
+    color: "var(--text-muted)",
+    marginBottom: "6px",
+    letterSpacing: "0.05em",
+    textTransform: "uppercase",
+  };
 
   return (
     <div
@@ -93,25 +172,49 @@ export default function AcceptInvitePage() {
       }}
     >
       <div className="auth-card">
-        {/* Logo / brand */}
+        {/* Brand */}
         <div style={{ marginBottom: "24px", textAlign: "center" }}>
-          <div style={{ fontSize: "22px", fontWeight: 700, color: "var(--brick)", lineHeight: 1.1 }}>
+          <div
+            style={{
+              fontSize: "22px",
+              fontWeight: 700,
+              color: "var(--brick)",
+              lineHeight: 1.1,
+            }}
+          >
             Pressed Floral
           </div>
-          <div style={{ fontSize: "12px", color: "var(--text-muted)", fontFamily: "var(--mono)", marginTop: "2px" }}>
+          <div
+            style={{
+              fontSize: "12px",
+              color: "var(--text-muted)",
+              fontFamily: "var(--mono)",
+              marginTop: "2px",
+            }}
+          >
             Scorecards
           </div>
         </div>
 
+        {/* Loading */}
         {stage === "loading" && (
-          <p style={{ fontSize: "13px", color: "var(--text-muted)", textAlign: "center" }}>
+          <p
+            style={{
+              fontSize: "13px",
+              color: "var(--text-muted)",
+              textAlign: "center",
+            }}
+          >
             Verifying your invite…
           </p>
         )}
 
+        {/* Error */}
         {stage === "error" && (
           <>
-            <div id="auth-error" style={{ marginBottom: "16px" }}>{error}</div>
+            <div id="auth-error" style={{ marginBottom: "16px" }}>
+              {error}
+            </div>
             <a
               href="/"
               style={{
@@ -127,28 +230,19 @@ export default function AcceptInvitePage() {
           </>
         )}
 
+        {/* Password setup form */}
         {stage === "form" && (
           <>
             <div className="auth-title">Welcome to Scorecards</div>
             <div className="auth-subtitle">
-              {email ? `Setting up account for ${email}` : "Set up your account to get started"}
+              {email
+                ? `Creating account for ${email}`
+                : "Set up your account to get started."}
             </div>
 
             <form onSubmit={handleSubmit}>
               <div style={{ marginBottom: "14px" }}>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: "11px",
-                    fontWeight: 700,
-                    color: "var(--text-muted)",
-                    marginBottom: "6px",
-                    letterSpacing: "0.05em",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  Password
-                </label>
+                <label style={labelStyle}>Password</label>
                 <input
                   type="password"
                   autoFocus
@@ -157,34 +251,12 @@ export default function AcceptInvitePage() {
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="At least 8 characters"
                   required
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    border: "1.5px solid var(--border)",
-                    borderRadius: "var(--radius-sm)",
-                    fontSize: "14px",
-                    fontFamily: "var(--sans)",
-                    background: "var(--surface)",
-                    color: "var(--text)",
-                    outline: "none",
-                  }}
+                  style={inputStyle}
                 />
               </div>
 
               <div style={{ marginBottom: "8px" }}>
-                <label
-                  style={{
-                    display: "block",
-                    fontSize: "11px",
-                    fontWeight: 700,
-                    color: "var(--text-muted)",
-                    marginBottom: "6px",
-                    letterSpacing: "0.05em",
-                    textTransform: "uppercase",
-                  }}
-                >
-                  Confirm Password
-                </label>
+                <label style={labelStyle}>Confirm Password</label>
                 <input
                   type="password"
                   autoComplete="new-password"
@@ -192,21 +264,15 @@ export default function AcceptInvitePage() {
                   onChange={(e) => setConfirm(e.target.value)}
                   placeholder="Re-enter your password"
                   required
-                  style={{
-                    width: "100%",
-                    padding: "10px 12px",
-                    border: "1.5px solid var(--border)",
-                    borderRadius: "var(--radius-sm)",
-                    fontSize: "14px",
-                    fontFamily: "var(--sans)",
-                    background: "var(--surface)",
-                    color: "var(--text)",
-                    outline: "none",
-                  }}
+                  style={inputStyle}
                 />
               </div>
 
-              {error && <div id="auth-error">{error}</div>}
+              {error && (
+                <div id="auth-error" style={{ marginBottom: "4px" }}>
+                  {error}
+                </div>
+              )}
 
               <button
                 type="submit"
@@ -219,11 +285,12 @@ export default function AcceptInvitePage() {
           </>
         )}
 
+        {/* Success */}
         {stage === "success" && (
           <div style={{ textAlign: "center" }}>
             <div
               style={{
-                fontSize: "32px",
+                fontSize: "36px",
                 marginBottom: "12px",
                 color: "var(--sage-dark)",
               }}
