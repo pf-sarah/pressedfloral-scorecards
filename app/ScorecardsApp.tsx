@@ -511,6 +511,34 @@ export default function ScorecardsApp() {
     return true;
   }
 
+  async function resendAdminInvite(user: AdminManagedUser) {
+    if (isFixture) {
+      showToast(`Invite resent to ${user.email}`);
+      return;
+    }
+    if (!sb) { showToast("Supabase is not connected.", "error"); return; }
+    const sessionResult = await sb.auth.getSession();
+    const token = sessionResult.data.session?.access_token;
+    if (!token) { showToast("Sign in again to manage users.", "error"); return; }
+    let response: Response;
+    try {
+      response = await fetch("/api/admin/users?resend=true", {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ email: user.email, role: user.role, departments: user.departments, locations: user.locations, linkedEmployeeName: user.linkedEmployeeName })
+      });
+    } catch {
+      showToast("Failed to resend invite.", "error");
+      return;
+    }
+    if (!response.ok) {
+      const body = await response.json().catch(() => ({}));
+      showToast(typeof body.error === "string" ? body.error : "Failed to resend invite.", "error");
+      return;
+    }
+    showToast(`Invite resent to ${user.email}`);
+  }
+
   async function updateAdminUser(payload: AdminUserPayload) {
     const normalized = normalizeAdminUserPayload(payload, { requireId: true });
     if (!normalized.ok) {
@@ -1014,6 +1042,7 @@ export default function ScorecardsApp() {
               onRefresh={loadAdminUsers}
               onInvite={inviteAdminUser}
               onUpdate={updateAdminUser}
+              onResendInvite={resendAdminInvite}
             />
           )}
           {mode === "todos" && (
@@ -1458,8 +1487,10 @@ function UsersScreen(props: {
   onRefresh: () => void;
   onInvite: (payload: AdminUserPayload) => Promise<boolean>;
   onUpdate: (payload: AdminUserPayload) => Promise<boolean>;
+  onResendInvite: (user: AdminManagedUser) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
+  const [resendingId, setResendingId] = useState<string | null>(null);
   const sortedUsers = [...props.users].sort((a, b) => a.email.localeCompare(b.email));
 
   return (
@@ -1506,7 +1537,19 @@ function UsersScreen(props: {
                     <td><span className={`user-status ${user.status}`}>{statusLabel(user)}</span></td>
                     <td>{roleLabel(user.role)}</td>
                     <td>{scopeSummary(user)}</td>
-                    <td className="row-menu-cell">
+                    <td className="row-menu-cell" style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                      {(user.status === "invited" || user.status === "unconfirmed") && (
+                        <button
+                          disabled={resendingId === user.id}
+                          onClick={async () => {
+                            setResendingId(user.id);
+                            await props.onResendInvite(user);
+                            setResendingId(null);
+                          }}
+                        >
+                          {resendingId === user.id ? "Sending…" : "Resend Invite"}
+                        </button>
+                      )}
                       <button onClick={() => setEditingId(editingId === user.id ? null : user.id)}>{editingId === user.id ? "Close" : "Edit"}</button>
                     </td>
                   </tr>

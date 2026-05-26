@@ -37,7 +37,9 @@ export async function POST(request: NextRequest) {
   const existingResult = await admin.client.auth.admin.listUsers({ page: 1, perPage: 1000 });
   if (existingResult.error) return jsonError(existingResult.error.message, 500);
   const existing = existingResult.data.users.find((user) => user.email?.toLowerCase() === payload.value.email);
-  if (existing) return jsonError("A user with that email already exists.", 409);
+
+  const isResend = request.nextUrl.searchParams.get("resend") === "true";
+  if (existing && !isResend) return jsonError("A user with that email already exists.", 409);
 
   const inviteResult = await admin.client.auth.admin.inviteUserByEmail(payload.value.email!, {
     redirectTo: `${request.nextUrl.origin}/accept-invite`,
