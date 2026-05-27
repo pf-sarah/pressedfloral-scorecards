@@ -37,17 +37,16 @@ export default function AcceptInvitePage() {
     const client = makeClient();
     clientRef.current = client;
 
-    // Supabase can deliver the invite token in three different ways depending
-    // on the project's auth flow setting:
+    // Supabase delivers tokens in several ways depending on flow type:
     //   1. PKCE (modern default):   ?code=AUTHORIZATION_CODE
-    //   2. OTP hash:                ?token_hash=...&type=invite
-    //   3. Implicit (legacy):       #access_token=...&type=invite
+    //   2. OTP hash:                ?token_hash=...&type=invite|recovery
+    //   3. Implicit (legacy):       #access_token=...&type=invite|recovery
     const searchParams = new URLSearchParams(window.location.search);
     const hashParams = new URLSearchParams(window.location.hash.replace(/^#/, ""));
 
     const code = searchParams.get("code");
     const tokenHash = searchParams.get("token_hash");
-    const queryType = searchParams.get("type");
+    const queryType = searchParams.get("type"); // "invite" or "recovery"
     const accessToken = hashParams.get("access_token");
     const refreshToken = hashParams.get("refresh_token") ?? "";
     const hashType = hashParams.get("type");
@@ -63,11 +62,11 @@ export default function AcceptInvitePage() {
           }
           setEmail(data.session.user.email ?? "");
           setStage("form");
-        } else if (tokenHash && queryType === "invite") {
-          // ── OTP / token_hash flow ──────────────────────────────────────────
+        } else if (tokenHash && (queryType === "invite" || queryType === "recovery")) {
+          // ── OTP / token_hash flow (invite or password reset) ───────────────
           const { data, error: err } = await client.auth.verifyOtp({
             token_hash: tokenHash,
-            type: "invite",
+            type: queryType as "invite" | "recovery",
           });
           if (err || !data.user) {
             showExpiredError();
@@ -75,8 +74,8 @@ export default function AcceptInvitePage() {
           }
           setEmail(data.user.email ?? "");
           setStage("form");
-        } else if (accessToken && hashType === "invite") {
-          // ── Implicit / hash flow ───────────────────────────────────────────
+        } else if (accessToken && (hashType === "invite" || hashType === "recovery")) {
+          // ── Implicit / hash flow (invite or password reset) ────────────────
           const { data, error: err } = await client.auth.setSession({
             access_token: accessToken,
             refresh_token: refreshToken,
