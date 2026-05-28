@@ -163,6 +163,7 @@ export default function AcceptInvitePage() {
     <div
       style={{
         minHeight: "100vh",
+        width: "100%",
         background: "var(--bg)",
         display: "flex",
         alignItems: "center",
