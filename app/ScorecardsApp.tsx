@@ -251,9 +251,16 @@ export default function ScorecardsApp() {
       return;
     }
 
-    // Surface any error Supabase drops into the URL hash (e.g. expired invite link).
+    // If Supabase drops an invite or recovery token on the root page (because redirectTo
+    // was ignored), forward to /accept-invite so the password-setup page handles it.
     if (typeof window !== "undefined") {
       const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
+      const hashType = hash.get("type");
+      if (hashType === "invite" || hashType === "recovery") {
+        window.location.replace("/accept-invite" + window.location.hash);
+        return;
+      }
+      // Surface any error Supabase drops into the URL hash (e.g. expired invite link).
       const hashError = hash.get("error_description") || hash.get("error");
       if (hashError) {
         const msg = decodeURIComponent(hashError).replace(/\+/g, " ");
