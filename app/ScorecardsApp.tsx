@@ -254,6 +254,14 @@ export default function ScorecardsApp() {
     // If Supabase drops an invite or recovery token on the root page (because redirectTo
     // was ignored), forward to /accept-invite so the password-setup page handles it.
     if (typeof window !== "undefined") {
+      // PKCE flow: token arrives as ?code= query param
+      const search = new URLSearchParams(window.location.search);
+      const code = search.get("code");
+      if (code) {
+        window.location.replace("/accept-invite" + window.location.search);
+        return;
+      }
+      // Implicit flow: token arrives as #access_token=...&type=invite|recovery
       const hash = new URLSearchParams(window.location.hash.replace(/^#/, ""));
       const hashType = hash.get("type");
       if (hashType === "invite" || hashType === "recovery") {
