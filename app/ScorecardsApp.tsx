@@ -1655,12 +1655,12 @@ function UserPermissionForm(props: {
     <div className="user-form">
       <div className="fields-grid">
         {props.mode === "invite" && (
-          <div className="field half">
+          <div className="field email-field">
             <label>Email</label>
             <input aria-label="Invite email" type="email" value={draft.email} onChange={(event) => setDraft({ ...draft, email: event.target.value })} placeholder="name@pressedfloral.com" />
           </div>
         )}
-        <div className="field">
+        <div className="field role-field">
           <label>Role</label>
           <select aria-label="User role" value={draft.role} onChange={(event) => setRole(event.target.value as ProfileRole)}>
             <option value="manager">Manager</option>
@@ -1670,7 +1670,7 @@ function UserPermissionForm(props: {
         </div>
         {draft.role === "manager" && (
           <>
-            <div className="field">
+            <div className="field dept-field">
               <label>Departments</label>
               <label className="check-label user-check">
                 <input type="checkbox" checked={draft.allDepartments} onChange={(event) => setDraft({ ...draft, allDepartments: event.target.checked, departments: event.target.checked ? [] : draft.departments })} />
@@ -1680,7 +1680,7 @@ function UserPermissionForm(props: {
                 <MultiSelectDropdown label="Choose departments" options={departmentOptions} selected={draft.departments} onChange={(values) => setDraft({ ...draft, departments: values })} emptyLabel="No departments" />
               )}
             </div>
-            <div className="field">
+            <div className="field loc-field">
               <label>Locations</label>
               <label className="check-label user-check">
                 <input type="checkbox" checked={draft.allLocations} onChange={(event) => setDraft({ ...draft, allLocations: event.target.checked, locations: event.target.checked ? [] : draft.locations })} />
@@ -1690,7 +1690,7 @@ function UserPermissionForm(props: {
                 <MultiSelectDropdown label="Choose locations" options={locationOptions} selected={draft.locations} onChange={(values) => setDraft({ ...draft, locations: values })} emptyLabel="No locations" />
               )}
             </div>
-            <div className="field">
+            <div className="field tree-field">
               <label>Reporting Tree Root</label>
               <select aria-label="Reporting tree root" value={draft.linkedEmployeeName} onChange={(event) => setDraft({ ...draft, linkedEmployeeName: event.target.value })}>
                 <option value="">No linked employee</option>
@@ -1700,7 +1700,7 @@ function UserPermissionForm(props: {
           </>
         )}
         {draft.role === "user" && (
-          <div className="field">
+          <div className="field linked-field">
             <label>Linked Employee</label>
             <select aria-label="Linked employee" value={draft.linkedEmployeeName} onChange={(event) => setDraft({ ...draft, linkedEmployeeName: event.target.value })}>
               <option value="">Choose employee</option>

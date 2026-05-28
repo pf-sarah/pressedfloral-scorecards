@@ -458,7 +458,31 @@ button {
   background: var(--surface2);
   border: 1.5px solid var(--border);
   border-radius: var(--radius-sm);
-  padding: 14px;
+  padding: 20px;
+}
+
+/* Override the generic auto-fill grid inside the user form with a fixed 12-column grid */
+.user-form .fields-grid {
+  display: grid;
+  grid-template-columns: repeat(12, 1fr);
+  gap: 14px;
+}
+
+.user-form .field.email-field   { grid-column: span 5; }
+.user-form .field.role-field    { grid-column: span 3; }
+.user-form .field.dept-field    { grid-column: span 4; }
+.user-form .field.loc-field     { grid-column: span 4; }
+.user-form .field.tree-field    { grid-column: span 4; }
+.user-form .field.linked-field  { grid-column: span 4; }
+
+@media (max-width: 700px) {
+  .user-form .fields-grid { grid-template-columns: 1fr 1fr; }
+  .user-form .field.email-field,
+  .user-form .field.role-field,
+  .user-form .field.dept-field,
+  .user-form .field.loc-field,
+  .user-form .field.tree-field,
+  .user-form .field.linked-field { grid-column: span 2; }
 }
 
 .user-edit-row td {
@@ -468,14 +492,14 @@ button {
 
 .user-form-actions {
   justify-content: flex-end;
-  margin-top: 12px;
+  margin-top: 14px;
 }
 
 .user-submit {
   width: auto;
   min-width: 120px;
   margin-top: 0;
-  padding: 8px 14px;
+  padding: 8px 18px;
   font-size: 13px;
   background: var(--brick) !important;
   color: #fff !important;
@@ -483,7 +507,7 @@ button {
 }
 
 .user-check {
-  margin-bottom: 8px;
+  margin-bottom: 6px;
 }
 
 .user-self-badge,
