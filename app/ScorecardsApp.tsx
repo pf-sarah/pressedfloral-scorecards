@@ -1653,14 +1653,15 @@ function UserPermissionForm(props: {
 
   return (
     <div className="user-form">
-      <div className="fields-grid">
+      {/* Row 1: Email + Role */}
+      <div className="user-form-row">
         {props.mode === "invite" && (
-          <div className="field email-field">
+          <div className="field" style={{ flex: "1 1 0" }}>
             <label>Email</label>
             <input aria-label="Invite email" type="email" value={draft.email} onChange={(event) => setDraft({ ...draft, email: event.target.value })} placeholder="name@pressedfloral.com" />
           </div>
         )}
-        <div className="field role-field">
+        <div className="field" style={{ flex: "0 0 180px" }}>
           <label>Role</label>
           <select aria-label="User role" value={draft.role} onChange={(event) => setRole(event.target.value as ProfileRole)}>
             <option value="manager">Manager</option>
@@ -1668,47 +1669,55 @@ function UserPermissionForm(props: {
             <option value="admin">Admin</option>
           </select>
         </div>
-        {draft.role === "manager" && (
-          <>
-            <div className="field dept-field">
+      </div>
+      {/* Row 2: Manager scope fields */}
+      {draft.role === "manager" && (
+        <div className="user-form-row">
+          <div className="field" style={{ flex: "1 1 0" }}>
+            <div className="user-field-header">
               <label>Departments</label>
               <label className="check-label user-check">
                 <input type="checkbox" checked={draft.allDepartments} onChange={(event) => setDraft({ ...draft, allDepartments: event.target.checked, departments: event.target.checked ? [] : draft.departments })} />
-                All departments
+                All
               </label>
-              {!draft.allDepartments && (
-                <MultiSelectDropdown label="Choose departments" options={departmentOptions} selected={draft.departments} onChange={(values) => setDraft({ ...draft, departments: values })} emptyLabel="No departments" />
-              )}
             </div>
-            <div className="field loc-field">
+            {!draft.allDepartments && (
+              <MultiSelectDropdown label="Choose departments" options={departmentOptions} selected={draft.departments} onChange={(values) => setDraft({ ...draft, departments: values })} emptyLabel="No departments" />
+            )}
+          </div>
+          <div className="field" style={{ flex: "1 1 0" }}>
+            <div className="user-field-header">
               <label>Locations</label>
               <label className="check-label user-check">
                 <input type="checkbox" checked={draft.allLocations} onChange={(event) => setDraft({ ...draft, allLocations: event.target.checked, locations: event.target.checked ? [] : draft.locations })} />
-                All locations
+                All
               </label>
-              {!draft.allLocations && (
-                <MultiSelectDropdown label="Choose locations" options={locationOptions} selected={draft.locations} onChange={(values) => setDraft({ ...draft, locations: values })} emptyLabel="No locations" />
-              )}
             </div>
-            <div className="field tree-field">
-              <label>Reporting Tree Root</label>
-              <select aria-label="Reporting tree root" value={draft.linkedEmployeeName} onChange={(event) => setDraft({ ...draft, linkedEmployeeName: event.target.value })}>
-                <option value="">No linked employee</option>
-                {employeeNames.map((name) => <option key={name} value={name}>{name}</option>)}
-              </select>
-            </div>
-          </>
-        )}
-        {draft.role === "user" && (
-          <div className="field linked-field">
+            {!draft.allLocations && (
+              <MultiSelectDropdown label="Choose locations" options={locationOptions} selected={draft.locations} onChange={(values) => setDraft({ ...draft, locations: values })} emptyLabel="No locations" />
+            )}
+          </div>
+          <div className="field" style={{ flex: "1 1 0" }}>
+            <label>Reporting Tree Root</label>
+            <select aria-label="Reporting tree root" value={draft.linkedEmployeeName} onChange={(event) => setDraft({ ...draft, linkedEmployeeName: event.target.value })}>
+              <option value="">No linked employee</option>
+              {employeeNames.map((name) => <option key={name} value={name}>{name}</option>)}
+            </select>
+          </div>
+        </div>
+      )}
+      {/* Row 2: User linked employee */}
+      {draft.role === "user" && (
+        <div className="user-form-row">
+          <div className="field" style={{ flex: "1 1 0" }}>
             <label>Linked Employee</label>
             <select aria-label="Linked employee" value={draft.linkedEmployeeName} onChange={(event) => setDraft({ ...draft, linkedEmployeeName: event.target.value })}>
               <option value="">Choose employee</option>
               {employeeNames.map((name) => <option key={name} value={name}>{name}</option>)}
             </select>
           </div>
-        )}
-      </div>
+        </div>
+      )}
       <div className="button-row user-form-actions">
         {props.onCancel && <button onClick={props.onCancel}>Cancel</button>}
         <button className="submit-btn user-submit" onClick={handleSubmit}>{props.submitLabel}</button>

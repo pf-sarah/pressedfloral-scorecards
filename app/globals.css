@@ -461,28 +461,37 @@ button {
   padding: 20px;
 }
 
-/* Override the generic auto-fill grid inside the user form with a fixed 12-column grid */
-.user-form .fields-grid {
-  display: grid;
-  grid-template-columns: repeat(12, 1fr);
+.user-form-row {
+  display: flex;
   gap: 14px;
+  margin-bottom: 14px;
+  align-items: flex-start;
 }
 
-.user-form .field.email-field   { grid-column: span 5; }
-.user-form .field.role-field    { grid-column: span 3; }
-.user-form .field.dept-field    { grid-column: span 4; }
-.user-form .field.loc-field     { grid-column: span 4; }
-.user-form .field.tree-field    { grid-column: span 4; }
-.user-form .field.linked-field  { grid-column: span 4; }
+.user-form-row:last-of-type {
+  margin-bottom: 0;
+}
+
+.user-field-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 5px;
+}
+
+.user-field-header label:first-child {
+  margin-bottom: 0;
+}
+
+.user-check {
+  margin-bottom: 0;
+  font-size: 12px;
+  color: var(--text-muted);
+}
 
 @media (max-width: 700px) {
-  .user-form .fields-grid { grid-template-columns: 1fr 1fr; }
-  .user-form .field.email-field,
-  .user-form .field.role-field,
-  .user-form .field.dept-field,
-  .user-form .field.loc-field,
-  .user-form .field.tree-field,
-  .user-form .field.linked-field { grid-column: span 2; }
+  .user-form-row { flex-wrap: wrap; }
+  .user-form-row .field { flex: 1 1 140px !important; }
 }
 
 .user-edit-row td {
@@ -506,9 +515,6 @@ button {
   border-color: var(--brick) !important;
 }
 
-.user-check {
-  margin-bottom: 6px;
-}
 
 .user-self-badge,
 .user-warning,
