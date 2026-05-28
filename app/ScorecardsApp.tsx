@@ -4207,6 +4207,7 @@ function WhatIfScreen(props: {
                     <th style={thC}>Target</th>
                     <th style={thC}>Min</th>
                     <th style={thC}>Actual</th>
+                    <th style={thC}>Lower↓</th>
                     <th style={thC}>Weight %</th>
                     <th style={thC}>Achieve %</th>
                     <th style={thC}>Bonus $</th>
@@ -4255,6 +4256,15 @@ function WhatIfScreen(props: {
                         <td style={{ padding: "4px 6px", textAlign: "center" }}>
                           <input type="number" className="actual-inline-input" value={pg.actual}
                             onChange={(e) => updateGoal(pg.id, "actual", e.target.value)} style={{ width: "68px" }} placeholder="—" />
+                        </td>
+                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
+                          <button
+                            onClick={() => setPlayGoals((prev) => prev.map((g) => g.id === pg.id ? { ...g, lowerBetter: !g.lowerBetter } : g))}
+                            title={pg.lowerBetter ? "Lower is better (click to toggle)" : "Higher is better (click to toggle)"}
+                            style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", background: pg.lowerBetter ? "var(--brick)" : "var(--surface)", color: pg.lowerBetter ? "#fff" : "var(--text-muted)", fontSize: "11px", padding: "2px 7px", cursor: "pointer", fontFamily: "var(--sans)", fontWeight: 600 }}
+                          >
+                            {pg.lowerBetter ? "Yes" : "No"}
+                          </button>
                         </td>
                         <td style={{ padding: "4px 6px", textAlign: "center" }}>
                           <input type="number" className="actual-inline-input" value={pg.weight}
