@@ -628,11 +628,36 @@ export default function ScorecardsApp() {
     return result;
   }, [appData.rippling]);
 
-  // Employee record for the logged-in user (for the Personal Scorecard panel)
+  // Employee record for the logged-in user (for the Personal Scorecard panel).
+  // Falls back to the most recent submitted scorecard if the employee isn't in Rippling,
+  // so the personal scorecard always shows applicable goals even before payroll data is uploaded.
   const myEmployee = useMemo(() => {
     if (!profile?.linkedEmployeeName) return null;
-    return latestRipplingEmployees.find((e) => e.name === profile.linkedEmployeeName) || null;
-  }, [profile, latestRipplingEmployees]);
+    const fromRippling = latestRipplingEmployees.find((e) => e.name === profile.linkedEmployeeName);
+    if (fromRippling) return fromRippling;
+    // Fall back to most recent submitted scorecard for role/dept/location
+    const latestSc = [...appData.scorecards]
+      .filter((sc) => sc.employeeName === profile.linkedEmployeeName)
+      .sort((a, b) => b.scorecardMonth.localeCompare(a.scorecardMonth))[0];
+    if (latestSc) {
+      return {
+        id: latestSc.employeeName,
+        name: latestSc.employeeName,
+        role: latestSc.role,
+        department: latestSc.department,
+        location: latestSc.location,
+        manager: "",
+        payType: latestSc.payType,
+        hourlyRate: latestSc.hourlyRate,
+        annualPay: latestSc.annualPay,
+        grossEarnings: undefined,
+        hoursWorked: undefined,
+        isExempt: undefined,
+        employmentType: undefined,
+      } as Employee;
+    }
+    return null;
+  }, [profile, latestRipplingEmployees, appData.scorecards]);
 
   // Scorecards belonging to the logged-in user (for the Personal Scorecard panel on the landing page)
   const myOwnScorecards = useMemo(() => {
@@ -1300,8 +1325,10 @@ function PersonalScorecardPanel({
       if (isQuarterly ? g.periodType !== "quarterly" : g.periodType === "quarterly") return false;
       if (periodActuals["__monthly_inactive__" + actualKey(g)]) return false;
       if (g.goalTier === "company") return true;
-      if (g.goalTier === "department") return g.department === myEmployee.department && (!g.location || g.location === myEmployee.location);
-      return g.role === myEmployee.role && g.department === myEmployee.department && (!g.location || g.location === myEmployee.location);
+      const deptMatch = g.department === myEmployee.department && (!g.location || g.location === myEmployee.location);
+      if (g.goalTier === "department") return deptMatch;
+      // Individual goals: match by dept+location; also match role if specified on the goal
+      return deptMatch && (!g.role || !myEmployee.role || g.role === myEmployee.role);
     });
     const n = applicable.length;
     return applicable.map((g, i) => {
