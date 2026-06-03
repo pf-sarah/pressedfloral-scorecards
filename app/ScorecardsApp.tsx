@@ -4167,13 +4167,11 @@ function WhatIfScreen(props: {
       if (g.goalTier === "individual") return !g.role || g.role === emp?.role;
       return false;
     });
-    const n = applicable.length;
-    const equalWeight = n > 0 ? Number((100 / n).toFixed(2)) : 0;
-    setPlayGoals(applicable.map((g, i) => ({
+    setPlayGoals(applicable.map((g) => ({
       id: g.id, name: g.name, goalTier: g.goalTier, location: g.location, department: g.department,
       role: g.role, lowerBetter: g.lowerBetter, capped: g.capped, capPct: g.capPct,
       target: String(g.goalValue || ""), min: String(g.minValue || ""), actual: "",
-      weight: i === n - 1 ? String(100 - equalWeight * (n - 1)) : String(equalWeight)
+      weight: "0"
     })));
   }, [selectedEmpName]); // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -4344,16 +4342,7 @@ function WhatIfScreen(props: {
                         <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{formatCurrency(sc.bonusContribution)}</td>
                         <td style={{ padding: "4px 6px", textAlign: "center" }}>
                           <button
-                            onClick={() => setPlayGoals((prev) => {
-                              const remaining = prev.filter((g) => g.id !== pg.id);
-                              const n = remaining.length;
-                              if (n === 0) return remaining;
-                              const equalWeight = Number((100 / n).toFixed(2));
-                              return remaining.map((g, i) => ({
-                                ...g,
-                                weight: i === n - 1 ? String(100 - equalWeight * (n - 1)) : String(equalWeight)
-                              }));
-                            })}
+                            onClick={() => setPlayGoals((prev) => prev.filter((g) => g.id !== pg.id))}
                             style={{ border: "none", background: "none", color: "#9B2C2C", fontSize: "14px", cursor: "pointer", padding: 0, lineHeight: 1, opacity: 0.6 }}
                             title="Remove goal"
                           >✕</button>
@@ -4373,19 +4362,14 @@ function WhatIfScreen(props: {
               <button
                 style={{ fontSize: "12px", padding: "5px 10px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", background: "none", cursor: "pointer", fontFamily: "var(--sans)" }}
                 onClick={() => {
-                  setPlayGoals((prev) => {
-                    const newGoals = [...prev, {
+                  setPlayGoals((prev) => [
+                    ...prev.map((g) => ({ ...g, weight: "0" })),
+                    {
                       id: `custom-${Date.now()}`, name: "", goalTier: "individual" as const,
                       lowerBetter: false, capped: "no" as const, capPct: 100,
-                      target: "", min: "", actual: "", weight: ""
-                    }];
-                    const n = newGoals.length;
-                    const equalWeight = Number((100 / n).toFixed(2));
-                    return newGoals.map((g, i) => ({
-                      ...g,
-                      weight: i === n - 1 ? String(100 - equalWeight * (n - 1)) : String(equalWeight)
-                    }));
-                  });
+                      target: "", min: "", actual: "", weight: "0"
+                    }
+                  ]);
                 }}
               >+ Add Goal</button>
             </div>
