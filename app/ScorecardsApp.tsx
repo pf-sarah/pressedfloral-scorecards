@@ -4164,7 +4164,7 @@ function WhatIfScreen(props: {
     setEarningsInput("");
     setHourlyRateInput(emp?.hourlyRate ? String(emp.hourlyRate) : "");
     const applicable = props.allGoals.filter((g) => {
-      if (g.goalTier === "company") return true;
+      if (g.goalTier === "company") return false; // company goals must be added manually
       if (g.goalTier === "department") return !g.department || g.department === emp?.department;
       if (g.goalTier === "individual") return !g.role || g.role === emp?.role;
       return false;
