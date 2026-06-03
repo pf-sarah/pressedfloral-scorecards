@@ -1713,7 +1713,7 @@ function BuildScorecardScreen({ allGoals, profile, teamEmployees, onSave }: {
               </div>
               <div style={fieldStyle}>
                 <label style={labelStyle}>DEPARTMENT<span style={reqStyle}>*</span></label>
-                <select style={inputStyle} value={empDept} onChange={(e) => setEmpDept(e.target.value)}>
+                <select style={inputStyle} value={empDept} onChange={(e) => { setEmpDept(e.target.value); setEmpRole(""); }}>
                   <option value="">— select —</option>
                   {visibleDepts.map((d) => <option key={d}>{d}</option>)}
                 </select>
@@ -1727,7 +1727,14 @@ function BuildScorecardScreen({ allGoals, profile, teamEmployees, onSave }: {
               </div>
               <div style={{ ...fieldStyle, gridColumn: "1 / -1" }}>
                 <label style={labelStyle}>JOB TITLE<span style={reqStyle}>*</span></label>
-                <input style={inputStyle} value={empRole} onChange={(e) => setEmpRole(e.target.value)} placeholder="e.g. Design Specialist" />
+                {(rolesByDepartment[empDept] || []).length > 0 ? (
+                  <select style={{ ...inputStyle, color: !empRole ? "var(--text-muted)" : undefined }} value={empRole} onChange={(e) => setEmpRole(e.target.value)}>
+                    <option value="">— select —</option>
+                    {(rolesByDepartment[empDept] || []).map((r) => <option key={r}>{r}</option>)}
+                  </select>
+                ) : (
+                  <input style={inputStyle} value={empRole} onChange={(e) => setEmpRole(e.target.value)} placeholder="e.g. Design Specialist" />
+                )}
               </div>
               <div style={fieldStyle}>
                 <label style={labelStyle}>PAY TYPE<span style={reqStyle}>*</span></label>
