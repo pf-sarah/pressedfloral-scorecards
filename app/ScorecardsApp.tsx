@@ -602,10 +602,13 @@ export default function ScorecardsApp() {
   }, [appData.rippling, appData.scorecards]);
 
   const visibleGoals = useMemo(() => {
+    const periodActualsForBank = appData.actuals[formatMonthLabel(bankMonth)] || {};
     let goals = scopedForProfile(appData.goals, effectiveProfile);
     // Only admins see company goals on the Goals & Actuals page
     if (!roleAtLeast(effectiveProfile, "admin")) goals = goals.filter((g) => g.goalTier !== "company");
-    if (!bankFilters.showInactive) goals = goals.filter((goal) => goal.active);
+    if (!bankFilters.showInactive) {
+      goals = goals.filter((goal) => goal.active && !periodActualsForBank["__monthly_inactive__" + actualKey(goal)]);
+    }
     if (bankFilters.types.length > 0 && bankFilters.types.length < 3) goals = goals.filter((goal) => bankFilters.types.includes(goal.goalTier));
     if (bankFilters.location) goals = goals.filter((goal) => !goal.location || goal.location === bankFilters.location);
     if (bankFilters.departments.length < departments.length) goals = goals.filter((goal) => !goal.department || bankFilters.departments.includes(goal.department));
@@ -613,7 +616,7 @@ export default function ScorecardsApp() {
       const field = bankFilters.sort as keyof Goal;
       return String(a[field] || "").localeCompare(String(b[field] || "")) || a.name.localeCompare(b.name);
     });
-  }, [appData.goals, bankFilters, profile]);
+  }, [appData.goals, appData.actuals, bankFilters, bankMonth, effectiveProfile]);
 
   const allRipplingEmployees = useMemo(() => Object.values(appData.rippling).flat(), [appData.rippling]);
 
