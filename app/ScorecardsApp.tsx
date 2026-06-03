@@ -2770,6 +2770,7 @@ function LiveScorecardCard({
   const [cardPeriodType, setCardPeriodType] = useState<"monthly" | "quarterly">("monthly");
   const [goalIds, setGoalIds] = useState<string[]>(() => baseGoals.filter((g) => g.periodType !== "quarterly").map((g) => g.id));
   const [indActuals, setIndActuals] = useState<Record<string, string>>({});
+  const [weightOverrides, setWeightOverrides] = useState<Record<string, string>>({});
 
   // Actuals can only be entered for past months, not the current month
   const isCurrentMonth = isoMonth === currentMonthValue();
@@ -2830,7 +2831,10 @@ function LiveScorecardCard({
     const n = goals.length;
     return goals.map((g, i) => {
       const equalWeight = n > 0 ? Number((100 / n).toFixed(2)) : 0;
-      const scWeight = i === n - 1 ? Number((100 - equalWeight * (n - 1)).toFixed(2)) : equalWeight;
+      const defaultWeight = i === n - 1 ? Number((100 - equalWeight * (n - 1)).toFixed(2)) : equalWeight;
+      const scWeight = weightOverrides[g.name] !== undefined
+        ? (weightOverrides[g.name] === "" ? 0 : Number(weightOverrides[g.name]))
+        : defaultWeight;
       return {
         ...g,
         scTarget: periodActuals[metaKey("target", g)] != null ? Number(periodActuals[metaKey("target", g)]) : g.goalValue,
@@ -2846,6 +2850,8 @@ function LiveScorecardCard({
   const liveScorecard = buildScorecard({ employee: activeEmployee, month: activeMonth, periodType: cardPeriodType, goals: currentGoals, submittedBy: currentUserEmail });
 
   const hasNoTarget = currentGoals.some((g) => periodActuals[metaKey("target", g)] == null || periodActuals[metaKey("min", g)] == null);
+  const totalWeight = Number(currentGoals.reduce((sum, g) => sum + g.scWeight, 0).toFixed(1));
+  const weightsValid = currentGoals.length === 0 || totalWeight === 100;
   const availableToAdd = allGoals.filter((g) => {
     if (goalIds.includes(g.id)) return false;
     if (!isGoalApplicable(g)) return false;
@@ -2962,7 +2968,19 @@ function LiveScorecardCard({
                             </span>
                           )}
                         </td>
-                        <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{goal.scWeight.toFixed(1)}%</td>
+                        <td style={{ padding: "4px 6px", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
+                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2px" }}>
+                            <input
+                              aria-label={`Weight for ${goal.name}`}
+                              type="number"
+                              className="actual-inline-input"
+                              value={weightOverrides[goal.name] ?? goal.scWeight.toFixed(1)}
+                              onChange={(e) => setWeightOverrides((prev) => ({ ...prev, [goal.name]: e.target.value }))}
+                              style={{ width: "52px" }}
+                            />
+                            <span style={{ fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>%</span>
+                          </div>
+                        </td>
                         <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center", fontWeight: 700 }}>
                           {sc?.actual != null
                             ? (sc.metMin
@@ -3016,11 +3034,16 @@ function LiveScorecardCard({
                 Actuals can only be entered for past months
               </span>
             )}
+            {currentGoals.length > 0 && (
+              <span style={{ fontSize: "11px", fontFamily: "var(--mono)", color: weightsValid ? "var(--text-muted)" : "var(--brick)", fontWeight: weightsValid ? 400 : 700 }}>
+                Weights: {totalWeight.toFixed(1)}%{!weightsValid ? " ⚠ must equal 100" : ""}
+              </span>
+            )}
             <button
               className="submit-btn"
               style={{ marginLeft: "auto", padding: "6px 18px", fontSize: "12px" }}
-              disabled={isCurrentMonth || hasNoTarget || currentGoals.length === 0}
-              title={isCurrentMonth ? "Scorecards can only be submitted for past months" : hasNoTarget ? "Set targets and minimums first" : undefined}
+              disabled={isCurrentMonth || hasNoTarget || currentGoals.length === 0 || !weightsValid}
+              title={isCurrentMonth ? "Scorecards can only be submitted for past months" : hasNoTarget ? "Set targets and minimums first" : !weightsValid ? "Weights must add up to 100%" : undefined}
               onClick={() => {
                 onSubmit(liveScorecard);
                 setLastSubmitted(liveScorecard);
