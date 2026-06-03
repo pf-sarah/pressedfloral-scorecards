@@ -217,6 +217,11 @@ export default function ScorecardsApp() {
   const [toast, setToast] = useState<{ message: string; type?: "success" | "error" } | null>(null);
   const [adminUsers, setAdminUsers] = useState<AdminManagedUser[]>([]);
   const [adminUsersLoading, setAdminUsersLoading] = useState(false);
+  const [viewAsProfile, setViewAsProfile] = useState<ManagerProfile | null>(null);
+
+  // When viewing as another user, all display/scoping uses this instead of the real profile.
+  // Write operations always use the real `profile` so data is never saved under the wrong user.
+  const effectiveProfile = viewAsProfile ?? profile;
 
   const [bankMonth, setBankMonth] = useState(currentMonthValue);
   const [bankFilters, setBankFilters] = useState({ types: ["company", "department", "individual"] as string[], location: "", departments: [...departments] as string[], sort: "goalTier", showInactive: false });
@@ -597,9 +602,9 @@ export default function ScorecardsApp() {
   }, [appData.rippling, appData.scorecards]);
 
   const visibleGoals = useMemo(() => {
-    let goals = scopedForProfile(appData.goals, profile);
+    let goals = scopedForProfile(appData.goals, effectiveProfile);
     // Only admins see company goals on the Goals & Actuals page
-    if (!roleAtLeast(profile, "admin")) goals = goals.filter((g) => g.goalTier !== "company");
+    if (!roleAtLeast(effectiveProfile, "admin")) goals = goals.filter((g) => g.goalTier !== "company");
     if (!bankFilters.showInactive) goals = goals.filter((goal) => goal.active);
     if (bankFilters.types.length > 0 && bankFilters.types.length < 3) goals = goals.filter((goal) => bankFilters.types.includes(goal.goalTier));
     if (bankFilters.location) goals = goals.filter((goal) => !goal.location || goal.location === bankFilters.location);
@@ -632,12 +637,12 @@ export default function ScorecardsApp() {
   // Falls back to the most recent submitted scorecard if the employee isn't in Rippling,
   // so the personal scorecard always shows applicable goals even before payroll data is uploaded.
   const myEmployee = useMemo(() => {
-    if (!profile?.linkedEmployeeName) return null;
-    const fromRippling = latestRipplingEmployees.find((e) => e.name === profile.linkedEmployeeName);
+    if (!effectiveProfile?.linkedEmployeeName) return null;
+    const fromRippling = latestRipplingEmployees.find((e) => e.name === effectiveProfile.linkedEmployeeName);
     if (fromRippling) return fromRippling;
     // Fall back to most recent submitted scorecard for role/dept/location
     const latestSc = [...appData.scorecards]
-      .filter((sc) => sc.employeeName === profile.linkedEmployeeName)
+      .filter((sc) => sc.employeeName === effectiveProfile.linkedEmployeeName)
       .sort((a, b) => b.scorecardMonth.localeCompare(a.scorecardMonth))[0];
     if (latestSc) {
       return {
@@ -657,12 +662,12 @@ export default function ScorecardsApp() {
       } as Employee;
     }
     return null;
-  }, [profile, latestRipplingEmployees, appData.scorecards]);
+  }, [effectiveProfile, latestRipplingEmployees, appData.scorecards]);
 
-  // Scorecards belonging to the logged-in user (for the Personal Scorecard panel on the landing page)
+  // Scorecards belonging to the effective user (for the Personal Scorecard panel)
   const myOwnScorecards = useMemo(() => {
-    if (!profile?.linkedEmployeeName) return [];
-    return [...appData.scorecards.filter((sc) => sc.employeeName === profile.linkedEmployeeName)]
+    if (!effectiveProfile?.linkedEmployeeName) return [];
+    return [...appData.scorecards.filter((sc) => sc.employeeName === effectiveProfile.linkedEmployeeName)]
       .sort((a, b) => {
         function key(period: string) {
           const qm = period.match(/^Q(\d) (\d{4})$/);
@@ -672,10 +677,10 @@ export default function ScorecardsApp() {
         }
         return key(a.scorecardMonth).localeCompare(key(b.scorecardMonth));
       });
-  }, [profile, appData.scorecards]);
+  }, [effectiveProfile, appData.scorecards]);
 
   const filteredHistory = useMemo(() => {
-    return scopedScorecardsForProfile(appData.scorecards, profile, allRipplingEmployees).filter((scorecard) => {
+    return scopedScorecardsForProfile(appData.scorecards, effectiveProfile, allRipplingEmployees).filter((scorecard) => {
       if (historyFilters.period && scorecard.scorecardMonth !== historyFilters.period) return false;
       if (historyFilters.location && scorecard.location !== historyFilters.location) return false;
       if (historyFilters.department && scorecard.department !== historyFilters.department) return false;
@@ -686,7 +691,7 @@ export default function ScorecardsApp() {
       }
       return true;
     });
-  }, [appData.scorecards, historyFilters, profile, allRipplingEmployees]);
+  }, [appData.scorecards, historyFilters, effectiveProfile, allRipplingEmployees]);
 
   // workMonth = the most recently completed month (always previous calendar month)
   const workMonth = useMemo(() => {
@@ -722,9 +727,9 @@ export default function ScorecardsApp() {
     const currentMonthVal = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
     const currentLabel = formatMonthLabel(currentMonthVal);
     const currentActuals = appData.actuals[currentLabel] || {};
-    const isAdmin = roleAtLeast(profile, "admin");
+    const isAdmin = roleAtLeast(effectiveProfile, "admin");
     return appData.goals.filter((g) => g.active && (isAdmin ? true : g.goalTier !== "company") && (g.goalTier === "company" || g.goalTier === "department") && currentActuals[metaKey("target", g)] == null);
-  }, [appData.goals, appData.actuals, profile]);
+  }, [appData.goals, appData.actuals, effectiveProfile]);
 
   const missingNextTargets = useMemo(() => {
     const today = new Date();
@@ -732,22 +737,22 @@ export default function ScorecardsApp() {
     const nextVal = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
     const nextLabel = formatMonthLabel(nextVal);
     const nextActuals = appData.actuals[nextLabel] || {};
-    const isAdmin = roleAtLeast(profile, "admin");
+    const isAdmin = roleAtLeast(effectiveProfile, "admin");
     return appData.goals.filter((g) => g.active && (isAdmin ? true : g.goalTier !== "company") && (g.goalTier === "company" || g.goalTier === "department") && nextActuals[metaKey("target", g)] == null);
-  }, [appData.goals, appData.actuals, profile]);
+  }, [appData.goals, appData.actuals, effectiveProfile]);
 
   const todos = useMemo(() => {
     const tasks: { label: string; detail: string; action: Screen }[] = [];
-    if (roleAtLeast(profile, "admin") && !appData.rippling[currentMonth]?.length) tasks.push({ label: "Upload Rippling data", detail: `${formatMonthLabel(currentMonth)} data not uploaded yet.`, action: "rippling" });
+    if (roleAtLeast(effectiveProfile, "admin") && !appData.rippling[currentMonth]?.length) tasks.push({ label: "Upload Rippling data", detail: `${formatMonthLabel(currentMonth)} data not uploaded yet.`, action: "rippling" });
     if (missingActuals.length) tasks.push({ label: "Enter shared actuals", detail: `${missingActuals.length} company or department goals need actuals.`, action: "setup" });
     if (missingCurrentTargets.length) tasks.push({ label: "Set current month targets", detail: `${missingCurrentTargets.length} goals need targets for this month.`, action: "todos" });
     return tasks;
-  }, [appData.rippling, currentMonth, workMonth, missingActuals, missingCurrentTargets, profile]);
+  }, [appData.rippling, currentMonth, workMonth, missingActuals, missingCurrentTargets, effectiveProfile]);
 
   const todoBadgeCount = useMemo(() => {
-    const ripplingPending = roleAtLeast(profile, "admin") && !appData.rippling[currentMonth]?.length ? 1 : 0;
+    const ripplingPending = roleAtLeast(effectiveProfile, "admin") && !appData.rippling[currentMonth]?.length ? 1 : 0;
     return ripplingPending + missingActuals.length + missingCurrentTargets.length + missingNextTargets.length;
-  }, [profile, appData.rippling, currentMonth, missingActuals, missingCurrentTargets, missingNextTargets]);
+  }, [effectiveProfile, appData.rippling, currentMonth, missingActuals, missingCurrentTargets, missingNextTargets]);
 
   async function saveGoal(goal: Goal): Promise<Goal | null> {
     let savedGoal = goal;
@@ -985,26 +990,38 @@ export default function ScorecardsApp() {
     <>
       <Sidebar
         mode={mode}
-        profile={profile}
+        profile={effectiveProfile}
         email={currentUserEmail}
         todoCount={todoBadgeCount}
         onMode={setMode}
         onSignOut={signOut}
       />
       <div id="app-main">
+        {viewAsProfile && (
+          <div style={{ background: "#703c2e", color: "#fff", padding: "8px 20px", display: "flex", alignItems: "center", gap: "12px", fontSize: "13px", fontWeight: 500, zIndex: 200, position: "sticky", top: 0 }}>
+            <span style={{ fontSize: "15px" }}>👁</span>
+            <span>Viewing as <strong>{viewAsProfile.email}</strong> — {viewAsProfile.role === "admin" ? "Admin" : viewAsProfile.role === "manager" ? "Manager" : "Viewer"}{viewAsProfile.linkedEmployeeName ? ` · ${viewAsProfile.linkedEmployeeName}` : ""}</span>
+            <button
+              onClick={() => { setViewAsProfile(null); setMode("users"); }}
+              style={{ marginLeft: "auto", background: "rgba(255,255,255,0.2)", border: "1px solid rgba(255,255,255,0.4)", color: "#fff", borderRadius: "4px", padding: "3px 12px", fontSize: "12px", fontWeight: 600, cursor: "pointer", fontFamily: "var(--sans)" }}
+            >
+              Exit View
+            </button>
+          </div>
+        )}
         <header>
           <div className="header-left">
             <h1>{pageLabel(mode)}</h1>
           </div>
         </header>
         <main>
-          {mode === "landing" && <LandingScreen onMode={setMode} profile={profile} />}
+          {mode === "landing" && <LandingScreen onMode={setMode} profile={effectiveProfile} />}
           {mode === "personal" && (
             <div className="screen active">
               <div style={{ maxWidth: "680px", margin: "0 auto", padding: "16px" }}>
                 <PersonalScorecardPanel
                   scorecards={myOwnScorecards}
-                  employeeName={profile?.linkedEmployeeName || ""}
+                  employeeName={effectiveProfile?.linkedEmployeeName || ""}
                   myEmployee={myEmployee}
                   allGoals={appData.goals.filter((g) => g.active)}
                   allActuals={appData.actuals}
@@ -1031,18 +1048,18 @@ export default function ScorecardsApp() {
               onDelete={deleteGoal}
               onToggle={toggleGoal}
               onToggleMonth={toggleGoalForMonth}
-              isAdmin={profile?.role === "admin"}
-              allowedDepartments={profile?.role === "admin" ? undefined : (profile?.departments || [])}
+              isAdmin={effectiveProfile?.role === "admin"}
+              allowedDepartments={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.departments || [])}
             />
           )}
           {mode === "scorecard" && (
             <ScorecardsScreen
               selectedMonths={scorecardMonths}
               months={months}
-              profile={profile}
+              profile={effectiveProfile}
               rippling={appData.rippling}
               allEmployees={allRipplingEmployees}
-              scorecards={scopedScorecardsForProfile(appData.scorecards, profile, allRipplingEmployees)}
+              scorecards={scopedScorecardsForProfile(appData.scorecards, effectiveProfile, allRipplingEmployees)}
               allGoals={appData.goals.filter((g) => g.active)}
               allActuals={appData.actuals}
               onMonths={setScorecardMonths}
@@ -1056,8 +1073,8 @@ export default function ScorecardsApp() {
               filters={historyFilters}
               view={historyView}
               scorecards={filteredHistory}
-              allScorecards={scopedScorecardsForProfile(appData.scorecards, profile, allRipplingEmployees)}
-              readonly={profile?.role === "user"}
+              allScorecards={scopedScorecardsForProfile(appData.scorecards, effectiveProfile, allRipplingEmployees)}
+              readonly={effectiveProfile?.role === "user"}
               onFilters={setHistoryFilters}
               onView={setHistoryView}
             />
@@ -1080,7 +1097,7 @@ export default function ScorecardsApp() {
           {mode === "whatif" && (
             <WhatIfScreen
               allGoals={appData.goals.filter((g) => g.active)}
-              profile={profile}
+              profile={effectiveProfile}
               latestEmployees={latestRipplingEmployees}
               allEmployees={allRipplingEmployees}
             />
@@ -1096,13 +1113,17 @@ export default function ScorecardsApp() {
               onInvite={inviteAdminUser}
               onUpdate={updateAdminUser}
               onResendInvite={resendAdminInvite}
+              onViewAs={(user) => {
+                setViewAsProfile({ id: user.id, email: user.email, role: user.role, departments: user.departments, locations: user.locations, linkedEmployeeName: user.linkedEmployeeName });
+                setMode("landing");
+              }}
             />
           )}
           {mode === "todos" && (
             <TodosScreen
               workMonth={workMonth}
               bankMonth={bankMonth}
-              profile={profile}
+              profile={effectiveProfile}
               hasRippling={!!appData.rippling[currentMonth]?.length}
               missingActuals={missingActuals}
               goals={appData.goals.filter((g) => g.active)}
@@ -1543,6 +1564,7 @@ function UsersScreen(props: {
   onInvite: (payload: AdminUserPayload) => Promise<boolean>;
   onUpdate: (payload: AdminUserPayload) => Promise<boolean>;
   onResendInvite: (user: AdminManagedUser) => void;
+  onViewAs: (user: AdminManagedUser) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
@@ -1600,7 +1622,14 @@ function UsersScreen(props: {
                         ? <>Invited<br />{formatTimestamp(user.invitedAt)}</>
                         : "—"}
                     </td>
-                    <td className="row-menu-cell" style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                    <td className="row-menu-cell" style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
+                      <button
+                        title="See exactly what this user sees in the app"
+                        style={{ background: "var(--brick-light)", color: "var(--brick)", fontWeight: 600, border: "1.5px solid var(--brick)", borderRadius: "var(--radius-sm)" }}
+                        onClick={() => props.onViewAs(user)}
+                      >
+                        👁 View as
+                      </button>
                       <button
                         disabled={resendingId === user.id}
                         onClick={async () => {
