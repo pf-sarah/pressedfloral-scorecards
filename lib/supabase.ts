@@ -56,6 +56,17 @@ export function goalToRow(goal: Goal, options: { includeId?: boolean } = {}) {
   return row;
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function loadSetting(client: any, key: string): Promise<string | null> {
+  const { data } = await client.from("app_settings").select("value").eq("key", key).maybeSingle();
+  return (data as any)?.value ?? null;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export async function saveSetting(client: any, key: string, value: string): Promise<void> {
+  await client.from("app_settings").upsert({ key, value }, { onConflict: "key" });
+}
+
 export function employeeFromRow(row: Record<string, any>): Employee {
   return {
     id: String(row.id || row.full_name),

@@ -32,6 +32,8 @@ import {
   goalFromRow,
   goalToRow,
   isSupabaseUuid,
+  loadSetting,
+  saveSetting,
   scorecardFromRow,
   scorecardToRow,
   supabaseClient
@@ -218,6 +220,8 @@ export default function ScorecardsApp() {
   const [adminUsers, setAdminUsers] = useState<AdminManagedUser[]>([]);
   const [adminUsersLoading, setAdminUsersLoading] = useState(false);
   const [viewAsProfile, setViewAsProfile] = useState<ManagerProfile | null>(null);
+  const [maintenanceMode, setMaintenanceMode] = useState(false);
+  const [maintenanceLoading, setMaintenanceLoading] = useState(false);
 
   // When viewing as another user, all display/scoping uses this instead of the real profile.
   // Write operations always use the real `profile` so data is never saved under the wrong user.
@@ -307,6 +311,30 @@ export default function ScorecardsApp() {
     });
     return () => listener.subscription.unsubscribe();
   }, [isFixture]);
+
+  // Load maintenance mode on startup (and whenever sb becomes available)
+  useEffect(() => {
+    if (isFixture) return;
+    const client = sb ?? (() => { try { return supabaseClient(); } catch { return null; } })();
+    if (!client) return;
+    loadSetting(client, "maintenance_mode").then((val) => {
+      if (val !== null) setMaintenanceMode(val === "true");
+    });
+  }, [sb, isFixture]);
+
+  async function toggleMaintenanceMode(enabled: boolean) {
+    setMaintenanceLoading(true);
+    try {
+      const client = sb ?? supabaseClient();
+      await saveSetting(client, "maintenance_mode", enabled ? "true" : "false");
+      setMaintenanceMode(enabled);
+      showToast(enabled ? "Maintenance mode ON — non-admins will see a maintenance page" : "Maintenance mode OFF — app is live");
+    } catch {
+      showToast("Could not update maintenance mode", "error");
+    } finally {
+      setMaintenanceLoading(false);
+    }
+  }
 
   useEffect(() => {
     if (!authenticated) return;
@@ -1001,6 +1029,11 @@ export default function ScorecardsApp() {
     );
   }
 
+  // Non-admins see the maintenance screen when maintenance mode is on
+  if (maintenanceMode && profile?.role !== "admin") {
+    return <MaintenanceScreen />;
+  }
+
   return (
     <>
       <Sidebar
@@ -1125,6 +1158,9 @@ export default function ScorecardsApp() {
               employees={latestRipplingEmployees}
               fixtureMode={isFixture}
               currentUserId={profile?.id || ""}
+              maintenanceMode={maintenanceMode}
+              maintenanceLoading={maintenanceLoading}
+              onToggleMaintenance={toggleMaintenanceMode}
               onRefresh={loadAdminUsers}
               onInvite={inviteAdminUser}
               onUpdate={updateAdminUser}
@@ -1499,6 +1535,21 @@ function PersonalScorecardPanel({
   );
 }
 
+function MaintenanceScreen() {
+  return (
+    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)", fontFamily: "var(--sans)" }}>
+      <div style={{ textAlign: "center", maxWidth: "400px", padding: "40px 24px" }}>
+        <div style={{ width: "64px", height: "64px", borderRadius: "14px", background: "var(--brick)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px", fontSize: "28px" }}>🔧</div>
+        <div style={{ fontSize: "22px", fontWeight: 700, color: "var(--text)", marginBottom: "10px" }}>Down for maintenance</div>
+        <div style={{ fontSize: "14px", color: "var(--text-muted)", lineHeight: 1.6 }}>
+          We&rsquo;re making some updates. The app will be back shortly.
+        </div>
+        <div style={{ marginTop: "32px", fontSize: "12px", color: "var(--text-faint)" }}>Pressed Floral Scorecards</div>
+      </div>
+    </div>
+  );
+}
+
 function LandingScreen({ onMode, profile }: {
   onMode: (mode: Screen) => void;
   profile: ManagerProfile | null;
@@ -1577,6 +1628,9 @@ function UsersScreen(props: {
   employees: Employee[];
   fixtureMode: boolean;
   currentUserId: string;
+  maintenanceMode: boolean;
+  maintenanceLoading: boolean;
+  onToggleMaintenance: (enabled: boolean) => void;
   onRefresh: () => void;
   onInvite: (payload: AdminUserPayload) => Promise<boolean>;
   onUpdate: (payload: AdminUserPayload) => Promise<boolean>;
@@ -1590,6 +1644,38 @@ function UsersScreen(props: {
   return (
     <div className="screen active users-screen">
       {props.fixtureMode && <div className="info-banner" style={{ display: "block" }}>Fixture mode simulates invites and permission updates locally.</div>}
+
+      {/* Maintenance Mode */}
+      <section>
+        <div className="section-title" style={{ marginBottom: 12 }}>Maintenance Mode</div>
+        <div style={{ display: "flex", alignItems: "center", gap: "16px", padding: "16px", background: props.maintenanceMode ? "#703c2e" : "var(--surface2)", borderRadius: "var(--radius)", border: `1.5px solid ${props.maintenanceMode ? "#9B2C2C" : "var(--border)"}`, transition: "background 0.2s, border-color 0.2s" }}>
+          <div style={{ flex: 1 }}>
+            <div style={{ fontWeight: 700, fontSize: "14px", color: props.maintenanceMode ? "#fff" : "var(--text)" }}>
+              {props.maintenanceMode ? "🔴 Maintenance mode is ON" : "🟢 App is live"}
+            </div>
+            <div style={{ fontSize: "12px", color: props.maintenanceMode ? "rgba(255,255,255,0.75)" : "var(--text-muted)", marginTop: "3px" }}>
+              {props.maintenanceMode
+                ? "All non-admin users see a maintenance page. Admins can still access the app normally."
+                : "All users can access the app. Turn this on before making changes that could break things mid-session."}
+            </div>
+          </div>
+          <button
+            disabled={props.maintenanceLoading}
+            onClick={() => props.onToggleMaintenance(!props.maintenanceMode)}
+            style={{
+              padding: "8px 20px", fontFamily: "var(--sans)", fontSize: "13px", fontWeight: 700,
+              border: "none", borderRadius: "var(--radius-sm)", cursor: props.maintenanceLoading ? "not-allowed" : "pointer",
+              background: props.maintenanceMode ? "#fff" : "var(--brick)",
+              color: props.maintenanceMode ? "#703c2e" : "#fff",
+              opacity: props.maintenanceLoading ? 0.6 : 1,
+              flexShrink: 0
+            }}
+          >
+            {props.maintenanceLoading ? "Saving…" : props.maintenanceMode ? "Turn Off" : "Turn On"}
+          </button>
+        </div>
+      </section>
+
       <section>
         <div className="toolbar-row">
           <div className="section-title" style={{ margin: 0, borderBottom: "none", paddingBottom: 0 }}>Invite User</div>
