@@ -4344,7 +4344,16 @@ function WhatIfScreen(props: {
                         <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{formatCurrency(sc.bonusContribution)}</td>
                         <td style={{ padding: "4px 6px", textAlign: "center" }}>
                           <button
-                            onClick={() => setPlayGoals((prev) => prev.filter((g) => g.id !== pg.id))}
+                            onClick={() => setPlayGoals((prev) => {
+                              const remaining = prev.filter((g) => g.id !== pg.id);
+                              const n = remaining.length;
+                              if (n === 0) return remaining;
+                              const equalWeight = Number((100 / n).toFixed(2));
+                              return remaining.map((g, i) => ({
+                                ...g,
+                                weight: i === n - 1 ? String(100 - equalWeight * (n - 1)) : String(equalWeight)
+                              }));
+                            })}
                             style={{ border: "none", background: "none", color: "#9B2C2C", fontSize: "14px", cursor: "pointer", padding: 0, lineHeight: 1, opacity: 0.6 }}
                             title="Remove goal"
                           >✕</button>
@@ -4364,13 +4373,19 @@ function WhatIfScreen(props: {
               <button
                 style={{ fontSize: "12px", padding: "5px 10px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", background: "none", cursor: "pointer", fontFamily: "var(--sans)" }}
                 onClick={() => {
-                  const n = playGoals.length + 1;
-                  const equalWeight = Number((100 / n).toFixed(2));
-                  setPlayGoals((prev) => [...prev, {
-                    id: `custom-${Date.now()}`, name: "", goalTier: "individual",
-                    lowerBetter: false, capped: "no", capPct: 100,
-                    target: "", min: "", actual: "", weight: String(equalWeight)
-                  }]);
+                  setPlayGoals((prev) => {
+                    const newGoals = [...prev, {
+                      id: `custom-${Date.now()}`, name: "", goalTier: "individual" as const,
+                      lowerBetter: false, capped: "no" as const, capPct: 100,
+                      target: "", min: "", actual: "", weight: ""
+                    }];
+                    const n = newGoals.length;
+                    const equalWeight = Number((100 / n).toFixed(2));
+                    return newGoals.map((g, i) => ({
+                      ...g,
+                      weight: i === n - 1 ? String(100 - equalWeight * (n - 1)) : String(equalWeight)
+                    }));
+                  });
                 }}
               >+ Add Goal</button>
             </div>
