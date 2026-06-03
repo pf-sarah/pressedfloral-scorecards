@@ -2986,6 +2986,7 @@ function ScorecardsScreen(props: {
   const [filterDepts, setFilterDepts] = useState<string[]>([]);
   const [filterLocations, setFilterLocations] = useState<string[]>([]);
   const [monthPickerOpen, setMonthPickerOpen] = useState(false);
+  const [globalPeriodType, setGlobalPeriodType] = useState<"monthly" | "quarterly">("monthly");
 
   // Single-month mode = exactly one month selected → live draft cards
   // Multi/all mode = 0 or 2+ months → live draft cards per month, grouped by month
@@ -3147,6 +3148,15 @@ function ScorecardsScreen(props: {
             </div>
           </div>
 
+          {/* Global Monthly / Quarterly toggle */}
+          <div>
+            <div style={filterLabelStyle}>PERIOD</div>
+            <div style={{ display: "flex", borderRadius: "var(--radius-sm)", border: "1.5px solid var(--border)", overflow: "hidden" }}>
+              <button style={{ padding: "6px 16px", border: "none", fontFamily: "var(--sans)", fontSize: "12px", fontWeight: 700, cursor: "pointer", background: globalPeriodType === "monthly" ? "var(--brick)" : "var(--surface)", color: globalPeriodType === "monthly" ? "#fff" : "var(--text-muted)", transition: "background 0.15s, color 0.15s" }} onClick={() => setGlobalPeriodType("monthly")}>Monthly</button>
+              <button style={{ padding: "6px 16px", border: "none", borderLeft: "1.5px solid var(--border)", fontFamily: "var(--sans)", fontSize: "12px", fontWeight: 700, cursor: "pointer", background: globalPeriodType === "quarterly" ? "var(--brick)" : "var(--surface)", color: globalPeriodType === "quarterly" ? "#fff" : "var(--text-muted)", transition: "background 0.15s, color 0.15s" }} onClick={() => setGlobalPeriodType("quarterly")}>Quarterly</button>
+            </div>
+          </div>
+
           {showLocationFilter && (
             <div>
               <div style={filterLabelStyle}>LOCATION</div>
@@ -3216,6 +3226,7 @@ function ScorecardsScreen(props: {
                   periodActuals={periodActuals}
                   allRippling={props.rippling}
                   submittedScorecard={submitted}
+                  globalPeriodType={globalPeriodType}
                   onSubmit={props.onSubmitScorecard}
                   onDeleteGoal={props.onDeleteGoal}
                   currentUserEmail={props.currentUserEmail}
@@ -3285,6 +3296,7 @@ function ScorecardsScreen(props: {
                         periodActuals={mActuals}
                         allRippling={props.rippling}
                         submittedScorecard={submitted}
+                        globalPeriodType={globalPeriodType}
                         onSubmit={props.onSubmitScorecard}
                         onDeleteGoal={props.onDeleteGoal}
                         currentUserEmail={props.currentUserEmail}
@@ -3302,7 +3314,7 @@ function ScorecardsScreen(props: {
 }
 
 function LiveScorecardCard({
-  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, onSubmit, onDeleteGoal, currentUserEmail
+  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, onSubmit, onDeleteGoal, currentUserEmail
 }: {
   employee: Employee;
   isoMonth: string;
@@ -3312,15 +3324,22 @@ function LiveScorecardCard({
   periodActuals: ActualsByKey;
   allRippling: Record<string, Employee[]>;
   submittedScorecard: Scorecard | undefined;
+  globalPeriodType: "monthly" | "quarterly";
   onSubmit: (scorecard: Scorecard) => void;
   onDeleteGoal: (value: { scorecardId: string; goalName: string }) => void;
   currentUserEmail: string;
 }) {
   const [open, setOpen] = useState(false);
-  const [cardPeriodType, setCardPeriodType] = useState<"monthly" | "quarterly">("monthly");
-  const [goalIds, setGoalIds] = useState<string[]>(() => baseGoals.filter((g) => g.periodType !== "quarterly").map((g) => g.id));
+  const [cardPeriodType, setCardPeriodType] = useState<"monthly" | "quarterly">(globalPeriodType);
+  const [goalIds, setGoalIds] = useState<string[]>(() => baseGoals.filter((g) => globalPeriodType === "quarterly" ? g.periodType === "quarterly" : g.periodType !== "quarterly").map((g) => g.id));
   const [indActuals, setIndActuals] = useState<Record<string, string>>({});
   const [weightOverrides, setWeightOverrides] = useState<Record<string, string>>({});
+
+  // Sync period type when the global toggle changes
+  useEffect(() => {
+    handlePeriodTypeChange(globalPeriodType);
+  }, [globalPeriodType]); // eslint-disable-line react-hooks/exhaustive-deps
+
 
   // Actuals can only be entered for past months, not the current month
   const isCurrentMonth = isoMonth === currentMonthValue();
@@ -3443,10 +3462,6 @@ function LiveScorecardCard({
             </>
           );
         })()}
-        <div style={{ display: "flex", borderRadius: "var(--radius-sm)", border: "1.5px solid var(--border)", overflow: "hidden", flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-          <button style={{ padding: "3px 10px", fontSize: "11px", fontWeight: 700, fontFamily: "var(--sans)", border: "none", cursor: "pointer", background: cardPeriodType === "monthly" ? "var(--brick)" : "var(--surface)", color: cardPeriodType === "monthly" ? "#fff" : "var(--text-muted)", transition: "background 0.15s, color 0.15s" }} onClick={() => handlePeriodTypeChange("monthly")}>Monthly</button>
-          <button style={{ padding: "3px 10px", fontSize: "11px", fontWeight: 700, fontFamily: "var(--sans)", border: "none", borderLeft: "1.5px solid var(--border)", cursor: "pointer", background: cardPeriodType === "quarterly" ? "var(--brick)" : "var(--surface)", color: cardPeriodType === "quarterly" ? "#fff" : "var(--text-muted)", transition: "background 0.15s, color 0.15s" }} onClick={() => handlePeriodTypeChange("quarterly")}>Quarterly</button>
-        </div>
         <span title="This scorecard hasn't been submitted yet" style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "99px", background: "#f0ece6", color: "#7a7268", fontWeight: 600, fontFamily: "var(--sans)", flexShrink: 0, cursor: "default" }}>Not Submitted</span>
       </div>
 
