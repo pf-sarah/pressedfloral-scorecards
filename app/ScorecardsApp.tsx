@@ -4137,8 +4137,6 @@ function WhatIfScreen(props: {
   const [earningsInput, setEarningsInput] = useState("");
   const [hourlyRateInput, setHourlyRateInput] = useState("");
   const [playGoals, setPlayGoals] = useState<PlayGoal[]>([]);
-  const [addGoalOpen, setAddGoalOpen] = useState(false);
-
   const teamEmployees = useMemo(
     () => scopedEmployeesForProfile(props.latestEmployees, props.profile, props.allEmployees),
     [props.latestEmployees, props.profile, props.allEmployees]
@@ -4195,14 +4193,6 @@ function WhatIfScreen(props: {
   const cappedAch = Math.min(weightedAchievement, 200);
   const bonusAmount = earnings * (cappedAch / 100) * 0.1;
   const effectiveHourly = impliedHours > 0 ? (earnings + bonusAmount) / impliedHours : null;
-
-  const availableToAdd = props.allGoals.filter((g) => {
-    if (playGoals.some((pg) => pg.id === g.id)) return false;
-    if (g.goalTier === "company") return true;
-    if (g.goalTier === "department") return !g.department || g.department === selectedEmp?.department;
-    if (g.goalTier === "individual") return !g.role || g.role === selectedEmp?.role;
-    return false;
-  });
 
   function updateGoal(id: string, field: keyof PlayGoal, value: string) {
     setPlayGoals((prev) => prev.map((pg) => pg.id === id ? { ...pg, [field]: value } : pg));
@@ -4373,45 +4363,16 @@ function WhatIfScreen(props: {
             <div style={{ position: "relative" }}>
               <button
                 style={{ fontSize: "12px", padding: "5px 10px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", background: "none", cursor: "pointer", fontFamily: "var(--sans)" }}
-                onClick={() => setAddGoalOpen(!addGoalOpen)}
+                onClick={() => {
+                  const n = playGoals.length + 1;
+                  const equalWeight = Number((100 / n).toFixed(2));
+                  setPlayGoals((prev) => [...prev, {
+                    id: `custom-${Date.now()}`, name: "", goalTier: "individual",
+                    lowerBetter: false, capped: "no", capPct: 100,
+                    target: "", min: "", actual: "", weight: String(equalWeight)
+                  }]);
+                }}
               >+ Add Goal</button>
-              {addGoalOpen && (
-                <div style={{ position: "absolute", bottom: "calc(100% + 4px)", left: 0, background: "var(--surface)", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", boxShadow: "0 4px 12px rgba(0,0,0,0.12)", zIndex: 100, minWidth: "220px", maxHeight: "260px", overflowY: "auto" }}>
-                  {availableToAdd.map((g) => (
-                    <button key={g.id}
-                      style={{ display: "block", width: "100%", padding: "7px 12px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "12px" }}
-                      onClick={() => {
-                        const n = playGoals.length + 1;
-                        const equalWeight = Number((100 / n).toFixed(2));
-                        setPlayGoals((prev) => [...prev, {
-                          id: g.id, name: g.name, goalTier: g.goalTier, location: g.location, department: g.department,
-                          role: g.role, lowerBetter: g.lowerBetter, capped: g.capped, capPct: g.capPct,
-                          target: String(g.goalValue || ""), min: String(g.minValue || ""), actual: "", weight: String(equalWeight)
-                        }]);
-                        setAddGoalOpen(false);
-                      }}>
-                      {g.name}<GoalScopeTags location={g.location} department={g.department} />
-                    </button>
-                  ))}
-                  {availableToAdd.length > 0 && (
-                    <div style={{ borderTop: "1px solid var(--border)", margin: "4px 0" }} />
-                  )}
-                  <button
-                    style={{ display: "block", width: "100%", padding: "7px 12px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "12px", color: "var(--brick)", fontWeight: 600 }}
-                    onClick={() => {
-                      const n = playGoals.length + 1;
-                      const equalWeight = Number((100 / n).toFixed(2));
-                      setPlayGoals((prev) => [...prev, {
-                        id: `custom-${Date.now()}`, name: "", goalTier: "individual",
-                        lowerBetter: false, capped: "no", capPct: 100,
-                        target: "", min: "", actual: "", weight: String(equalWeight)
-                      }]);
-                      setAddGoalOpen(false);
-                    }}>
-                    + Custom goal
-                  </button>
-                </div>
-              )}
             </div>
             <div style={{ marginLeft: "auto", fontSize: "12px", color: totalWeight !== 100 ? "var(--brick)" : "var(--text-muted)", fontFamily: "var(--mono)" }}>
               Total weight: {totalWeight.toFixed(1)}%{totalWeight !== 100 ? " ⚠ must equal 100" : ""}
