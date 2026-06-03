@@ -218,7 +218,7 @@ export default function ScorecardsApp() {
   const [adminUsers, setAdminUsers] = useState<AdminManagedUser[]>([]);
   const [adminUsersLoading, setAdminUsersLoading] = useState(false);
 
-  const [bankMonth, setBankMonth] = useState(fixtureMonth);
+  const [bankMonth, setBankMonth] = useState(currentMonthValue);
   const [bankFilters, setBankFilters] = useState({ types: ["company", "department", "individual"] as string[], location: "", departments: [...departments] as string[], sort: "goalTier", showInactive: false });
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
 
@@ -1203,6 +1203,7 @@ function Sidebar(props: {
   const hasLinkedEmployee = !!props.profile?.linkedEmployeeName;
   const nav: { mode: Screen; label: string; icon: string; minRole?: "manager" | "admin"; hidden?: boolean }[] = [
     { mode: "landing", label: "Home", icon: "⌂" },
+    { mode: "todos", label: "To Do", icon: "☐", minRole: "manager" },
     { mode: "personal", label: "My Scorecard", icon: "◉", hidden: !hasLinkedEmployee },
     { mode: "setup", label: "Goals & Actuals", icon: "☰", minRole: "manager" },
     { mode: "scorecard", label: "Team Scorecards", icon: "👥", minRole: "manager" },
@@ -1211,7 +1212,6 @@ function Sidebar(props: {
     { mode: "rippling", label: "Rippling Data", icon: "⇅", minRole: "admin" },
     { mode: "users", label: "Users", icon: "◇", minRole: "admin" },
     { mode: "guide", label: "How To Use", icon: "ⓘ" },
-    { mode: "todos", label: "To Do", icon: "☐", minRole: "manager" },
     { mode: "migrate", label: "Migrate Data", icon: "↑", minRole: "admin" }
   ];
   return (
@@ -1829,6 +1829,7 @@ function GoalsScreen(props: {
   const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
   const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [actualEditId, setActualEditId] = useState<string | null>(null);
+  const [periodTab, setPeriodTab] = useState<"monthly" | "quarterly">("monthly");
 
   const now = new Date();
   const currentMonthVal = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
@@ -1916,6 +1917,17 @@ function GoalsScreen(props: {
             Show inactive
           </label>
         </div>
+        {/* Period tab toggle */}
+        <div style={{ display: "flex", gap: 0, marginBottom: "10px", borderRadius: "var(--radius-sm)", border: "1.5px solid var(--border)", overflow: "hidden", alignSelf: "flex-start", width: "fit-content" }}>
+          <button
+            onClick={() => setPeriodTab("monthly")}
+            style={{ padding: "5px 18px", fontSize: "12px", fontWeight: 700, fontFamily: "var(--sans)", border: "none", cursor: "pointer", background: periodTab === "monthly" ? "var(--brick)" : "var(--surface)", color: periodTab === "monthly" ? "#fff" : "var(--text-muted)", transition: "background 0.15s, color 0.15s" }}
+          >Monthly</button>
+          <button
+            onClick={() => setPeriodTab("quarterly")}
+            style={{ padding: "5px 18px", fontSize: "12px", fontWeight: 700, fontFamily: "var(--sans)", border: "none", borderLeft: "1.5px solid var(--border)", cursor: "pointer", background: periodTab === "quarterly" ? "var(--brick)" : "var(--surface)", color: periodTab === "quarterly" ? "#fff" : "var(--text-muted)", transition: "background 0.15s, color 0.15s" }}
+          >Quarterly</button>
+        </div>
         {/* Filter row */}
         <div className="filter-row" style={{ gap: 8 }}>
           <MultiSelectDropdown
@@ -1972,8 +1984,8 @@ function GoalsScreen(props: {
                 <th style={thCtx}>Loc</th>
                 <th style={thCtx}>Dept</th>
                 <th style={thGoal}>Goal Name</th>
-                <th style={{ ...thGoal, textAlign: "center" }}>Per.</th>
-                <th style={thGoal}>Lower</th>
+                <th style={{ ...thGoal, textAlign: "center" }}>Period</th>
+                <th style={thGoal}>Lower is Better</th>
                 <th style={thGoal}>Cap</th>
                 <th style={thTarget}>Target</th>
                 <th style={thTarget}>Min</th>
@@ -1983,7 +1995,7 @@ function GoalsScreen(props: {
               </tr>
             </thead>
             <tbody>
-              {monthlyGoals.map((goal) => {
+              {(periodTab === "monthly" ? monthlyGoals : []).map((goal) => {
                 const a = props.actuals;
                 return (
                 <React.Fragment key={goal.id}>
@@ -2053,14 +2065,7 @@ function GoalsScreen(props: {
                 </React.Fragment>
                 );
               })}
-              {quarterlyGoals.length > 0 && (
-                <tr>
-                  <td colSpan={12} style={{ background: "var(--surface2)", padding: "6px 10px", fontSize: "10px", fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.5px", fontFamily: "var(--mono)", textTransform: "uppercase", borderTop: "2px solid var(--border)" }}>
-                    Quarterly Goals — {quarterRangeLabel(props.month)}
-                  </td>
-                </tr>
-              )}
-              {quarterlyGoals.map((goal) => {
+              {(periodTab === "quarterly" ? quarterlyGoals : []).map((goal) => {
                 const a = quarterActuals;
                 return (
                 <React.Fragment key={goal.id}>
@@ -2140,10 +2145,10 @@ function GoalsScreen(props: {
             </tbody>
           </table>
         </div>
-        {!props.goals.length && <div className="no-goals-msg" style={{ display: "block" }}>No goals match the current filter</div>}
+        {(periodTab === "monthly" ? monthlyGoals : quarterlyGoals).length === 0 && <div className="no-goals-msg" style={{ display: "block" }}>No {periodTab} goals match the current filter</div>}
         {!effectiveReadonly && (
           <div style={{ padding: "12px 16px" }}>
-            <button className="add-goal-btn" onClick={() => props.onEdit({ ...emptyGoal, id: `goal-${Date.now()}` })}>+ Add Goal to Bank</button>
+            <button className="add-goal-btn" onClick={() => props.onEdit({ ...emptyGoal, id: `goal-${Date.now()}`, periodType: periodTab })}>+ Add {periodTab === "quarterly" ? "Quarterly" : "Monthly"} Goal to Bank</button>
           </div>
         )}
       </section>
@@ -2736,6 +2741,9 @@ function LiveScorecardCard({
   const [cardPeriodType, setCardPeriodType] = useState<"monthly" | "quarterly">("monthly");
   const [goalIds, setGoalIds] = useState<string[]>(() => baseGoals.filter((g) => g.periodType !== "quarterly").map((g) => g.id));
   const [indActuals, setIndActuals] = useState<Record<string, string>>({});
+
+  // Actuals can only be entered for past months, not the current month
+  const isCurrentMonth = isoMonth === currentMonthValue();
   const [addGoalOpen, setAddGoalOpen] = useState(false);
   const [lastSubmitted, setLastSubmitted] = useState<Scorecard | null>(null);
 
@@ -2829,25 +2837,30 @@ function LiveScorecardCard({
             {employee.role}{employee.department ? ` · ${employee.department}` : ""}{employee.location ? ` · ${employee.location}` : ""}
           </div>
         </div>
-        {currentGoals.length > 0 && (
-          <>
-            <div style={{ textAlign: "right", flexShrink: 0 }}>
-              <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>Achievement</div>
-              <div style={{ fontSize: "17px", fontWeight: 700, color: achColor }}>{liveScorecard.weightedAchievement.toFixed(1)}%</div>
-            </div>
-            <div style={{ textAlign: "right", flexShrink: 0, minWidth: "80px" }}>
-              <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>Est. Bonus</div>
-              <div style={{ fontSize: "17px", fontWeight: 700, color: "var(--brick)" }}>{formatCurrency(liveScorecard.bonusAmount)}</div>
-            </div>
-          </>
-        )}
-        {hasQuarterlyGoals && (
-          <div style={{ display: "flex", borderRadius: "99px", border: "1.5px solid var(--border)", overflow: "hidden", flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
-            <button style={{ padding: "2px 8px", fontSize: "10px", fontWeight: 700, fontFamily: "var(--mono)", border: "none", cursor: "pointer", background: cardPeriodType === "monthly" ? "var(--brick)" : "transparent", color: cardPeriodType === "monthly" ? "#fff" : "var(--text-muted)", transition: "background 0.15s" }} onClick={() => handlePeriodTypeChange("monthly")}>MO</button>
-            <button style={{ padding: "2px 8px", fontSize: "10px", fontWeight: 700, fontFamily: "var(--mono)", border: "none", cursor: "pointer", background: cardPeriodType === "quarterly" ? "var(--brick)" : "transparent", color: cardPeriodType === "quarterly" ? "#fff" : "var(--text-muted)", transition: "background 0.15s" }} onClick={() => handlePeriodTypeChange("quarterly")}>QTR</button>
-          </div>
-        )}
-        <span style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "99px", background: "#f0ece6", color: "#7a7268", fontWeight: 700, fontFamily: "var(--mono)", flexShrink: 0 }}>DRAFT</span>
+        {currentGoals.length > 0 && (() => {
+          const hasAnyActual = liveScorecard.goals.some((g) => g.actual != null);
+          return (
+            <>
+              <div style={{ textAlign: "right", flexShrink: 0 }}>
+                <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>Achievement</div>
+                {hasAnyActual
+                  ? <div style={{ fontSize: "17px", fontWeight: 700, color: achColor }}>{liveScorecard.weightedAchievement.toFixed(1)}%</div>
+                  : <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-muted)" }}>Pending</div>}
+              </div>
+              <div style={{ textAlign: "right", flexShrink: 0, minWidth: "80px" }}>
+                <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>Est. Bonus</div>
+                {hasAnyActual
+                  ? <div style={{ fontSize: "17px", fontWeight: 700, color: "var(--brick)" }}>{formatCurrency(liveScorecard.bonusAmount)}</div>
+                  : <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-muted)" }}>Pending</div>}
+              </div>
+            </>
+          );
+        })()}
+        <div style={{ display: "flex", borderRadius: "var(--radius-sm)", border: "1.5px solid var(--border)", overflow: "hidden", flexShrink: 0 }} onClick={(e) => e.stopPropagation()}>
+          <button style={{ padding: "3px 10px", fontSize: "11px", fontWeight: 700, fontFamily: "var(--sans)", border: "none", cursor: "pointer", background: cardPeriodType === "monthly" ? "var(--brick)" : "var(--surface)", color: cardPeriodType === "monthly" ? "#fff" : "var(--text-muted)", transition: "background 0.15s, color 0.15s" }} onClick={() => handlePeriodTypeChange("monthly")}>Monthly</button>
+          <button style={{ padding: "3px 10px", fontSize: "11px", fontWeight: 700, fontFamily: "var(--sans)", border: "none", borderLeft: "1.5px solid var(--border)", cursor: "pointer", background: cardPeriodType === "quarterly" ? "var(--brick)" : "var(--surface)", color: cardPeriodType === "quarterly" ? "#fff" : "var(--text-muted)", transition: "background 0.15s, color 0.15s" }} onClick={() => handlePeriodTypeChange("quarterly")}>Quarterly</button>
+        </div>
+        <span title="This scorecard hasn't been submitted yet" style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "99px", background: "#f0ece6", color: "#7a7268", fontWeight: 600, fontFamily: "var(--sans)", flexShrink: 0, cursor: "default" }}>Not Submitted</span>
       </div>
 
       {open && (
@@ -2905,7 +2918,7 @@ function LiveScorecardCard({
                           {noTarget ? <span style={{ color: "var(--text-faint)", fontSize: "10px" }}>not set</span> : formatNumber(goal.scMin)}
                         </td>
                         <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
-                          {isInd ? (
+                          {isInd && !isCurrentMonth ? (
                             <input
                               aria-label={`Actual for ${goal.name}`}
                               type="number"
@@ -2969,11 +2982,16 @@ function LiveScorecardCard({
                 </div>
               )}
             </div>
+            {isCurrentMonth && (
+              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic" }}>
+                Actuals can only be entered for past months
+              </span>
+            )}
             <button
               className="submit-btn"
               style={{ marginLeft: "auto", padding: "6px 18px", fontSize: "12px" }}
-              disabled={hasNoTarget || currentGoals.length === 0}
-              title={hasNoTarget ? "Set targets and minimums first" : undefined}
+              disabled={isCurrentMonth || hasNoTarget || currentGoals.length === 0}
+              title={isCurrentMonth ? "Scorecards can only be submitted for past months" : hasNoTarget ? "Set targets and minimums first" : undefined}
               onClick={() => {
                 onSubmit(liveScorecard);
                 setLastSubmitted(liveScorecard);

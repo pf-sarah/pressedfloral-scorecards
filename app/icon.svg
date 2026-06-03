@@ -1,0 +1,14 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
+  <rect width="512" height="512" fill="#BAA696" rx="96" ry="96"/>
+  <text
+    x="256"
+    y="352"
+    font-family="Georgia, 'Times New Roman', serif"
+    font-size="268"
+    font-weight="400"
+    fill="#ffffff"
+    text-anchor="middle"
+    dominant-baseline="auto"
+    letter-spacing="8"
+  >PF</text>
+</svg>
