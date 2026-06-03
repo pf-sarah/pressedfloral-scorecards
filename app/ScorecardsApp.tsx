@@ -603,9 +603,21 @@ export default function ScorecardsApp() {
 
   const visibleGoals = useMemo(() => {
     const periodActualsForBank = appData.actuals[formatMonthLabel(bankMonth)] || {};
-    let goals = scopedForProfile(appData.goals, effectiveProfile);
-    // Only admins see company goals on the Goals & Actuals page
-    if (!roleAtLeast(effectiveProfile, "admin")) goals = goals.filter((g) => g.goalTier !== "company");
+    let goals = appData.goals;
+    // Scope goals to the manager's team — individual goals by employee name, others by dept/location
+    if (effectiveProfile && effectiveProfile.role !== "admin") {
+      const teamNames = new Set(
+        scopedEmployeesForProfile(Object.values(appData.rippling).flat(), effectiveProfile, Object.values(appData.rippling).flat()).map((e) => e.name)
+      );
+      goals = goals.filter((g) => {
+        if (g.goalTier === "company") return false; // non-admins never see company goals
+        if (g.goalTier === "individual" && g.employeeName) return teamNames.has(g.employeeName);
+        // dept/individual-with-role: use dept/location scoping
+        return scopedForProfile([g], effectiveProfile).length > 0;
+      });
+    } else if (effectiveProfile && effectiveProfile.role === "admin") {
+      // admins see everything
+    }
     if (!bankFilters.showInactive) {
       goals = goals.filter((goal) => goal.active && !periodActualsForBank["__monthly_inactive__" + actualKey(goal)]);
     }
@@ -616,7 +628,7 @@ export default function ScorecardsApp() {
       const field = bankFilters.sort as keyof Goal;
       return String(a[field] || "").localeCompare(String(b[field] || "")) || a.name.localeCompare(b.name);
     });
-  }, [appData.goals, appData.actuals, bankFilters, bankMonth, effectiveProfile]);
+  }, [appData.goals, appData.actuals, appData.rippling, bankFilters, bankMonth, effectiveProfile]);
 
   const allRipplingEmployees = useMemo(() => Object.values(appData.rippling).flat(), [appData.rippling]);
 
@@ -1042,6 +1054,7 @@ export default function ScorecardsApp() {
               actuals={appData.actuals[formatMonthLabel(bankMonth)] || {}}
               allActuals={appData.actuals}
               editingGoal={editingGoal}
+              teamEmployees={scopedEmployeesForProfile(latestRipplingEmployees, effectiveProfile, allRipplingEmployees)}
               onMonth={setBankMonth}
               onFilters={setBankFilters}
               onActual={saveActual}
@@ -1351,7 +1364,8 @@ function PersonalScorecardPanel({
       if (g.goalTier === "company") return true;
       const deptMatch = g.department === myEmployee.department && (!g.location || g.location === myEmployee.location);
       if (g.goalTier === "department") return deptMatch;
-      // Individual goals: match by dept+location; also match role if specified on the goal
+      // Individual goals: match by employeeName if set (new), else fall back to role match (legacy)
+      if (g.employeeName) return g.employeeName === myEmployee.name;
       return deptMatch && (!g.role || !myEmployee.role || g.role === myEmployee.role);
     });
     const n = applicable.length;
@@ -1845,6 +1859,7 @@ function GoalsScreen(props: {
   actuals: ActualsByKey;
   allActuals: Record<string, ActualsByKey>;
   editingGoal: Goal | null;
+  teamEmployees?: Employee[];
   readonly?: boolean;
   onMonth: (value: string) => void;
   onFilters: (value: { types: string[]; location: string; departments: string[]; sort: string; showInactive: boolean }) => void;
@@ -2036,7 +2051,7 @@ function GoalsScreen(props: {
                   <td style={{ ...thCtx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{locLabel(goal.location)}</td>
                   <td style={{ ...thCtx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{goal.department || "—"}</td>
                   <td style={{ ...thGoal, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {goal.name}{goal.goalTier === "individual" && goal.role && <span style={{ fontSize: "9px", padding: "1px 5px", borderRadius: "99px", background: "#e9e9e9", color: "#555", fontWeight: 600, fontFamily: "var(--mono)", whiteSpace: "nowrap", marginLeft: "4px" }}>{goal.role}</span>}
+                    {goal.name}{goal.goalTier === "individual" && (goal.employeeName || goal.role) && <span style={{ fontSize: "9px", padding: "1px 5px", borderRadius: "99px", background: "#e9e9e9", color: "#555", fontWeight: 600, fontFamily: "var(--mono)", whiteSpace: "nowrap", marginLeft: "4px" }}>{goal.employeeName || goal.role}</span>}
                   </td>
                   <td style={{ ...thGoal, textAlign: "center" }}><span style={{ fontSize: "9px", fontWeight: 700, fontFamily: "var(--mono)", color: "var(--text-muted)" }}>M</span></td>
                   <td style={thGoal}>{goal.lowerBetter ? "Yes" : "No"}</td>
@@ -2090,7 +2105,7 @@ function GoalsScreen(props: {
                 {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && props.editingGoal?.id === goal.id && (
                   <tr className="goal-editor-row">
                     <td colSpan={12}>
-                      <GoalEditor goal={props.editingGoal} actuals={mergedActuals} isAdmin={props.isAdmin} allowedDepartments={props.allowedDepartments} onCancel={() => props.onEdit(null)} onSave={props.onSave} onSaveTargetPair={handleSaveTargetPair} />
+                      <GoalEditor goal={props.editingGoal} actuals={mergedActuals} isAdmin={props.isAdmin} allowedDepartments={props.allowedDepartments} teamEmployees={props.teamEmployees} onCancel={() => props.onEdit(null)} onSave={props.onSave} onSaveTargetPair={handleSaveTargetPair} />
                     </td>
                   </tr>
                 )}
@@ -2106,7 +2121,7 @@ function GoalsScreen(props: {
                   <td style={{ ...thCtx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{locLabel(goal.location)}</td>
                   <td style={{ ...thCtx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{goal.department || "—"}</td>
                   <td style={{ ...thGoal, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {goal.name}{goal.goalTier === "individual" && goal.role && <span style={{ fontSize: "9px", padding: "1px 5px", borderRadius: "99px", background: "#e9e9e9", color: "#555", fontWeight: 600, fontFamily: "var(--mono)", whiteSpace: "nowrap", marginLeft: "4px" }}>{goal.role}</span>}
+                    {goal.name}{goal.goalTier === "individual" && (goal.employeeName || goal.role) && <span style={{ fontSize: "9px", padding: "1px 5px", borderRadius: "99px", background: "#e9e9e9", color: "#555", fontWeight: 600, fontFamily: "var(--mono)", whiteSpace: "nowrap", marginLeft: "4px" }}>{goal.employeeName || goal.role}</span>}
                   </td>
                   <td style={{ ...thGoal, textAlign: "center" }}><span style={{ fontSize: "9px", fontWeight: 700, fontFamily: "var(--mono)", color: "#7a4400", background: "#fdf0e0", padding: "1px 4px", borderRadius: "3px" }}>Q</span></td>
                   <td style={thGoal}>{goal.lowerBetter ? "Yes" : "No"}</td>
@@ -2160,7 +2175,7 @@ function GoalsScreen(props: {
                 {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && props.editingGoal?.id === goal.id && (
                   <tr className="goal-editor-row">
                     <td colSpan={12}>
-                      <GoalEditor goal={props.editingGoal} actuals={mergedActuals} isAdmin={props.isAdmin} allowedDepartments={props.allowedDepartments} onCancel={() => props.onEdit(null)} onSave={props.onSave} onSaveTargetPair={handleSaveTargetPair} />
+                      <GoalEditor goal={props.editingGoal} actuals={mergedActuals} isAdmin={props.isAdmin} allowedDepartments={props.allowedDepartments} teamEmployees={props.teamEmployees} onCancel={() => props.onEdit(null)} onSave={props.onSave} onSaveTargetPair={handleSaveTargetPair} />
                     </td>
                   </tr>
                 )}
@@ -2170,7 +2185,7 @@ function GoalsScreen(props: {
               {!effectiveReadonly && props.editingGoal && !props.goals.find((g) => g.id === props.editingGoal!.id) && (
                 <tr className="goal-editor-row">
                   <td colSpan={12}>
-                    <GoalEditor goal={props.editingGoal} actuals={mergedActuals} isAdmin={props.isAdmin} allowedDepartments={props.allowedDepartments} onCancel={() => props.onEdit(null)} onSave={props.onSave} onSaveTargetPair={handleSaveTargetPair} />
+                    <GoalEditor goal={props.editingGoal} actuals={mergedActuals} isAdmin={props.isAdmin} allowedDepartments={props.allowedDepartments} teamEmployees={props.teamEmployees} onCancel={() => props.onEdit(null)} onSave={props.onSave} onSaveTargetPair={handleSaveTargetPair} />
                   </td>
                 </tr>
               )}
@@ -2286,7 +2301,7 @@ function GoalScopeTags({ location, department }: { location?: string; department
   );
 }
 
-function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, onSave, onSaveTargetPair, onCancel }: { goal: Goal; actuals: ActualsByKey; isAdmin?: boolean; allowedDepartments?: string[]; onSave: (goal: Goal) => Goal | null | void | Promise<Goal | null | void>; onSaveTargetPair: (goal: Goal, target: string, min: string) => void | Promise<void>; onCancel: () => void }) {
+function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, teamEmployees, onSave, onSaveTargetPair, onCancel }: { goal: Goal; actuals: ActualsByKey; isAdmin?: boolean; allowedDepartments?: string[]; teamEmployees?: Employee[]; onSave: (goal: Goal) => Goal | null | void | Promise<Goal | null | void>; onSaveTargetPair: (goal: Goal, target: string, min: string) => void | Promise<void>; onCancel: () => void }) {
   const isNew = goal.name === "";
   const [draft, setDraft] = useState(goal);
   const [target, setTarget] = useState(actuals[metaKey("target", goal)] != null ? String(actuals[metaKey("target", goal)]) : String(goal.goalValue || ""));
@@ -2296,22 +2311,29 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, onSave, onSave
   const [tierVal, setTierVal] = useState<string>(isNew ? "" : goal.goalTier);
   const [locVal, setLocVal] = useState<string>(isNew ? "__unset__" : (goal.location ?? ""));
   const [deptVal, setDeptVal] = useState<string>(isNew ? "__unset__" : (goal.department ?? ""));
-  const [roleVal, setRoleVal] = useState<string>(isNew ? "__unset__" : (goal.role ?? ""));
+  const [empVal, setEmpVal] = useState<string>(isNew ? "__unset__" : (goal.employeeName ?? "__unset__"));
   const [lowerVal, setLowerVal] = useState<string>(isNew ? "" : String(goal.lowerBetter));
   const [cappedVal, setCappedVal] = useState<string>(isNew ? "" : goal.capped);
   const [periodVal, setPeriodVal] = useState<string>(isNew ? "" : (goal.periodType || "monthly"));
 
   const visibleDepartments = allowedDepartments?.length ? allowedDepartments : departments;
-  const roles = (deptVal && deptVal !== "__unset__") ? (rolesByDepartment[deptVal] || []) : [];
 
   const isIndividual = tierVal === "individual";
+  const isDepartment = tierVal === "department";
+
+  // For individual goals: filter team employees by selected dept/location when available
+  const filteredEmployees = (teamEmployees || []).filter((e) => {
+    if (deptVal && deptVal !== "__unset__" && deptVal !== "" && e.department !== deptVal) return false;
+    if (locVal && locVal !== "__unset__" && locVal !== "" && e.location !== locVal) return false;
+    return true;
+  }).sort((a, b) => a.name.localeCompare(b.name));
 
   const missing: string[] = [];
   if (!draft.name.trim()) missing.push("Goal Name");
   if (!tierVal) missing.push("Type");
-  if (locVal === "__unset__") missing.push("Location");
+  if (!isDepartment && locVal === "__unset__") missing.push("Location");
   if (deptVal === "__unset__") missing.push("Department");
-  if (isIndividual && roleVal === "__unset__") missing.push("Role");
+  if (isIndividual && empVal === "__unset__") missing.push("Employee");
   if (!lowerVal) missing.push("Lower is Better");
   if (!cappedVal) missing.push("Capped");
   if (!periodVal) missing.push("Period Type");
@@ -2322,9 +2344,10 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, onSave, onSave
     const finalGoal: Goal = {
       ...draft,
       goalTier: tierVal as GoalTier,
-      location: locVal === "" ? undefined : locVal,
+      location: (isIndividual || locVal === "") ? undefined : locVal,
       department: deptVal === "" ? undefined : deptVal,
-      role: roleVal === "" ? undefined : roleVal,
+      employeeName: isIndividual && empVal !== "__unset__" ? empVal : undefined,
+      role: undefined, // no longer used for new goals
       lowerBetter: lowerVal === "true",
       capped: cappedVal as "yes" | "no",
       periodType: periodVal as "monthly" | "quarterly",
@@ -2342,38 +2365,42 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, onSave, onSave
       <div className="fields-grid">
         <div className="field">
           <label>Type<span style={reqStyle}>*</span></label>
-          <select value={tierVal} onChange={(e) => { setTierVal(e.target.value); if (e.target.value !== "individual") setRoleVal(""); }} style={!tierVal ? { color: "var(--text-muted)" } : undefined}>
+          <select value={tierVal} onChange={(e) => { setTierVal(e.target.value); setEmpVal("__unset__"); }} style={!tierVal ? { color: "var(--text-muted)" } : undefined}>
             <option value="" disabled hidden>— select —</option>
             {isAdmin && <option value="company">Company</option>}
             <option value="department">Department</option>
             <option value="individual">Individual</option>
           </select>
         </div>
-        <div className="field">
-          <label>Location<span style={reqStyle}>*</span></label>
-          <select value={locVal} onChange={(e) => setLocVal(e.target.value)} style={locVal === "__unset__" ? { color: "var(--text-muted)" } : undefined}>
-            <option value="__unset__" disabled hidden>— select —</option>
-            <option value="">All locations</option>
-            <option>Utah</option>
-            <option>Georgia</option>
-            <option>Remote</option>
-          </select>
-        </div>
+        {!isIndividual && (
+          <div className="field">
+            <label>Location<span style={reqStyle}>*</span></label>
+            <select value={locVal} onChange={(e) => setLocVal(e.target.value)} style={locVal === "__unset__" ? { color: "var(--text-muted)" } : undefined}>
+              <option value="__unset__" disabled hidden>— select —</option>
+              <option value="">All locations</option>
+              <option>Utah</option>
+              <option>Georgia</option>
+              <option>Remote</option>
+            </select>
+          </div>
+        )}
         <div className="field">
           <label>Department<span style={reqStyle}>*</span></label>
-          <select value={deptVal} onChange={(e) => { setDeptVal(e.target.value); setRoleVal("__unset__"); }} style={deptVal === "__unset__" ? { color: "var(--text-muted)" } : undefined}>
+          <select value={deptVal} onChange={(e) => { setDeptVal(e.target.value); setEmpVal("__unset__"); }} style={deptVal === "__unset__" ? { color: "var(--text-muted)" } : undefined}>
             <option value="__unset__" disabled hidden>— select —</option>
-            {isAdmin && <option value="">All departments</option>}
+            {isAdmin && !isIndividual && <option value="">All departments</option>}
             {visibleDepartments.map((d) => <option key={d}>{d}</option>)}
           </select>
         </div>
         {isIndividual && (
           <div className="field">
-            <label>Role<span style={reqStyle}>*</span></label>
-            <select value={roleVal} onChange={(e) => setRoleVal(e.target.value)} style={roleVal === "__unset__" ? { color: "var(--text-muted)" } : undefined}>
+            <label>Employee<span style={reqStyle}>*</span></label>
+            <select value={empVal} onChange={(e) => setEmpVal(e.target.value)} style={empVal === "__unset__" ? { color: "var(--text-muted)" } : undefined}>
               <option value="__unset__" disabled hidden>— select —</option>
-              <option value="">All roles</option>
-              {roles.map((r) => <option key={r}>{r}</option>)}
+              {filteredEmployees.length > 0
+                ? filteredEmployees.map((e) => <option key={e.name} value={e.name}>{e.name}</option>)
+                : (teamEmployees || []).sort((a, b) => a.name.localeCompare(b.name)).map((e) => <option key={e.name} value={e.name}>{e.name}</option>)
+              }
             </select>
           </div>
         )}
@@ -2804,7 +2831,9 @@ function LiveScorecardCard({
   function isGoalApplicable(goal: Goal): boolean {
     if (goal.goalTier === "company") return true;
     if (goal.goalTier === "department") return goal.department === employee.department && (!goal.location || goal.location === employee.location);
-    return goal.role === employee.role && goal.department === employee.department && (!goal.location || goal.location === employee.location);
+    // Individual: match by employeeName if set (new), else fall back to role match (legacy)
+    if (goal.employeeName) return goal.employeeName === employee.name;
+    return (!goal.role || goal.role === employee.role) && goal.department === employee.department && (!goal.location || goal.location === employee.location);
   }
 
   const hasQuarterlyGoals = allGoals.some((g) => g.periodType === "quarterly" && isGoalApplicable(g));
@@ -4190,7 +4219,10 @@ function WhatIfScreen(props: {
     const applicable = props.allGoals.filter((g) => {
       if (g.goalTier === "company") return false; // company goals must be added manually
       if (g.goalTier === "department") return !g.department || g.department === emp?.department;
-      if (g.goalTier === "individual") return !g.role || g.role === emp?.role;
+      if (g.goalTier === "individual") {
+        if (g.employeeName) return g.employeeName === emp?.name; // new: match by name
+        return !g.role || g.role === emp?.role; // legacy: match by role
+      }
       return false;
     });
     setPlayGoals(applicable.map((g) => ({

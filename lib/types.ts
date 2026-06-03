@@ -16,7 +16,8 @@ export type Goal = {
   goalTier: GoalTier;
   location?: string;
   department?: string;
-  role?: string;
+  role?: string;         // legacy — use employeeName for individual goals going forward
+  employeeName?: string; // individual goals: the specific employee this goal belongs to
   name: string;
   goalValue: number;
   minValue: number;
