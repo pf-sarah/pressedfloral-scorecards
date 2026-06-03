@@ -1147,7 +1147,6 @@ export default function ScorecardsApp() {
           {mode === "build" && (
             <BuildScorecardScreen
               allGoals={appData.goals.filter((g) => g.active)}
-              months={months}
               profile={effectiveProfile}
               teamEmployees={scopedEmployeesForProfile(latestRipplingEmployees, effectiveProfile, allRipplingEmployees)}
               onSave={saveBuildScorecard}
@@ -1591,9 +1590,8 @@ function PersonalScorecardPanel({
 
 type BuildGoal = { tempId: string; name: string; weight: string; target: string; min: string; lowerBetter: boolean; capped: "yes" | "no"; capPct: string; };
 
-function BuildScorecardScreen({ allGoals, months, profile, teamEmployees, onSave }: {
+function BuildScorecardScreen({ allGoals, profile, teamEmployees, onSave }: {
   allGoals: Goal[];
-  months: string[];
   profile: ManagerProfile | null;
   teamEmployees: Employee[];
   onSave: (employee: Employee, goals: BuildGoal[], month: string, periodType: "monthly" | "quarterly") => Promise<void>;
@@ -1672,7 +1670,7 @@ function BuildScorecardScreen({ allGoals, months, profile, teamEmployees, onSave
     setFormOpen(true);
   }
 
-  const step1Valid = empName.trim() && empDept && empLocation && empRole.trim() && empPayType && selectedMonth;
+  const step1Valid = empName.trim() && empDept && empLocation && empRole.trim() && empPayType;
 
   const stepLabel = step === "employee" ? "Team Member" : step === "goals" ? "Goals" : "Review";
   const stepNum = step === "employee" ? 1 : step === "goals" ? 2 : 3;
@@ -1749,12 +1747,6 @@ function BuildScorecardScreen({ allGoals, months, profile, teamEmployees, onSave
                   <input style={inputStyle} type="number" value={empAnnual} onChange={(e) => setEmpAnnual(e.target.value)} placeholder="0.00" />
                 </div>
               )}
-              <div style={fieldStyle}>
-                <label style={labelStyle}>SCORECARD MONTH<span style={reqStyle}>*</span></label>
-                <select style={inputStyle} value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)}>
-                  {months.slice(0, 24).map((m) => <option key={m} value={m}>{formatMonthLabel(m)}</option>)}
-                </select>
-              </div>
               <div style={fieldStyle}>
                 <label style={labelStyle}>PERIOD TYPE<span style={reqStyle}>*</span></label>
                 <div style={{ display: "flex", borderRadius: "var(--radius-sm)", border: "1.5px solid var(--border)", overflow: "hidden" }}>
