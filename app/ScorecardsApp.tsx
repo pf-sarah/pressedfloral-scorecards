@@ -40,7 +40,7 @@ import {
 } from "../lib/supabase";
 import type { ActualsByKey, AppData, Employee, Goal, GoalTier, HistoryFilters, ManagerProfile, ProfileRole, Scorecard } from "../lib/types";
 
-type Screen = "landing" | "setup" | "scorecard" | "history" | "rippling" | "guide" | "todos" | "migrate" | "whatif" | "personal" | "users";
+type Screen = "landing" | "setup" | "scorecard" | "history" | "rippling" | "guide" | "todos" | "migrate" | "whatif" | "personal" | "users" | "build";
 type HistoryView = "table" | "scorecard" | "grid" | "chart";
 
 /** Derive a "First Last" candidate name from an email like kanon.foote@domain.com */
@@ -951,6 +951,49 @@ export default function ScorecardsApp() {
     showToast("Rippling data saved");
   }
 
+  type BuildGoal = { tempId: string; name: string; weight: string; target: string; min: string; lowerBetter: boolean; capped: "yes" | "no"; capPct: string; };
+
+  async function saveBuildScorecard(employee: Employee, buildGoals: BuildGoal[], month: string, periodType: "monthly" | "quarterly") {
+    // 1. Add/update employee in Rippling for this month
+    const existing = appData.rippling[month] || [];
+    const updated = [...existing.filter((e) => e.name !== employee.name), employee];
+    if (!isFixture && sb) {
+      await sb.from("rippling_employees").delete().match({ period: month, full_name: employee.name });
+      const ins = await sb.from("rippling_employees").insert([employeeToRow(month, employee)]);
+      if (ins.error) { showSupabaseError(ins.error, "Could not save employee."); return; }
+    }
+    setAppData((cur) => ({ ...cur, rippling: { ...cur.rippling, [month]: updated } }));
+    persistRippling(month, updated);
+
+    // 2. Save each goal and its target/min for the month
+    const periodLabel = formatMonthLabel(month);
+    for (const bg of buildGoals) {
+      const tempGoal: Goal = {
+        id: `tmp-${Date.now()}-${Math.random()}`,
+        goalTier: "individual",
+        department: employee.department,
+        location: employee.location,
+        employeeName: employee.name,
+        name: bg.name,
+        goalValue: Number(bg.target) || 0,
+        minValue: Number(bg.min) || 0,
+        lowerBetter: bg.lowerBetter,
+        capped: bg.capped,
+        capPct: Number(bg.capPct) || 100,
+        active: true,
+        periodType,
+      };
+      const saved = await saveGoal(tempGoal);
+      if (saved && (bg.target || bg.min)) {
+        await saveMonthTargetPair(saved, periodLabel, bg.target, bg.min);
+      }
+    }
+
+    showToast(`Scorecard built for ${employee.name}`);
+    setScorecardMonths([month]);
+    setMode("scorecard");
+  }
+
   async function saveRippling() {
     if (!ripplingMonth || !ripplingPreview.length) {
       showToast("Upload a CSV before saving", "error");
@@ -1101,6 +1144,15 @@ export default function ScorecardsApp() {
               allowedDepartments={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.departments || [])}
             />
           )}
+          {mode === "build" && (
+            <BuildScorecardScreen
+              allGoals={appData.goals.filter((g) => g.active)}
+              months={months}
+              profile={effectiveProfile}
+              teamEmployees={scopedEmployeesForProfile(latestRipplingEmployees, effectiveProfile, allRipplingEmployees)}
+              onSave={saveBuildScorecard}
+            />
+          )}
           {mode === "scorecard" && (
             <ScorecardsScreen
               selectedMonths={scorecardMonths}
@@ -1228,7 +1280,8 @@ function pageLabel(mode: Screen) {
     migrate: "Migrate Data",
     whatif: "What If Scorecard",
     personal: "My Scorecard",
-    users: "Users"
+    users: "Users",
+    build: "Build Scorecard"
   }[mode];
 }
 
@@ -1278,6 +1331,7 @@ function Sidebar(props: {
     { mode: "landing", label: "Home", icon: "⌂" },
     { mode: "todos", label: "To Do", icon: "☐", minRole: "manager" },
     { mode: "personal", label: "My Scorecard", icon: "◉", hidden: !hasLinkedEmployee },
+    { mode: "build", label: "Build Scorecard", icon: "✚", minRole: "manager" },
     { mode: "setup", label: "Goals & Actuals", icon: "☰", minRole: "manager" },
     { mode: "scorecard", label: "Team Scorecards", icon: "👥", minRole: "manager" },
     { mode: "history", label: "Historical Data", icon: "◷" },
@@ -1531,6 +1585,387 @@ function PersonalScorecardPanel({
           No goals assigned for this period yet.
         </div>
       )}
+    </div>
+  );
+}
+
+type BuildGoal = { tempId: string; name: string; weight: string; target: string; min: string; lowerBetter: boolean; capped: "yes" | "no"; capPct: string; };
+
+function BuildScorecardScreen({ allGoals, months, profile, teamEmployees, onSave }: {
+  allGoals: Goal[];
+  months: string[];
+  profile: ManagerProfile | null;
+  teamEmployees: Employee[];
+  onSave: (employee: Employee, goals: BuildGoal[], month: string, periodType: "monthly" | "quarterly") => Promise<void>;
+}) {
+  type Step = "employee" | "goals" | "review";
+  const [step, setStep] = useState<Step>("employee");
+  const [saving, setSaving] = useState(false);
+
+  // Step 1 — employee
+  const [empName, setEmpName] = useState("");
+  const [empDept, setEmpDept] = useState(profile?.departments?.[0] || "");
+  const [empLocation, setEmpLocation] = useState(profile?.locations?.[0] || "");
+  const [empRole, setEmpRole] = useState("");
+  const [empPayType, setEmpPayType] = useState<"hourly" | "salary">("hourly");
+  const [empRate, setEmpRate] = useState("");
+  const [empAnnual, setEmpAnnual] = useState("");
+  const [selectedMonth, setSelectedMonth] = useState(currentMonthValue());
+  const [periodType, setPeriodType] = useState<"monthly" | "quarterly">("monthly");
+
+  // Step 2 — goals
+  const [goals, setGoals] = useState<BuildGoal[]>([]);
+  const [formOpen, setFormOpen] = useState(false);
+  const [gName, setGName] = useState("");
+  const [gWeight, setGWeight] = useState("");
+  const [gTarget, setGTarget] = useState("");
+  const [gMin, setGMin] = useState("");
+  const [gLower, setGLower] = useState<"" | "true" | "false">("");
+  const [gCapped, setGCapped] = useState<"yes" | "no">("no");
+  const [gCapPct, setGCapPct] = useState("100");
+
+  const visibleDepts = profile?.role === "admin" ? departments : (profile?.departments?.length ? profile.departments : departments);
+  const visibleLocs = profile?.role === "admin" ? locations : (profile?.locations?.length ? profile.locations : locations);
+
+  // Suggestions: goals from other employees in the same dept (avoid already-added names)
+  const addedNames = new Set(goals.map((g) => g.name));
+  const suggestions = allGoals.filter((g) =>
+    g.goalTier === "individual" &&
+    g.department === empDept &&
+    g.employeeName !== empName &&
+    !addedNames.has(g.name)
+  );
+  // Deduplicate suggestions by name
+  const uniqueSuggestions = suggestions.filter((g, i) => suggestions.findIndex((s) => s.name === g.name) === i);
+
+  const totalWeight = goals.reduce((sum, g) => sum + (Number(g.weight) || 0), 0);
+  const weightsOk = goals.length === 0 || Math.round(totalWeight * 10) / 10 === 100;
+
+  function resetGoalForm() {
+    setGName(""); setGWeight(""); setGTarget(""); setGMin("");
+    setGLower(""); setGCapped("no"); setGCapPct("100");
+    setFormOpen(false);
+  }
+
+  function addGoal() {
+    if (!gName.trim() || !gLower) return;
+    setGoals((prev) => [...prev, {
+      tempId: `tmp-${Date.now()}`,
+      name: gName.trim(),
+      weight: gWeight,
+      target: gTarget,
+      min: gMin,
+      lowerBetter: gLower === "true",
+      capped: gCapped,
+      capPct: gCapPct,
+    }]);
+    resetGoalForm();
+  }
+
+  function applySuggestion(g: Goal) {
+    setGName(g.name);
+    setGTarget(String(g.goalValue || ""));
+    setGMin(String(g.minValue || ""));
+    setGLower(String(g.lowerBetter) as "true" | "false");
+    setGCapped(g.capped);
+    setGCapPct(String(g.capPct));
+    setFormOpen(true);
+  }
+
+  const step1Valid = empName.trim() && empDept && empLocation && empRole.trim() && empPayType && selectedMonth;
+
+  const stepLabel = step === "employee" ? "Team Member" : step === "goals" ? "Goals" : "Review";
+  const stepNum = step === "employee" ? 1 : step === "goals" ? 2 : 3;
+
+  const fieldStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "5px" };
+  const labelStyle: React.CSSProperties = { fontSize: "11px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)", letterSpacing: "0.3px" };
+  const inputStyle: React.CSSProperties = { padding: "8px 10px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", fontFamily: "var(--sans)", fontSize: "13px", background: "var(--surface)", color: "var(--text)", width: "100%" };
+  const reqStyle: React.CSSProperties = { color: "var(--brick)", marginLeft: 2 };
+
+  return (
+    <div className="screen active">
+      <div style={{ maxWidth: "700px", margin: "0 auto", padding: "0 0 40px" }}>
+
+        {/* Step indicator */}
+        <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: "28px", padding: "0 2px" }}>
+          {(["Team Member", "Goals", "Review"] as const).map((label, i) => {
+            const num = i + 1;
+            const active = stepNum === num;
+            const done = stepNum > num;
+            return (
+              <React.Fragment key={label}>
+                <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
+                  <div style={{ width: "26px", height: "26px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: 700, fontFamily: "var(--mono)", background: active ? "var(--brick)" : done ? "#2D6B1A" : "var(--surface2)", color: active || done ? "#fff" : "var(--text-muted)", border: `1.5px solid ${active ? "var(--brick)" : done ? "#2D6B1A" : "var(--border)"}`, flexShrink: 0 }}>{done ? "✓" : num}</div>
+                  <span style={{ fontSize: "12px", fontWeight: active ? 700 : 400, color: active ? "var(--text)" : done ? "#2D6B1A" : "var(--text-muted)" }}>{label}</span>
+                </div>
+                {i < 2 && <div style={{ flex: 1, height: "1.5px", background: done ? "#2D6B1A" : "var(--border)", margin: "0 10px" }} />}
+              </React.Fragment>
+            );
+          })}
+        </div>
+
+        {/* ── Step 1: Team Member ── */}
+        {step === "employee" && (
+          <section>
+            <div className="section-title" style={{ marginBottom: 20 }}>Team Member Info</div>
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
+              <div style={{ ...fieldStyle, gridColumn: "1 / -1" }}>
+                <label style={labelStyle}>FULL NAME<span style={reqStyle}>*</span></label>
+                <input style={inputStyle} value={empName} onChange={(e) => setEmpName(e.target.value)} placeholder="e.g. Jane Smith" />
+              </div>
+              <div style={fieldStyle}>
+                <label style={labelStyle}>DEPARTMENT<span style={reqStyle}>*</span></label>
+                <select style={inputStyle} value={empDept} onChange={(e) => setEmpDept(e.target.value)}>
+                  <option value="">— select —</option>
+                  {visibleDepts.map((d) => <option key={d}>{d}</option>)}
+                </select>
+              </div>
+              <div style={fieldStyle}>
+                <label style={labelStyle}>LOCATION<span style={reqStyle}>*</span></label>
+                <select style={inputStyle} value={empLocation} onChange={(e) => setEmpLocation(e.target.value)}>
+                  <option value="">— select —</option>
+                  {visibleLocs.map((l) => <option key={l}>{l}</option>)}
+                </select>
+              </div>
+              <div style={{ ...fieldStyle, gridColumn: "1 / -1" }}>
+                <label style={labelStyle}>JOB TITLE<span style={reqStyle}>*</span></label>
+                <input style={inputStyle} value={empRole} onChange={(e) => setEmpRole(e.target.value)} placeholder="e.g. Design Specialist" />
+              </div>
+              <div style={fieldStyle}>
+                <label style={labelStyle}>PAY TYPE<span style={reqStyle}>*</span></label>
+                <select style={inputStyle} value={empPayType} onChange={(e) => setEmpPayType(e.target.value as "hourly" | "salary")}>
+                  <option value="hourly">Hourly</option>
+                  <option value="salary">Salary</option>
+                </select>
+              </div>
+              {empPayType === "hourly" ? (
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>HOURLY RATE</label>
+                  <input style={inputStyle} type="number" value={empRate} onChange={(e) => setEmpRate(e.target.value)} placeholder="0.00" />
+                </div>
+              ) : (
+                <div style={fieldStyle}>
+                  <label style={labelStyle}>ANNUAL PAY</label>
+                  <input style={inputStyle} type="number" value={empAnnual} onChange={(e) => setEmpAnnual(e.target.value)} placeholder="0.00" />
+                </div>
+              )}
+              <div style={fieldStyle}>
+                <label style={labelStyle}>SCORECARD MONTH<span style={reqStyle}>*</span></label>
+                <select style={inputStyle} value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)}>
+                  {months.slice(0, 24).map((m) => <option key={m} value={m}>{formatMonthLabel(m)}</option>)}
+                </select>
+              </div>
+              <div style={fieldStyle}>
+                <label style={labelStyle}>PERIOD TYPE<span style={reqStyle}>*</span></label>
+                <div style={{ display: "flex", borderRadius: "var(--radius-sm)", border: "1.5px solid var(--border)", overflow: "hidden" }}>
+                  {(["monthly", "quarterly"] as const).map((pt) => (
+                    <button key={pt} style={{ flex: 1, padding: "8px", border: "none", fontFamily: "var(--sans)", fontSize: "12px", fontWeight: 700, cursor: "pointer", background: periodType === pt ? "var(--brick)" : "var(--surface)", color: periodType === pt ? "#fff" : "var(--text-muted)", transition: "background 0.15s, color 0.15s" }} onClick={() => setPeriodType(pt)}>
+                      {pt === "monthly" ? "Monthly" : "Quarterly"}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </div>
+            <div style={{ marginTop: "24px", display: "flex", justifyContent: "flex-end" }}>
+              <button className="submit-btn" style={{ padding: "9px 28px" }} disabled={!step1Valid} onClick={() => setStep("goals")}>
+                Next: Add Goals →
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* ── Step 2: Goals ── */}
+        {step === "goals" && (
+          <section>
+            <div style={{ display: "flex", alignItems: "baseline", gap: "10px", marginBottom: "6px" }}>
+              <div className="section-title" style={{ margin: 0 }}>Goals for {empName}</div>
+              <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{formatMonthLabel(selectedMonth)} · {periodType === "monthly" ? "Monthly" : "Quarterly"}</span>
+            </div>
+
+            {/* Existing goals list */}
+            {goals.length > 0 && (
+              <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", marginBottom: "14px" }}>
+                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                  <thead>
+                    <tr style={{ background: "var(--surface2)", borderBottom: "1.5px solid var(--border)" }}>
+                      <th style={{ padding: "7px 12px", textAlign: "left", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>GOAL</th>
+                      <th style={{ padding: "7px 10px", textAlign: "center", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>WEIGHT</th>
+                      <th style={{ padding: "7px 10px", textAlign: "center", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>TARGET</th>
+                      <th style={{ padding: "7px 10px", textAlign: "center", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>MIN</th>
+                      <th style={{ padding: "7px 10px", textAlign: "center", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>LOWER</th>
+                      <th style={{ width: "32px" }}></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {goals.map((g) => (
+                      <tr key={g.tempId} style={{ borderBottom: "1px solid var(--border)" }}>
+                        <td style={{ padding: "8px 12px", fontWeight: 600 }}>{g.name}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center", fontFamily: "var(--mono)" }}>{g.weight ? `${g.weight}%` : <span style={{ color: "var(--text-faint)" }}>—</span>}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center", fontFamily: "var(--mono)" }}>{g.target || <span style={{ color: "var(--text-faint)" }}>—</span>}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center", fontFamily: "var(--mono)" }}>{g.min || <span style={{ color: "var(--text-faint)" }}>—</span>}</td>
+                        <td style={{ padding: "8px 10px", textAlign: "center" }}>{g.lowerBetter ? "Yes" : "No"}</td>
+                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
+                          <button onClick={() => setGoals((prev) => prev.filter((x) => x.tempId !== g.tempId))} style={{ border: "none", background: "none", color: "#9B2C2C", fontSize: "14px", cursor: "pointer", opacity: 0.6, padding: 0, lineHeight: 1 }}>✕</button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div style={{ padding: "7px 12px", background: "var(--surface2)", borderTop: "1px solid var(--border)", fontSize: "11px", fontFamily: "var(--mono)", color: weightsOk ? "var(--text-muted)" : "var(--brick)", fontWeight: weightsOk ? 400 : 700 }}>
+                  Total weight: {totalWeight.toFixed(1)}%{!weightsOk && goals.length > 0 ? " ⚠ must equal 100" : ""}
+                </div>
+              </div>
+            )}
+
+            {/* Add goal form */}
+            {formOpen ? (
+              <div style={{ border: "1.5px solid var(--brick)", borderRadius: "var(--radius)", padding: "16px", marginBottom: "14px", background: "var(--surface)" }}>
+                <div style={{ fontSize: "12px", fontWeight: 700, marginBottom: "14px", color: "var(--text)" }}>New Goal</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
+                  <div style={{ ...fieldStyle, gridColumn: "1 / -1" }}>
+                    <label style={labelStyle}>GOAL NAME<span style={reqStyle}>*</span></label>
+                    <input style={inputStyle} value={gName} onChange={(e) => setGName(e.target.value)} placeholder="e.g. Monthly Revenue" autoFocus />
+                  </div>
+                  <div style={fieldStyle}>
+                    <label style={labelStyle}>WEIGHT (%)</label>
+                    <input style={inputStyle} type="number" value={gWeight} onChange={(e) => setGWeight(e.target.value)} placeholder="e.g. 25" />
+                  </div>
+                  <div style={fieldStyle}>
+                    <label style={labelStyle}>LOWER IS BETTER<span style={reqStyle}>*</span></label>
+                    <select style={{ ...inputStyle, color: !gLower ? "var(--text-muted)" : undefined }} value={gLower} onChange={(e) => setGLower(e.target.value as "" | "true" | "false")}>
+                      <option value="" disabled hidden>— select —</option>
+                      <option value="false">No</option>
+                      <option value="true">Yes</option>
+                    </select>
+                  </div>
+                  <div style={fieldStyle}>
+                    <label style={labelStyle}>TARGET</label>
+                    <input style={inputStyle} type="number" value={gTarget} onChange={(e) => setGTarget(e.target.value)} placeholder="0" />
+                  </div>
+                  <div style={fieldStyle}>
+                    <label style={labelStyle}>MINIMUM</label>
+                    <input style={inputStyle} type="number" value={gMin} onChange={(e) => setGMin(e.target.value)} placeholder="0" />
+                  </div>
+                  <div style={fieldStyle}>
+                    <label style={labelStyle}>CAPPED</label>
+                    <select style={inputStyle} value={gCapped} onChange={(e) => setGCapped(e.target.value as "yes" | "no")}>
+                      <option value="no">No</option>
+                      <option value="yes">Yes</option>
+                    </select>
+                  </div>
+                  {gCapped === "yes" && (
+                    <div style={fieldStyle}>
+                      <label style={labelStyle}>CAP %</label>
+                      <input style={inputStyle} type="number" value={gCapPct} onChange={(e) => setGCapPct(e.target.value)} />
+                    </div>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
+                  <button className="submit-btn" style={{ padding: "7px 20px", fontSize: "12px" }} disabled={!gName.trim() || !gLower} onClick={addGoal}>Add Goal</button>
+                  <button style={{ padding: "7px 14px", fontSize: "12px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", background: "none", cursor: "pointer", fontFamily: "var(--sans)" }} onClick={resetGoalForm}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <button
+                style={{ width: "100%", padding: "11px", border: "1.5px dashed var(--border)", borderRadius: "var(--radius)", background: "none", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "13px", color: "var(--text-muted)", fontWeight: 600, marginBottom: "14px" }}
+                onClick={() => setFormOpen(true)}
+              >+ Add Goal</button>
+            )}
+
+            {/* Suggestions */}
+            {uniqueSuggestions.length > 0 && !formOpen && (
+              <div style={{ padding: "14px 16px", background: "var(--surface2)", borderRadius: "var(--radius)", border: "1.5px solid var(--border)" }}>
+                <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)", letterSpacing: "0.5px", marginBottom: "10px" }}>SUGGESTIONS FROM {empDept.toUpperCase()}</div>
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "7px" }}>
+                  {uniqueSuggestions.map((g) => (
+                    <button
+                      key={g.id}
+                      onClick={() => applySuggestion(g)}
+                      style={{ padding: "5px 12px", border: "1.5px solid var(--border)", borderRadius: "99px", background: "var(--surface)", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "12px", color: "var(--text)", fontWeight: 500, display: "flex", alignItems: "center", gap: "5px" }}
+                    >
+                      <span style={{ fontSize: "10px", color: "var(--brick)" }}>+</span> {g.name}
+                      {g.employeeName && <span style={{ fontSize: "9px", color: "var(--text-muted)" }}>· {g.employeeName}</span>}
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            <div style={{ marginTop: "24px", display: "flex", gap: "10px", justifyContent: "space-between" }}>
+              <button style={{ padding: "9px 20px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", background: "none", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "13px" }} onClick={() => setStep("employee")}>← Back</button>
+              <button className="submit-btn" style={{ padding: "9px 28px" }} disabled={goals.length === 0} onClick={() => setStep("review")}>
+                Review →
+              </button>
+            </div>
+          </section>
+        )}
+
+        {/* ── Step 3: Review ── */}
+        {step === "review" && (
+          <section>
+            <div className="section-title" style={{ marginBottom: 20 }}>Review & Save</div>
+
+            {/* Employee summary */}
+            <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", padding: "16px", marginBottom: "16px", background: "var(--surface2)" }}>
+              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)", marginBottom: "10px", letterSpacing: "0.5px" }}>TEAM MEMBER</div>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "13px" }}>
+                <div><span style={{ color: "var(--text-muted)", fontSize: "11px" }}>Name </span><strong>{empName}</strong></div>
+                <div><span style={{ color: "var(--text-muted)", fontSize: "11px" }}>Title </span>{empRole}</div>
+                <div><span style={{ color: "var(--text-muted)", fontSize: "11px" }}>Dept </span>{empDept}</div>
+                <div><span style={{ color: "var(--text-muted)", fontSize: "11px" }}>Location </span>{empLocation}</div>
+                <div><span style={{ color: "var(--text-muted)", fontSize: "11px" }}>Pay </span>{empPayType === "hourly" ? `$${empRate}/hr` : `$${Number(empAnnual).toLocaleString()}/yr`}</div>
+                <div><span style={{ color: "var(--text-muted)", fontSize: "11px" }}>Period </span>{formatMonthLabel(selectedMonth)} · {periodType === "monthly" ? "Monthly" : "Quarterly"}</div>
+              </div>
+            </div>
+
+            {/* Goals summary */}
+            <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", marginBottom: "20px" }}>
+              <div style={{ padding: "10px 14px", background: "var(--surface2)", borderBottom: "1.5px solid var(--border)", fontSize: "10px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)", letterSpacing: "0.5px" }}>GOALS ({goals.length})</div>
+              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
+                <tbody>
+                  {goals.map((g, i) => (
+                    <tr key={g.tempId} style={{ borderBottom: i < goals.length - 1 ? "1px solid var(--border)" : "none" }}>
+                      <td style={{ padding: "9px 14px", fontWeight: 600 }}>{g.name}</td>
+                      <td style={{ padding: "9px 10px", textAlign: "center", fontFamily: "var(--mono)", color: "var(--text-muted)", fontSize: "11px" }}>{g.weight ? `${g.weight}%` : "—"}</td>
+                      <td style={{ padding: "9px 10px", textAlign: "center", fontFamily: "var(--mono)", color: "var(--text-muted)", fontSize: "11px" }}>Target: {g.target || "—"}</td>
+                      <td style={{ padding: "9px 10px", textAlign: "center", fontFamily: "var(--mono)", color: "var(--text-muted)", fontSize: "11px" }}>Min: {g.min || "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div style={{ padding: "7px 14px", background: "var(--surface2)", borderTop: "1px solid var(--border)", fontSize: "11px", fontFamily: "var(--mono)", color: weightsOk ? "var(--text-muted)" : "var(--brick)", fontWeight: weightsOk ? 400 : 700 }}>
+                Total weight: {totalWeight.toFixed(1)}%{!weightsOk ? " ⚠ must equal 100 to submit a scorecard" : ""}
+              </div>
+            </div>
+
+            <div style={{ marginTop: "8px", display: "flex", gap: "10px", justifyContent: "space-between" }}>
+              <button style={{ padding: "9px 20px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", background: "none", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "13px" }} onClick={() => setStep("goals")}>← Back</button>
+              <button
+                className="submit-btn"
+                style={{ padding: "9px 28px" }}
+                disabled={saving}
+                onClick={async () => {
+                  setSaving(true);
+                  const employee: Employee = {
+                    id: empName,
+                    name: empName,
+                    role: empRole,
+                    department: empDept,
+                    location: empLocation,
+                    payType: empPayType,
+                    hourlyRate: empPayType === "hourly" && empRate ? Number(empRate) : undefined,
+                    annualPay: empPayType === "salary" && empAnnual ? Number(empAnnual) : undefined,
+                  };
+                  await onSave(employee, goals, selectedMonth, periodType);
+                  setSaving(false);
+                }}
+              >
+                {saving ? "Saving…" : "Save & Open Scorecard"}
+              </button>
+            </div>
+          </section>
+        )}
+      </div>
     </div>
   );
 }
