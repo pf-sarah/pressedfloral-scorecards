@@ -3866,7 +3866,7 @@ function TodosScreen({
       <div className="todo-group-card">
         <div className="todo-group-header">
           <div className="todo-group-header-left">
-            <span className="todo-group-title">Admin Tasks · {workMonthLabel}</span>
+            <span className="todo-group-title">Monthly Tasks · {workMonthLabel}</span>
             <span className="todo-group-meta">{adminDoneCount}/{adminTotal} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></span>
           </div>
           <button className="todo-show-completed" onClick={() => setShowCompletedAdmin((v) => !v)}>
@@ -3877,7 +3877,7 @@ function TodosScreen({
           <div className="todo-group-bar" style={{ width: `${(adminDoneCount / adminTotal) * 100}%` }} />
         </div>
         {visibleAdminRows.length === 0 ? (
-          <div className="todo-empty-row">All admin tasks complete ✓</div>
+          <div className="todo-empty-row">All monthly tasks complete ✓</div>
         ) : (
           visibleAdminRows.map((row) => (
             <React.Fragment key={row.key}>{row.node}</React.Fragment>
