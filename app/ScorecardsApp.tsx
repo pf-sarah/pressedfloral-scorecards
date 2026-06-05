@@ -40,7 +40,7 @@ import {
 } from "../lib/supabase";
 import type { ActualsByKey, AppData, Employee, Goal, GoalTier, HistoryFilters, ManagerProfile, ProfileRole, Scorecard } from "../lib/types";
 
-type Screen = "landing" | "setup" | "scorecard" | "history" | "rippling" | "guide" | "todos" | "migrate" | "whatif" | "personal" | "users" | "build";
+type Screen = "landing" | "setup" | "scorecard" | "history" | "rippling" | "guide" | "todos" | "migrate" | "whatif" | "personal" | "users";
 type HistoryView = "table" | "scorecard" | "grid" | "chart";
 
 /** Derive a "First Last" candidate name from an email like kanon.foote@domain.com */
@@ -126,6 +126,14 @@ function quarterKeyForMonth(isoMonth: string): string {
   const [y, m] = isoMonth.split("-").map(Number);
   if (!y || !m) return "";
   return `Q${Math.ceil(m / 3)} ${y}`;
+}
+
+function quarterToIsoMonth(quarter: string): string {
+  const match = quarter.match(/^Q(\d) (\d{4})$/);
+  if (!match) return currentMonthValue();
+  const q = parseInt(match[1]);
+  const y = parseInt(match[2]);
+  return `${y}-${String((q - 1) * 3 + 1).padStart(2, "0")}`;
 }
 
 function quarterRangeLabel(isoMonth: string): string {
@@ -231,7 +239,8 @@ export default function ScorecardsApp() {
   const [bankFilters, setBankFilters] = useState({ types: ["company", "department", "individual"] as string[], location: "", departments: [...departments] as string[], sort: "goalTier", showInactive: false });
   const [editingGoal, setEditingGoal] = useState<Goal | null>(null);
 
-  const [ripplingMonth, setRipplingMonth] = useState(fixtureMonth);
+  // Rippling uploads always target the previous (completed) month
+
   const [ripplingPreview, setRipplingPreview] = useState<Employee[]>([]);
 
   const [historyFilters, setHistoryFilters] = useState<HistoryFilters>({
@@ -743,11 +752,7 @@ export default function ScorecardsApp() {
     return `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
   }, []);
 
-  // currentMonth = this calendar month — the Rippling upload for this month contains last month's earnings
-  const currentMonth = useMemo(() => {
-    const d = new Date();
-    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-  }, []);
+
 
   const missingActuals = useMemo(() => {
     const actuals = appData.actuals[formatMonthLabel(workMonth)] || {};
@@ -786,16 +791,16 @@ export default function ScorecardsApp() {
 
   const todos = useMemo(() => {
     const tasks: { label: string; detail: string; action: Screen }[] = [];
-    if (roleAtLeast(effectiveProfile, "admin") && !appData.rippling[currentMonth]?.length) tasks.push({ label: "Upload Rippling data", detail: `${formatMonthLabel(currentMonth)} data not uploaded yet.`, action: "rippling" });
+    if (roleAtLeast(effectiveProfile, "admin") && !appData.rippling[workMonth]?.length) tasks.push({ label: "Upload Rippling data", detail: `${formatMonthLabel(workMonth)} data not uploaded yet.`, action: "rippling" });
     if (missingActuals.length) tasks.push({ label: "Enter shared actuals", detail: `${missingActuals.length} company or department goals need actuals.`, action: "setup" });
     if (missingCurrentTargets.length) tasks.push({ label: "Set current month targets", detail: `${missingCurrentTargets.length} goals need targets for this month.`, action: "todos" });
     return tasks;
-  }, [appData.rippling, currentMonth, workMonth, missingActuals, missingCurrentTargets, effectiveProfile]);
+  }, [appData.rippling, workMonth, missingActuals, missingCurrentTargets, effectiveProfile]);
 
   const todoBadgeCount = useMemo(() => {
-    const ripplingPending = roleAtLeast(effectiveProfile, "admin") && !appData.rippling[currentMonth]?.length ? 1 : 0;
+    const ripplingPending = roleAtLeast(effectiveProfile, "admin") && !appData.rippling[workMonth]?.length ? 1 : 0;
     return ripplingPending + missingActuals.length + missingCurrentTargets.length + missingNextTargets.length;
-  }, [effectiveProfile, appData.rippling, currentMonth, missingActuals, missingCurrentTargets, missingNextTargets]);
+  }, [effectiveProfile, appData.rippling, workMonth, missingActuals, missingCurrentTargets, missingNextTargets]);
 
   async function saveGoal(goal: Goal): Promise<Goal | null> {
     let savedGoal = goal;
@@ -951,68 +956,26 @@ export default function ScorecardsApp() {
     showToast("Rippling data saved");
   }
 
-  type BuildGoal = { tempId: string; name: string; weight: string; target: string; min: string; lowerBetter: boolean; capped: "yes" | "no"; capPct: string; };
-
-  async function saveBuildScorecard(employee: Employee, buildGoals: BuildGoal[], month: string, periodType: "monthly" | "quarterly") {
-    // 1. Add/update employee in Rippling for this month
-    const existing = appData.rippling[month] || [];
-    const updated = [...existing.filter((e) => e.name !== employee.name), employee];
-    if (!isFixture && sb) {
-      await sb.from("rippling_employees").delete().match({ period: month, full_name: employee.name });
-      const ins = await sb.from("rippling_employees").insert([employeeToRow(month, employee)]);
-      if (ins.error) { showSupabaseError(ins.error, "Could not save employee."); return; }
-    }
-    setAppData((cur) => ({ ...cur, rippling: { ...cur.rippling, [month]: updated } }));
-    persistRippling(month, updated);
-
-    // 2. Save each goal and its target/min for the month
-    const periodLabel = formatMonthLabel(month);
-    for (const bg of buildGoals) {
-      const tempGoal: Goal = {
-        id: `tmp-${Date.now()}-${Math.random()}`,
-        goalTier: "individual",
-        department: employee.department,
-        location: employee.location,
-        employeeName: employee.name,
-        name: bg.name,
-        goalValue: Number(bg.target) || 0,
-        minValue: Number(bg.min) || 0,
-        lowerBetter: bg.lowerBetter,
-        capped: bg.capped,
-        capPct: Number(bg.capPct) || 100,
-        active: true,
-        periodType,
-      };
-      const saved = await saveGoal(tempGoal);
-      if (saved && (bg.target || bg.min)) {
-        await saveMonthTargetPair(saved, periodLabel, bg.target, bg.min);
-      }
-    }
-
-    showToast(`Scorecard built for ${employee.name}`);
-    setScorecardMonths([month]);
-    setMode("scorecard");
-  }
 
   async function saveRippling() {
-    if (!ripplingMonth || !ripplingPreview.length) {
+    if (!ripplingPreview.length) {
       showToast("Upload a CSV before saving", "error");
       return;
     }
     if (!isFixture && sb) {
-      const deleteResult = await sb.from("rippling_employees").delete().eq("period", ripplingMonth);
+      const deleteResult = await sb.from("rippling_employees").delete().eq("period", workMonth);
       if (deleteResult.error) {
         showSupabaseError(deleteResult.error, "Existing Rippling data could not be cleared.");
         return;
       }
-      const insertResult = await sb.from("rippling_employees").insert(ripplingPreview.map((employee) => employeeToRow(ripplingMonth, employee)));
+      const insertResult = await sb.from("rippling_employees").insert(ripplingPreview.map((employee) => employeeToRow(workMonth, employee)));
       if (insertResult.error) {
         showSupabaseError(insertResult.error, "Rippling data could not be saved.");
         return;
       }
     }
-    setAppData((current) => ({ ...current, rippling: { ...current.rippling, [ripplingMonth]: ripplingPreview } }));
-    persistRippling(ripplingMonth, ripplingPreview);
+    setAppData((current) => ({ ...current, rippling: { ...current.rippling, [workMonth]: ripplingPreview } }));
+    persistRippling(workMonth, ripplingPreview);
     setRipplingPreview([]);
     showToast("Rippling data saved");
   }
@@ -1144,14 +1107,7 @@ export default function ScorecardsApp() {
               allowedDepartments={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.departments || [])}
             />
           )}
-          {mode === "build" && (
-            <BuildScorecardScreen
-              allGoals={appData.goals.filter((g) => g.active)}
-              profile={effectiveProfile}
-              teamEmployees={scopedEmployeesForProfile(latestRipplingEmployees, effectiveProfile, allRipplingEmployees)}
-              onSave={saveBuildScorecard}
-            />
-          )}
+
           {mode === "scorecard" && (
             <ScorecardsScreen
               selectedMonths={scorecardMonths}
@@ -1181,10 +1137,9 @@ export default function ScorecardsApp() {
           )}
           {mode === "rippling" && (
             <RipplingScreen
-              month={ripplingMonth}
+              month={workMonth}
               preview={ripplingPreview}
               saved={appData.rippling}
-              onMonth={setRipplingMonth}
               onPreview={setRipplingPreview}
               onSave={saveRippling}
               onClear={() => {
@@ -1227,7 +1182,7 @@ export default function ScorecardsApp() {
               workMonth={workMonth}
               bankMonth={bankMonth}
               profile={effectiveProfile}
-              hasRippling={!!appData.rippling[currentMonth]?.length}
+              hasRippling={!!appData.rippling[workMonth]?.length}
               missingActuals={missingActuals}
               goals={appData.goals.filter((g) => g.active)}
               allActuals={appData.actuals}
@@ -1245,10 +1200,6 @@ export default function ScorecardsApp() {
               }}
               onSaveActual={(goal, value) => saveActual(goal, value, formatMonthLabel(workMonth))}
               onRipplingUpload={(employees) => saveRipplingForMonth(workMonth, employees)}
-              onBuildEmployee={() => {
-                setScorecardMonths([workMonth]);
-                setMode("scorecard");
-              }}
             />
           )}
           {mode === "migrate" && <MigrateScreen />}
@@ -1279,8 +1230,7 @@ function pageLabel(mode: Screen) {
     migrate: "Migrate Data",
     whatif: "What If Scorecard",
     personal: "My Scorecard",
-    users: "Users",
-    build: "Build Scorecard"
+    users: "Users"
   }[mode];
 }
 
@@ -1330,7 +1280,6 @@ function Sidebar(props: {
     { mode: "landing", label: "Home", icon: "⌂" },
     { mode: "todos", label: "To Do", icon: "☐", minRole: "manager" },
     { mode: "personal", label: "My Scorecard", icon: "◉", hidden: !hasLinkedEmployee },
-    { mode: "build", label: "Build Scorecard", icon: "✚", minRole: "manager" },
     { mode: "setup", label: "Goals & Actuals", icon: "☰", minRole: "manager" },
     { mode: "scorecard", label: "Team Scorecards", icon: "👥", minRole: "manager" },
     { mode: "history", label: "Historical Data", icon: "◷" },
@@ -1450,7 +1399,7 @@ function PersonalScorecardPanel({
       if (!g.active) return false;
       if (isQuarterly ? g.periodType !== "quarterly" : g.periodType === "quarterly") return false;
       if (periodActuals["__monthly_inactive__" + actualKey(g)]) return false;
-      if (g.goalTier === "company") return true;
+      if (g.goalTier === "company") return false;
       const deptMatch = g.department === myEmployee.department && (!g.location || g.location === myEmployee.location);
       if (g.goalTier === "department") return deptMatch;
       // Individual goals: match by employeeName if set (new), else fall back to role match (legacy)
@@ -1458,14 +1407,19 @@ function PersonalScorecardPanel({
       return deptMatch && (!g.role || !myEmployee.role || g.role === myEmployee.role);
     });
     const n = applicable.length;
+    // If all goals have a stored default weight, use those; otherwise equal-distribute
+    const allHaveWeight = applicable.every((g) => g.weight != null && g.weight > 0);
+    const eq = n > 0 ? Number((100 / n).toFixed(2)) : 0;
     return applicable.map((g, i) => {
-      const eq = n > 0 ? Number((100 / n).toFixed(2)) : 0;
+      const defaultWeight = allHaveWeight
+        ? g.weight!
+        : (i === n - 1 ? Number((100 - eq * (n - 1)).toFixed(2)) : eq);
       return {
         ...g,
         scTarget: periodActuals[metaKey("target", g)] != null ? Number(periodActuals[metaKey("target", g)]) : g.goalValue,
         scMin: periodActuals[metaKey("min", g)] != null ? Number(periodActuals[metaKey("min", g)]) : g.minValue,
         scActual: g.goalTier === "individual" ? null : (periodActuals[actualKey(g)] != null ? Number(periodActuals[actualKey(g)]) : null),
-        scWeight: i === n - 1 ? Number((100 - eq * (n - 1)).toFixed(2)) : eq,
+        scWeight: defaultWeight,
       };
     });
   }, [myEmployee, allGoals, periodActuals, isQuarterly]);
@@ -1588,386 +1542,6 @@ function PersonalScorecardPanel({
   );
 }
 
-type BuildGoal = { tempId: string; name: string; weight: string; target: string; min: string; lowerBetter: boolean; capped: "yes" | "no"; capPct: string; };
-
-function BuildScorecardScreen({ allGoals, profile, teamEmployees, onSave }: {
-  allGoals: Goal[];
-  profile: ManagerProfile | null;
-  teamEmployees: Employee[];
-  onSave: (employee: Employee, goals: BuildGoal[], month: string, periodType: "monthly" | "quarterly") => Promise<void>;
-}) {
-  type Step = "employee" | "goals" | "review";
-  const [step, setStep] = useState<Step>("employee");
-  const [saving, setSaving] = useState(false);
-
-  // Step 1 — employee
-  const [empName, setEmpName] = useState("");
-  const [empDept, setEmpDept] = useState(profile?.departments?.[0] || "");
-  const [empLocation, setEmpLocation] = useState(profile?.locations?.[0] || "");
-  const [empRole, setEmpRole] = useState("");
-  const [empPayType, setEmpPayType] = useState<"hourly" | "salary">("hourly");
-  const [empRate, setEmpRate] = useState("");
-  const [empAnnual, setEmpAnnual] = useState("");
-  const [selectedMonth, setSelectedMonth] = useState(currentMonthValue());
-  const [periodType, setPeriodType] = useState<"monthly" | "quarterly">("monthly");
-
-  // Step 2 — goals
-  const [goals, setGoals] = useState<BuildGoal[]>([]);
-  const [formOpen, setFormOpen] = useState(false);
-  const [gName, setGName] = useState("");
-  const [gWeight, setGWeight] = useState("");
-  const [gTarget, setGTarget] = useState("");
-  const [gMin, setGMin] = useState("");
-  const [gLower, setGLower] = useState<"" | "true" | "false">("");
-  const [gCapped, setGCapped] = useState<"yes" | "no">("no");
-  const [gCapPct, setGCapPct] = useState("100");
-
-  const visibleDepts = profile?.role === "admin" ? departments : (profile?.departments?.length ? profile.departments : departments);
-  const visibleLocs = profile?.role === "admin" ? locations : (profile?.locations?.length ? profile.locations : locations);
-
-  // Suggestions: goals from other employees in the same dept (avoid already-added names)
-  const addedNames = new Set(goals.map((g) => g.name));
-  const suggestions = allGoals.filter((g) =>
-    g.goalTier === "individual" &&
-    g.department === empDept &&
-    g.employeeName !== empName &&
-    !addedNames.has(g.name)
-  );
-  // Deduplicate suggestions by name
-  const uniqueSuggestions = suggestions.filter((g, i) => suggestions.findIndex((s) => s.name === g.name) === i);
-
-  const totalWeight = goals.reduce((sum, g) => sum + (Number(g.weight) || 0), 0);
-  const weightsOk = goals.length === 0 || Math.round(totalWeight * 10) / 10 === 100;
-
-  function resetGoalForm() {
-    setGName(""); setGWeight(""); setGTarget(""); setGMin("");
-    setGLower(""); setGCapped("no"); setGCapPct("100");
-    setFormOpen(false);
-  }
-
-  function addGoal() {
-    if (!gName.trim() || !gLower) return;
-    setGoals((prev) => [...prev, {
-      tempId: `tmp-${Date.now()}`,
-      name: gName.trim(),
-      weight: gWeight,
-      target: gTarget,
-      min: gMin,
-      lowerBetter: gLower === "true",
-      capped: gCapped,
-      capPct: gCapPct,
-    }]);
-    resetGoalForm();
-  }
-
-  function applySuggestion(g: Goal) {
-    setGName(g.name);
-    setGTarget(String(g.goalValue || ""));
-    setGMin(String(g.minValue || ""));
-    setGLower(String(g.lowerBetter) as "true" | "false");
-    setGCapped(g.capped);
-    setGCapPct(String(g.capPct));
-    setFormOpen(true);
-  }
-
-  const step1Valid = empName.trim() && empDept && empLocation && empRole.trim() && empPayType;
-
-  const stepLabel = step === "employee" ? "Team Member" : step === "goals" ? "Goals" : "Review";
-  const stepNum = step === "employee" ? 1 : step === "goals" ? 2 : 3;
-
-  const fieldStyle: React.CSSProperties = { display: "flex", flexDirection: "column", gap: "5px" };
-  const labelStyle: React.CSSProperties = { fontSize: "11px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)", letterSpacing: "0.3px" };
-  const inputStyle: React.CSSProperties = { padding: "8px 10px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", fontFamily: "var(--sans)", fontSize: "13px", background: "var(--surface)", color: "var(--text)", width: "100%" };
-  const reqStyle: React.CSSProperties = { color: "var(--brick)", marginLeft: 2 };
-
-  return (
-    <div className="screen active">
-      <div style={{ maxWidth: "700px", margin: "0 auto", padding: "0 0 40px" }}>
-
-        {/* Step indicator */}
-        <div style={{ display: "flex", alignItems: "center", gap: 0, marginBottom: "28px", padding: "0 2px" }}>
-          {(["Team Member", "Goals", "Review"] as const).map((label, i) => {
-            const num = i + 1;
-            const active = stepNum === num;
-            const done = stepNum > num;
-            return (
-              <React.Fragment key={label}>
-                <div style={{ display: "flex", alignItems: "center", gap: "7px" }}>
-                  <div style={{ width: "26px", height: "26px", borderRadius: "50%", display: "flex", alignItems: "center", justifyContent: "center", fontSize: "11px", fontWeight: 700, fontFamily: "var(--mono)", background: active ? "var(--brick)" : done ? "#2D6B1A" : "var(--surface2)", color: active || done ? "#fff" : "var(--text-muted)", border: `1.5px solid ${active ? "var(--brick)" : done ? "#2D6B1A" : "var(--border)"}`, flexShrink: 0 }}>{done ? "✓" : num}</div>
-                  <span style={{ fontSize: "12px", fontWeight: active ? 700 : 400, color: active ? "var(--text)" : done ? "#2D6B1A" : "var(--text-muted)" }}>{label}</span>
-                </div>
-                {i < 2 && <div style={{ flex: 1, height: "1.5px", background: done ? "#2D6B1A" : "var(--border)", margin: "0 10px" }} />}
-              </React.Fragment>
-            );
-          })}
-        </div>
-
-        {/* ── Step 1: Team Member ── */}
-        {step === "employee" && (
-          <section>
-            <div className="section-title" style={{ marginBottom: 20 }}>Team Member Info</div>
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "16px" }}>
-              <div style={{ ...fieldStyle, gridColumn: "1 / -1" }}>
-                <label style={labelStyle}>FULL NAME<span style={reqStyle}>*</span></label>
-                <input style={inputStyle} value={empName} onChange={(e) => setEmpName(e.target.value)} placeholder="e.g. Jane Smith" />
-              </div>
-              <div style={fieldStyle}>
-                <label style={labelStyle}>DEPARTMENT<span style={reqStyle}>*</span></label>
-                <select style={inputStyle} value={empDept} onChange={(e) => { setEmpDept(e.target.value); setEmpRole(""); }}>
-                  <option value="">— select —</option>
-                  {visibleDepts.map((d) => <option key={d}>{d}</option>)}
-                </select>
-              </div>
-              <div style={fieldStyle}>
-                <label style={labelStyle}>LOCATION<span style={reqStyle}>*</span></label>
-                <select style={inputStyle} value={empLocation} onChange={(e) => setEmpLocation(e.target.value)}>
-                  <option value="">— select —</option>
-                  {visibleLocs.map((l) => <option key={l}>{l}</option>)}
-                </select>
-              </div>
-              <div style={{ ...fieldStyle, gridColumn: "1 / -1" }}>
-                <label style={labelStyle}>JOB TITLE<span style={reqStyle}>*</span></label>
-                {(rolesByDepartment[empDept] || []).length > 0 ? (
-                  <select style={{ ...inputStyle, color: !empRole ? "var(--text-muted)" : undefined }} value={empRole} onChange={(e) => setEmpRole(e.target.value)}>
-                    <option value="">— select —</option>
-                    {(rolesByDepartment[empDept] || []).map((r) => <option key={r}>{r}</option>)}
-                  </select>
-                ) : (
-                  <input style={inputStyle} value={empRole} onChange={(e) => setEmpRole(e.target.value)} placeholder="e.g. Design Specialist" />
-                )}
-              </div>
-              <div style={fieldStyle}>
-                <label style={labelStyle}>PAY TYPE<span style={reqStyle}>*</span></label>
-                <select style={inputStyle} value={empPayType} onChange={(e) => setEmpPayType(e.target.value as "hourly" | "salary")}>
-                  <option value="hourly">Hourly</option>
-                  <option value="salary">Salary</option>
-                </select>
-              </div>
-              {empPayType === "hourly" ? (
-                <div style={fieldStyle}>
-                  <label style={labelStyle}>HOURLY RATE</label>
-                  <input style={inputStyle} type="number" value={empRate} onChange={(e) => setEmpRate(e.target.value)} placeholder="0.00" />
-                </div>
-              ) : (
-                <div style={fieldStyle}>
-                  <label style={labelStyle}>ANNUAL PAY</label>
-                  <input style={inputStyle} type="number" value={empAnnual} onChange={(e) => setEmpAnnual(e.target.value)} placeholder="0.00" />
-                </div>
-              )}
-              <div style={fieldStyle}>
-                <label style={labelStyle}>PERIOD TYPE<span style={reqStyle}>*</span></label>
-                <div style={{ display: "flex", borderRadius: "var(--radius-sm)", border: "1.5px solid var(--border)", overflow: "hidden" }}>
-                  {(["monthly", "quarterly"] as const).map((pt) => (
-                    <button key={pt} style={{ flex: 1, padding: "8px", border: "none", fontFamily: "var(--sans)", fontSize: "12px", fontWeight: 700, cursor: "pointer", background: periodType === pt ? "var(--brick)" : "var(--surface)", color: periodType === pt ? "#fff" : "var(--text-muted)", transition: "background 0.15s, color 0.15s" }} onClick={() => setPeriodType(pt)}>
-                      {pt === "monthly" ? "Monthly" : "Quarterly"}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
-            <div style={{ marginTop: "24px", display: "flex", justifyContent: "flex-end" }}>
-              <button className="submit-btn" style={{ padding: "9px 28px" }} disabled={!step1Valid} onClick={() => setStep("goals")}>
-                Next: Add Goals →
-              </button>
-            </div>
-          </section>
-        )}
-
-        {/* ── Step 2: Goals ── */}
-        {step === "goals" && (
-          <section>
-            <div style={{ display: "flex", alignItems: "baseline", gap: "10px", marginBottom: "6px" }}>
-              <div className="section-title" style={{ margin: 0 }}>Goals for {empName}</div>
-              <span style={{ fontSize: "11px", color: "var(--text-muted)" }}>{formatMonthLabel(selectedMonth)} · {periodType === "monthly" ? "Monthly" : "Quarterly"}</span>
-            </div>
-
-            {/* Existing goals list */}
-            {goals.length > 0 && (
-              <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", marginBottom: "14px" }}>
-                <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
-                  <thead>
-                    <tr style={{ background: "var(--surface2)", borderBottom: "1.5px solid var(--border)" }}>
-                      <th style={{ padding: "7px 12px", textAlign: "left", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>GOAL</th>
-                      <th style={{ padding: "7px 10px", textAlign: "center", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>WEIGHT</th>
-                      <th style={{ padding: "7px 10px", textAlign: "center", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>TARGET</th>
-                      <th style={{ padding: "7px 10px", textAlign: "center", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>MIN</th>
-                      <th style={{ padding: "7px 10px", textAlign: "center", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)" }}>LOWER</th>
-                      <th style={{ width: "32px" }}></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {goals.map((g) => (
-                      <tr key={g.tempId} style={{ borderBottom: "1px solid var(--border)" }}>
-                        <td style={{ padding: "8px 12px", fontWeight: 600 }}>{g.name}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center", fontFamily: "var(--mono)" }}>{g.weight ? `${g.weight}%` : <span style={{ color: "var(--text-faint)" }}>—</span>}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center", fontFamily: "var(--mono)" }}>{g.target || <span style={{ color: "var(--text-faint)" }}>—</span>}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center", fontFamily: "var(--mono)" }}>{g.min || <span style={{ color: "var(--text-faint)" }}>—</span>}</td>
-                        <td style={{ padding: "8px 10px", textAlign: "center" }}>{g.lowerBetter ? "Yes" : "No"}</td>
-                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
-                          <button onClick={() => setGoals((prev) => prev.filter((x) => x.tempId !== g.tempId))} style={{ border: "none", background: "none", color: "#9B2C2C", fontSize: "14px", cursor: "pointer", opacity: 0.6, padding: 0, lineHeight: 1 }}>✕</button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <div style={{ padding: "7px 12px", background: "var(--surface2)", borderTop: "1px solid var(--border)", fontSize: "11px", fontFamily: "var(--mono)", color: weightsOk ? "var(--text-muted)" : "var(--brick)", fontWeight: weightsOk ? 400 : 700 }}>
-                  Total weight: {totalWeight.toFixed(1)}%{!weightsOk && goals.length > 0 ? " ⚠ must equal 100" : ""}
-                </div>
-              </div>
-            )}
-
-            {/* Add goal form */}
-            {formOpen ? (
-              <div style={{ border: "1.5px solid var(--brick)", borderRadius: "var(--radius)", padding: "16px", marginBottom: "14px", background: "var(--surface)" }}>
-                <div style={{ fontSize: "12px", fontWeight: 700, marginBottom: "14px", color: "var(--text)" }}>New Goal</div>
-                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "12px" }}>
-                  <div style={{ ...fieldStyle, gridColumn: "1 / -1" }}>
-                    <label style={labelStyle}>GOAL NAME<span style={reqStyle}>*</span></label>
-                    <input style={inputStyle} value={gName} onChange={(e) => setGName(e.target.value)} placeholder="e.g. Monthly Revenue" autoFocus />
-                  </div>
-                  <div style={fieldStyle}>
-                    <label style={labelStyle}>WEIGHT (%)</label>
-                    <input style={inputStyle} type="number" value={gWeight} onChange={(e) => setGWeight(e.target.value)} placeholder="e.g. 25" />
-                  </div>
-                  <div style={fieldStyle}>
-                    <label style={labelStyle}>LOWER IS BETTER<span style={reqStyle}>*</span></label>
-                    <select style={{ ...inputStyle, color: !gLower ? "var(--text-muted)" : undefined }} value={gLower} onChange={(e) => setGLower(e.target.value as "" | "true" | "false")}>
-                      <option value="" disabled hidden>— select —</option>
-                      <option value="false">No</option>
-                      <option value="true">Yes</option>
-                    </select>
-                  </div>
-                  <div style={fieldStyle}>
-                    <label style={labelStyle}>TARGET</label>
-                    <input style={inputStyle} type="number" value={gTarget} onChange={(e) => setGTarget(e.target.value)} placeholder="0" />
-                  </div>
-                  <div style={fieldStyle}>
-                    <label style={labelStyle}>MINIMUM</label>
-                    <input style={inputStyle} type="number" value={gMin} onChange={(e) => setGMin(e.target.value)} placeholder="0" />
-                  </div>
-                  <div style={fieldStyle}>
-                    <label style={labelStyle}>CAPPED</label>
-                    <select style={inputStyle} value={gCapped} onChange={(e) => setGCapped(e.target.value as "yes" | "no")}>
-                      <option value="no">No</option>
-                      <option value="yes">Yes</option>
-                    </select>
-                  </div>
-                  {gCapped === "yes" && (
-                    <div style={fieldStyle}>
-                      <label style={labelStyle}>CAP %</label>
-                      <input style={inputStyle} type="number" value={gCapPct} onChange={(e) => setGCapPct(e.target.value)} />
-                    </div>
-                  )}
-                </div>
-                <div style={{ display: "flex", gap: "10px", marginTop: "14px" }}>
-                  <button className="submit-btn" style={{ padding: "7px 20px", fontSize: "12px" }} disabled={!gName.trim() || !gLower} onClick={addGoal}>Add Goal</button>
-                  <button style={{ padding: "7px 14px", fontSize: "12px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", background: "none", cursor: "pointer", fontFamily: "var(--sans)" }} onClick={resetGoalForm}>Cancel</button>
-                </div>
-              </div>
-            ) : (
-              <button
-                style={{ width: "100%", padding: "11px", border: "1.5px dashed var(--border)", borderRadius: "var(--radius)", background: "none", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "13px", color: "var(--text-muted)", fontWeight: 600, marginBottom: "14px" }}
-                onClick={() => setFormOpen(true)}
-              >+ Add Goal</button>
-            )}
-
-            {/* Suggestions */}
-            {uniqueSuggestions.length > 0 && !formOpen && (
-              <div style={{ padding: "14px 16px", background: "var(--surface2)", borderRadius: "var(--radius)", border: "1.5px solid var(--border)" }}>
-                <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)", letterSpacing: "0.5px", marginBottom: "10px" }}>SUGGESTIONS FROM {empDept.toUpperCase()}</div>
-                <div style={{ display: "flex", flexWrap: "wrap", gap: "7px" }}>
-                  {uniqueSuggestions.map((g) => (
-                    <button
-                      key={g.id}
-                      onClick={() => applySuggestion(g)}
-                      style={{ padding: "5px 12px", border: "1.5px solid var(--border)", borderRadius: "99px", background: "var(--surface)", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "12px", color: "var(--text)", fontWeight: 500, display: "flex", alignItems: "center", gap: "5px" }}
-                    >
-                      <span style={{ fontSize: "10px", color: "var(--brick)" }}>+</span> {g.name}
-                      {g.employeeName && <span style={{ fontSize: "9px", color: "var(--text-muted)" }}>· {g.employeeName}</span>}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            )}
-
-            <div style={{ marginTop: "24px", display: "flex", gap: "10px", justifyContent: "space-between" }}>
-              <button style={{ padding: "9px 20px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", background: "none", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "13px" }} onClick={() => setStep("employee")}>← Back</button>
-              <button className="submit-btn" style={{ padding: "9px 28px" }} disabled={goals.length === 0} onClick={() => setStep("review")}>
-                Review →
-              </button>
-            </div>
-          </section>
-        )}
-
-        {/* ── Step 3: Review ── */}
-        {step === "review" && (
-          <section>
-            <div className="section-title" style={{ marginBottom: 20 }}>Review & Save</div>
-
-            {/* Employee summary */}
-            <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", padding: "16px", marginBottom: "16px", background: "var(--surface2)" }}>
-              <div style={{ fontSize: "10px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)", marginBottom: "10px", letterSpacing: "0.5px" }}>TEAM MEMBER</div>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: "10px", fontSize: "13px" }}>
-                <div><span style={{ color: "var(--text-muted)", fontSize: "11px" }}>Name </span><strong>{empName}</strong></div>
-                <div><span style={{ color: "var(--text-muted)", fontSize: "11px" }}>Title </span>{empRole}</div>
-                <div><span style={{ color: "var(--text-muted)", fontSize: "11px" }}>Dept </span>{empDept}</div>
-                <div><span style={{ color: "var(--text-muted)", fontSize: "11px" }}>Location </span>{empLocation}</div>
-                <div><span style={{ color: "var(--text-muted)", fontSize: "11px" }}>Pay </span>{empPayType === "hourly" ? `$${empRate}/hr` : `$${Number(empAnnual).toLocaleString()}/yr`}</div>
-                <div><span style={{ color: "var(--text-muted)", fontSize: "11px" }}>Period </span>{formatMonthLabel(selectedMonth)} · {periodType === "monthly" ? "Monthly" : "Quarterly"}</div>
-              </div>
-            </div>
-
-            {/* Goals summary */}
-            <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", marginBottom: "20px" }}>
-              <div style={{ padding: "10px 14px", background: "var(--surface2)", borderBottom: "1.5px solid var(--border)", fontSize: "10px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)", letterSpacing: "0.5px" }}>GOALS ({goals.length})</div>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "12px" }}>
-                <tbody>
-                  {goals.map((g, i) => (
-                    <tr key={g.tempId} style={{ borderBottom: i < goals.length - 1 ? "1px solid var(--border)" : "none" }}>
-                      <td style={{ padding: "9px 14px", fontWeight: 600 }}>{g.name}</td>
-                      <td style={{ padding: "9px 10px", textAlign: "center", fontFamily: "var(--mono)", color: "var(--text-muted)", fontSize: "11px" }}>{g.weight ? `${g.weight}%` : "—"}</td>
-                      <td style={{ padding: "9px 10px", textAlign: "center", fontFamily: "var(--mono)", color: "var(--text-muted)", fontSize: "11px" }}>Target: {g.target || "—"}</td>
-                      <td style={{ padding: "9px 10px", textAlign: "center", fontFamily: "var(--mono)", color: "var(--text-muted)", fontSize: "11px" }}>Min: {g.min || "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-              <div style={{ padding: "7px 14px", background: "var(--surface2)", borderTop: "1px solid var(--border)", fontSize: "11px", fontFamily: "var(--mono)", color: weightsOk ? "var(--text-muted)" : "var(--brick)", fontWeight: weightsOk ? 400 : 700 }}>
-                Total weight: {totalWeight.toFixed(1)}%{!weightsOk ? " ⚠ must equal 100 to submit a scorecard" : ""}
-              </div>
-            </div>
-
-            <div style={{ marginTop: "8px", display: "flex", gap: "10px", justifyContent: "space-between" }}>
-              <button style={{ padding: "9px 20px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", background: "none", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "13px" }} onClick={() => setStep("goals")}>← Back</button>
-              <button
-                className="submit-btn"
-                style={{ padding: "9px 28px" }}
-                disabled={saving}
-                onClick={async () => {
-                  setSaving(true);
-                  const employee: Employee = {
-                    id: empName,
-                    name: empName,
-                    role: empRole,
-                    department: empDept,
-                    location: empLocation,
-                    payType: empPayType,
-                    hourlyRate: empPayType === "hourly" && empRate ? Number(empRate) : undefined,
-                    annualPay: empPayType === "salary" && empAnnual ? Number(empAnnual) : undefined,
-                  };
-                  await onSave(employee, goals, selectedMonth, periodType);
-                  setSaving(false);
-                }}
-              >
-                {saving ? "Saving…" : "Save & Open Scorecard"}
-              </button>
-            </div>
-          </section>
-        )}
-      </div>
-    </div>
-  );
-}
 
 function MaintenanceScreen() {
   return (
@@ -2467,17 +2041,36 @@ function GoalsScreen(props: {
         <div className="toolbar-row" style={{ marginBottom: 10, gap: 10 }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", minWidth: 0 }}>
             <div className="section-title" style={{ margin: 0, borderBottom: "none", paddingBottom: 0 }}>Goals & Actuals</div>
-            <select className="bank-filter-select" style={{ flex: "none" }} value={props.month} onChange={(e) => props.onMonth(e.target.value)}>
-              {props.months.filter((m) => {
-                if (!/^\d{4}-\d{2}$/.test(m)) return false;
-                const now = new Date();
-                const cur = now.getFullYear() * 12 + now.getMonth();
-                const [y, mo] = m.split("-").map(Number);
-                const val = y * 12 + (mo - 1);
-                return val >= cur - 12 && val <= cur + 3;
-              }).map((month) => <option key={month} value={month}>{formatMonthLabel(month)}</option>)}
-            </select>
-            {monthStatus && <span className="current-month-tag" style={{ whiteSpace: "nowrap" }}>{monthStatus}</span>}
+            {periodTab === "quarterly" ? (() => {
+              const curY = now.getFullYear();
+              const curQ = Math.ceil((now.getMonth() + 1) / 3);
+              const quarters: string[] = [];
+              for (let i = -4; i <= 2; i++) {
+                let q = curQ + i; let y = curY;
+                while (q < 1) { q += 4; y--; }
+                while (q > 4) { q -= 4; y++; }
+                const key = `Q${q} ${y}`;
+                if (!quarters.includes(key)) quarters.push(key);
+              }
+              // Sort chronologically (by ISO month of quarter start) newest first
+              quarters.sort((a, b) => quarterToIsoMonth(b).localeCompare(quarterToIsoMonth(a)));
+              return (
+                <select className="bank-filter-select" style={{ flex: "none" }} value={quarterKeyForMonth(props.month)} onChange={(e) => props.onMonth(quarterToIsoMonth(e.target.value))}>
+                  {quarters.map((q) => <option key={q} value={q}>{q}</option>)}
+                </select>
+              );
+            })() : (
+              <select className="bank-filter-select" style={{ flex: "none" }} value={props.month} onChange={(e) => props.onMonth(e.target.value)}>
+                {props.months.filter((m) => {
+                  if (!/^\d{4}-\d{2}$/.test(m)) return false;
+                  const cur = now.getFullYear() * 12 + now.getMonth();
+                  const [y, mo] = m.split("-").map(Number);
+                  const val = y * 12 + (mo - 1);
+                  return val >= cur - 12 && val <= cur + 3;
+                }).sort((a, b) => b.localeCompare(a)).map((month) => <option key={month} value={month}>{formatMonthLabel(month)}</option>)}
+              </select>
+            )}
+            {monthStatus && periodTab === "monthly" && <span className="current-month-tag" style={{ whiteSpace: "nowrap" }}>{monthStatus}</span>}
           </div>
           <label className="check-label" style={{ fontSize: "12px", whiteSpace: "nowrap", flexShrink: 0 }}>
             <input type="checkbox" checked={props.filters.showInactive} onChange={(e) => props.onFilters({ ...props.filters, showInactive: e.target.checked })} style={{ accentColor: "var(--brick)" }} />
@@ -2732,6 +2325,7 @@ function GoalsScreen(props: {
             {!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && goalHasTargets(goal) && <button onClick={() => { setActualEditId(goal.id); setMenuOpenId(null); setMenuPos(null); }}>Enter actual</button>}
             {!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && !goalHasTargets(goal) && <span style={{ display: "block", padding: "8px 12px", fontSize: "12px", color: "var(--text-faint)" }}>Set target first</span>}
             {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && <button onClick={() => { props.onToggleMonth(goal); setMenuOpenId(null); setMenuPos(null); }}>{isMonthlyInactive(goal) ? "Activate for this month" : "Deactivate for this month"}</button>}
+            {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && <button onClick={() => { props.onDelete(goal.id); setMenuOpenId(null); setMenuPos(null); }} style={{ color: "#9B2C2C" }}>Delete goal</button>}
             {(!props.isAdmin && goal.goalTier === "company") && <span style={{ display: "block", padding: "8px 12px", fontSize: "12px", color: "var(--text-faint)" }}>No edits allowed</span>}
           </div>
         );
@@ -2826,6 +2420,7 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, teamEmployees,
   const [draft, setDraft] = useState(goal);
   const [target, setTarget] = useState(actuals[metaKey("target", goal)] != null ? String(actuals[metaKey("target", goal)]) : String(goal.goalValue || ""));
   const [min, setMin] = useState(actuals[metaKey("min", goal)] != null ? String(actuals[metaKey("min", goal)]) : String(goal.minValue || ""));
+  const [weightVal, setWeightVal] = useState(goal.weight != null ? String(goal.weight) : "");
 
   // Required fields that must be explicitly chosen — blank ("" or "__unset__") on new goals
   const [tierVal, setTierVal] = useState<string>(isNew ? "" : goal.goalTier);
@@ -2857,6 +2452,7 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, teamEmployees,
   if (!lowerVal) missing.push("Lower is Better");
   if (!cappedVal) missing.push("Capped");
   if (!periodVal) missing.push("Period Type");
+  if (!weightVal || isNaN(Number(weightVal)) || Number(weightVal) <= 0) missing.push("Weight");
   const canSave = missing.length === 0;
 
   async function handleSave() {
@@ -2871,6 +2467,7 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, teamEmployees,
       lowerBetter: lowerVal === "true",
       capped: cappedVal as "yes" | "no",
       periodType: periodVal as "monthly" | "quarterly",
+      weight: Number(weightVal) || undefined,
     };
     const savedGoal = await onSave(finalGoal);
     if (savedGoal === null) return;
@@ -2954,6 +2551,10 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, teamEmployees,
             <option value="quarterly">Quarterly</option>
           </select>
         </div>
+        <div className="field">
+          <label>Weight %<span style={reqStyle}>*</span></label>
+          <input type="number" min="0" max="100" step="0.1" value={weightVal} onChange={(e) => setWeightVal(e.target.value)} placeholder="e.g. 25" />
+        </div>
       </div>
       {!canSave && missing.length > 0 && (
         <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: 8, fontFamily: "var(--sans)" }}>
@@ -3012,13 +2613,8 @@ function ScorecardsScreen(props: {
   const monthEmployees = monthRaw.length > 0 ? monthRaw : (singleMonthMode ? latestEmployees : []);
   const teamEmployees = scopedEmployeesForProfile(monthEmployees, props.profile, props.allEmployees);
 
-  const earningsPeriodKey = (() => {
-    if (!selectedMonth) return "";
-    const [y, m] = selectedMonth.split("-").map(Number);
-    if (!y || !m) return "";
-    return `${m === 12 ? y + 1 : y}-${String(m === 12 ? 1 : m + 1).padStart(2, "0")}`;
-  })();
-  const earningsUpload = props.rippling[earningsPeriodKey] || [];
+  // Earnings (hours + gross pay) come from the upload tagged to the same month being scored
+  const earningsUpload = props.rippling[selectedMonth] || [];
   function withActualEarnings(emp: Employee): Employee {
     const src = earningsUpload.find((e) => e.name === emp.name);
     return { ...emp, grossEarnings: src?.grossEarnings, hoursWorked: src?.hoursWorked };
@@ -3044,7 +2640,7 @@ function ScorecardsScreen(props: {
   function goalsForEmployee(employee: Employee, actuals: Record<string, number | null> = periodActuals): Goal[] {
     return props.allGoals.filter((goal) => {
       if (actuals["__monthly_inactive__" + actualKey(goal)]) return false;
-      if (goal.goalTier === "company") return true;
+      if (goal.goalTier === "company") return false;
       if (goal.goalTier === "department") return goal.department === employee.department && (!goal.location || goal.location === employee.location);
       return goal.role === employee.role && goal.department === employee.department && (!goal.location || goal.location === employee.location);
     });
@@ -3267,9 +2863,7 @@ function ScorecardsScreen(props: {
                   (filterLocations.length === 0 || filterLocations.includes(e.location))
                 )
                 .sort((a, b) => a.name.localeCompare(b.name));
-              const [my, mm] = m.split("-").map(Number);
-              const earningsKey = my && mm ? `${mm === 12 ? my + 1 : my}-${String(mm === 12 ? 1 : mm + 1).padStart(2, "0")}` : "";
-              const mEarningsUpload = props.rippling[earningsKey] || [];
+              const mEarningsUpload = props.rippling[m] || [];
               const mActuals = {
                 ...(props.allActuals[mLabel] || {}),
                 ...(props.allActuals[quarterKeyForMonth(m)] || {}),
@@ -3334,6 +2928,9 @@ function LiveScorecardCard({
   const [goalIds, setGoalIds] = useState<string[]>(() => baseGoals.filter((g) => globalPeriodType === "quarterly" ? g.periodType === "quarterly" : g.periodType !== "quarterly").map((g) => g.id));
   const [indActuals, setIndActuals] = useState<Record<string, string>>({});
   const [weightOverrides, setWeightOverrides] = useState<Record<string, string>>({});
+  const [goalMenuOpen, setGoalMenuOpen] = useState<string | null>(null);
+  const [goalMenuPos, setGoalMenuPos] = useState<{ top: number; right: number } | null>(null);
+  const [goalMenuWeight, setGoalMenuWeight] = useState<string>("");
 
   // Sync period type when the global toggle changes
   useEffect(() => {
@@ -3368,7 +2965,7 @@ function LiveScorecardCard({
   }, [isoMonth, employee, allRippling]);
 
   function isGoalApplicable(goal: Goal): boolean {
-    if (goal.goalTier === "company") return true;
+    if (goal.goalTier === "company") return false;
     if (goal.goalTier === "department") return goal.department === employee.department && (!goal.location || goal.location === employee.location);
     // Individual: match by employeeName if set (new), else fall back to role match (legacy)
     if (goal.employeeName) return goal.employeeName === employee.name;
@@ -3434,7 +3031,7 @@ function LiveScorecardCard({
   const thC: React.CSSProperties = { ...thS, textAlign: "center" };
 
   return (
-    <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", background: "var(--surface)" }}>
+    <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", background: "var(--surface)" }} onClick={() => { if (goalMenuOpen) { setGoalMenuOpen(null); setGoalMenuPos(null); } }}>
       <div onClick={() => setOpen(!open)} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "13px 16px", cursor: "pointer" }} className="sc-card-head">
         <div style={{ fontSize: "12px", color: "var(--text-muted)", transition: "transform 0.2s", flexShrink: 0, transform: open ? "rotate(90deg)" : "none" }}>▶</div>
         <div style={{ flex: 1, minWidth: 0 }}>
@@ -3499,7 +3096,7 @@ function LiveScorecardCard({
                     <th style={thC}>Weight</th>
                     <th style={thC}>Achieve%</th>
                     <th style={thC}>Est. Bonus $</th>
-                    <th style={{ ...thC, width: "28px" }}></th>
+                    <th style={{ ...thC, width: "36px" }}></th>
                   </tr>
                 </thead>
                 <tbody>
@@ -3535,18 +3132,8 @@ function LiveScorecardCard({
                             </span>
                           )}
                         </td>
-                        <td style={{ padding: "4px 6px", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
-                          <div style={{ display: "flex", alignItems: "center", justifyContent: "center", gap: "2px" }}>
-                            <input
-                              aria-label={`Weight for ${goal.name}`}
-                              type="number"
-                              className="actual-inline-input"
-                              value={weightOverrides[goal.name] ?? goal.scWeight.toFixed(1)}
-                              onChange={(e) => setWeightOverrides((prev) => ({ ...prev, [goal.name]: e.target.value }))}
-                              style={{ width: "52px" }}
-                            />
-                            <span style={{ fontSize: "10px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>%</span>
-                          </div>
+                        <td style={{ padding: "4px 6px", textAlign: "center", fontFamily: "var(--mono)", fontSize: "11px" }}>
+                          {(weightOverrides[goal.name] != null ? Number(weightOverrides[goal.name]) : goal.scWeight).toFixed(1)}%
                         </td>
                         <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center", fontWeight: 700 }}>
                           {sc?.actual != null
@@ -3556,13 +3143,23 @@ function LiveScorecardCard({
                             : <span style={{ color: "var(--text-faint)" }}>—</span>}
                         </td>
                         <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{formatCurrency(sc?.bonusContribution ?? 0)}</td>
-                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
+                        <td style={{ padding: "4px 6px", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
                           <button
-                            className="sc-del-btn"
-                            title="Remove goal"
-                            onClick={(e) => { e.stopPropagation(); setGoalIds((prev) => prev.filter((id) => id !== goal.id)); }}
-                            style={{ border: "none", background: "none", color: "#9B2C2C", fontSize: "14px", cursor: "pointer", padding: 0, lineHeight: 1, opacity: 0.6 }}
-                          >✕</button>
+                            title="Goal options"
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              if (goalMenuOpen === goal.id) {
+                                setGoalMenuOpen(null);
+                                setGoalMenuPos(null);
+                              } else {
+                                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+                                setGoalMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
+                                setGoalMenuOpen(goal.id);
+                                setGoalMenuWeight(weightOverrides[goal.name] ?? goal.scWeight.toFixed(1));
+                              }
+                            }}
+                            style={{ border: "none", background: "none", color: "var(--text-muted)", fontSize: "16px", cursor: "pointer", padding: "0 2px", lineHeight: 1, fontWeight: 700, letterSpacing: "0.05em" }}
+                          >⋮</button>
                         </td>
                       </tr>
                     );
@@ -3621,6 +3218,55 @@ function LiveScorecardCard({
           </div>
         </>
       )}
+      {goalMenuOpen && goalMenuPos && (() => {
+        const menuGoal = currentGoals.find((g) => g.id === goalMenuOpen);
+        if (!menuGoal) return null;
+        return (
+          <div
+            className="row-menu"
+            style={{ position: "fixed", top: goalMenuPos.top, right: goalMenuPos.right, zIndex: 1000 }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div style={{ padding: "8px 12px 4px", fontSize: "10px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)", borderBottom: "1px solid var(--border)", marginBottom: "4px" }}>
+              {menuGoal.name}
+            </div>
+            <div style={{ padding: "6px 12px" }}>
+              <label style={{ fontSize: "11px", fontWeight: 600, display: "block", marginBottom: "4px" }}>Weight %</label>
+              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.1"
+                  className="actual-inline-input"
+                  value={goalMenuWeight}
+                  onChange={(e) => setGoalMenuWeight(e.target.value)}
+                  style={{ width: "64px" }}
+                  autoFocus
+                />
+                <button
+                  style={{ fontSize: "11px", padding: "3px 10px", background: "var(--brick)", color: "#fff", border: "none", borderRadius: "var(--radius-sm)", cursor: "pointer", fontFamily: "var(--sans)", fontWeight: 600 }}
+                  onClick={() => {
+                    setWeightOverrides((prev) => ({ ...prev, [menuGoal.name]: goalMenuWeight }));
+                    setGoalMenuOpen(null);
+                    setGoalMenuPos(null);
+                  }}
+                >Apply</button>
+              </div>
+            </div>
+            <div style={{ borderTop: "1px solid var(--border)", marginTop: "4px" }}>
+              <button
+                style={{ display: "block", width: "100%", padding: "7px 12px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "12px", color: "#9B2C2C" }}
+                onClick={() => {
+                  setGoalIds((prev) => prev.filter((id) => id !== goalMenuOpen));
+                  setGoalMenuOpen(null);
+                  setGoalMenuPos(null);
+                }}
+              >Remove goal</button>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 }
@@ -4222,7 +3868,6 @@ function RipplingScreen(props: {
   month: string;
   preview: Employee[];
   saved: Record<string, Employee[]>;
-  onMonth: (value: string) => void;
   onPreview: (employees: Employee[]) => void;
   onSave: () => void;
   onClear: () => void;
@@ -4232,45 +3877,22 @@ function RipplingScreen(props: {
     props.onPreview(parseRipplingEmployees(await file.text()));
   }
 
-  const today = new Date();
-  const currentMonthVal = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
-
-  function uploadBlocked(month: string): string | null {
-    if (!month) return null;
-    const [y, m] = month.split("-").map(Number);
-    const monthStart = new Date(y, m - 1, 1);
-    const monthEnd = new Date(y, m, 0);
-    if (monthStart > today) return "Cannot upload data for a future month.";
-    if (monthEnd < today) {
-      const daysSince = Math.floor((today.getTime() - monthEnd.getTime()) / 86400000);
-      if (daysSince > 7) return `Upload window closed — ${formatMonthLabel(month)} ended ${daysSince} days ago (limit is 7).`;
-    }
-    return null;
-  }
-
-  const blockReason = uploadBlocked(props.month);
   const savedEmployees = props.saved[props.month] || [];
   return (
     <div className="screen active">
       <section>
         <div className="section-title">Upload Rippling CSV</div>
-        <div className="field">
-          <label>Period</label>
-          <input type="month" value={props.month} max={currentMonthVal} onChange={(event) => props.onMonth(event.target.value)} />
+        <div className="info-banner" style={{ display: "block" }}>
+          Uploading employee data for <strong>{formatMonthLabel(props.month)}</strong>. Export the previous month's completed payroll from Rippling and drop it below.
         </div>
-        {blockReason && (
-          <div className="info-banner" style={{ display: "block", background: "#fff3f3", borderColor: "#f5c0c0", color: "#9B2C2C" }}>{blockReason}</div>
-        )}
-        {!blockReason && (
-          <label id="rippling-drop-zone">
-            <span className="drop-icon">CSV</span>
-            <strong>Drop your Rippling CSV here</strong>
-            <small>or click to browse - Active_Employees_with_Hourly_and_Annual_Base_Pay.csv</small>
-            <input type="file" accept=".csv" hidden onChange={(event) => handleFile(event.target.files?.[0])} />
-          </label>
-        )}
+        <label id="rippling-drop-zone">
+          <span className="drop-icon">CSV</span>
+          <strong>Drop your Rippling CSV here</strong>
+          <small>or click to browse — Active_Employees_with_Hourly_and_Annual_Base_Pay.csv</small>
+          <input type="file" accept=".csv" hidden onChange={(event) => handleFile(event.target.files?.[0])} />
+        </label>
       </section>
-      {!!props.preview.length && !blockReason && <EmployeeTable title="Imported employees" employees={props.preview} action={<button className="submit-btn" onClick={props.onSave}>Save to App</button>} />}
+      {!!props.preview.length && <EmployeeTable title="Imported employees" employees={props.preview} action={<button className="submit-btn" onClick={props.onSave}>Save to App</button>} />}
       <EmployeeTable title="Saved employee data" employees={savedEmployees} action={<button onClick={props.onClear}>Clear all</button>} />
     </div>
   );
@@ -4303,8 +3925,7 @@ function TodosScreen({
   onSaveTargetPair,
   onSaveCurrentTargetPair,
   onSaveActual,
-  onRipplingUpload,
-  onBuildEmployee
+  onRipplingUpload
 }: {
   workMonth: string;
   bankMonth: string;
@@ -4318,7 +3939,6 @@ function TodosScreen({
   onSaveCurrentTargetPair: (goal: Goal, target: string, min: string) => void;
   onSaveActual: (goal: Goal, value: string) => void;
   onRipplingUpload: (employees: Employee[]) => void;
-  onBuildEmployee: () => void;
 }) {
   const [showCompletedAdmin, setShowCompletedAdmin] = useState(false);
   const [showCompletedTargets, setShowCompletedTargets] = useState(false);

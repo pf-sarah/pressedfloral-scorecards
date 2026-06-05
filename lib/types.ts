@@ -21,6 +21,7 @@ export type Goal = {
   name: string;
   goalValue: number;
   minValue: number;
+  weight?: number;       // default weight (%) for this goal on scorecards
   lowerBetter: boolean;
   capped: "yes" | "no";
   capPct: number;
