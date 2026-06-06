@@ -1,4 +1,48 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@theme inline {
+  --color-background: var(--bg);
+  --color-foreground: var(--text);
+  --color-card: var(--surface);
+  --color-card-foreground: var(--text);
+  --color-popover: var(--surface);
+  --color-popover-foreground: var(--text);
+  --color-primary: var(--brick);
+  --color-primary-foreground: #ffffff;
+  --color-secondary: var(--surface2);
+  --color-secondary-foreground: var(--text);
+  --color-muted: var(--surface2);
+  --color-muted-foreground: var(--text-muted);
+  --color-accent: var(--brick-light);
+  --color-accent-foreground: var(--brick);
+  --color-destructive: #9b1c1c;
+  --color-destructive-foreground: #ffffff;
+  --color-border: var(--border);
+  --color-input: var(--border-strong);
+  --color-ring: var(--taupe);
+
+  --color-sidebar: var(--surface);
+  --color-sidebar-foreground: var(--text);
+  --color-sidebar-primary: var(--brick);
+  --color-sidebar-primary-foreground: #ffffff;
+  --color-sidebar-accent: var(--brick-light);
+  --color-sidebar-accent-foreground: var(--brick);
+  --color-sidebar-border: var(--border);
+  --color-sidebar-ring: var(--taupe);
+
+  --font-sans: 'Outfit', ui-sans-serif, system-ui, sans-serif;
+  --radius-lg: var(--radius);
+  --radius-md: var(--radius-sm);
+  --radius-sm: 6px;
+}
+
+@layer base {
+  *, *::before, *::after { border-color: var(--border); }
+  /* Reset lives in @layer base so Tailwind/shadcn utility classes (px-*, py-*, etc.)
+     win the cascade. An unlayered `* { padding: 0 }` silently overrides them. */
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+}
 
 :root {
       --bg: #f8f6f2;
@@ -22,25 +66,12 @@
       --radius: 12px;
       --radius-sm: 8px;
     }
-    * { box-sizing: border-box; margin: 0; padding: 0; }
     input[type=number]::-webkit-inner-spin-button, input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
     input[type=number] { -moz-appearance: textfield; }
     body { font-family: var(--sans); background: var(--bg); color: var(--text); min-height: 100vh; }
 
-    /* ── Header ── */
-    /* ── Sidebar layout ── */
-    body { display: flex; min-height: 100vh; }
-    #sidebar { width: 168px; min-width: 168px; background: var(--surface); border-right: 1.5px solid var(--border); display: flex; flex-direction: column; padding: 0; position: fixed; top: 0; left: 0; height: 100vh; z-index: 100; overflow-y: auto; }
-    #sidebar-header { padding: 16px 14px 12px; border-bottom: 1.5px solid var(--border); }
-    #sidebar-header h1 { font-size: 13px; font-weight: 700; color: var(--brick); letter-spacing: -0.3px; line-height: 1.3; }
-    #sidebar-header p { font-size: 10px; color: var(--text-muted); margin-top: 3px; font-family: var(--mono); }
-    #sidebar-nav { padding: 8px 6px; flex: 1; }
-    .nav-item { display: flex; align-items: center; gap: 8px; padding: 7px 8px; border-radius: var(--radius-sm); cursor: pointer; font-size: 12px; font-family: var(--sans); font-weight: 500; color: var(--text-muted); transition: all 0.15s; white-space: nowrap; }
-    .nav-item:hover { background: var(--surface2); color: var(--text); }
-    .nav-item.active { background: var(--brick-light); color: var(--brick); font-weight: 600; }
-    .nav-item .nav-icon { font-size: 13px; width: 16px; text-align: center; flex-shrink: 0; }
-    #app-main { margin-left: 168px; flex: 1; min-width: 0; }
-    header { background: #ffffff; padding: 16px 32px; display: flex; align-items: center; justify-content: space-between; border-bottom: 1.5px solid var(--border); }
+    /* ── Sidebar/header are owned by the shadcn AppShell component (components/AppShell.tsx).
+       Legacy #sidebar / .nav-item / #app-main rules removed. ── */
     .header-left h1 { font-size: 16px; font-weight: 600; color: var(--text); }
     .header-left p { font-size: 11px; color: var(--text-muted); margin-top: 2px; font-family: var(--mono); }
     main { max-width: 900px; margin: 0 auto; padding: 28px 32px 60px; }
@@ -53,11 +84,15 @@
     .fields-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 12px; }
     .field { display: flex; flex-direction: column; gap: 5px; }
     .field.half { grid-column: span 2; }
-    label { font-size: 11px; font-family: var(--mono); color: var(--text-muted); letter-spacing: 0.06em; font-weight: 500; text-transform: uppercase; }
-    input, select { font-family: var(--sans); font-size: 14px; font-weight: 500; color: var(--text); background: var(--bg); border: 1.5px solid var(--border-strong); border-radius: var(--radius-sm); padding: 9px 12px; width: 100%; outline: none; transition: border-color 0.15s, background 0.15s; }
-    input:focus, select:focus { border-color: var(--taupe); background: #fff; box-shadow: 0 0 0 3px rgba(186,166,150,0.2); }
-    input::placeholder { color: var(--text-faint); font-weight: 400; }
-    input.error, select.error { border-color: var(--brick); background: var(--brick-light); }
+    /* Legacy native-control styling. Scoped with :not([data-slot]) so shadcn form
+       primitives (Input/Select/Label, which set data-slot=…) opt out and use their
+       own token-driven classes. This lets us migrate screen-by-screen without a
+       global element rule clobbering the shadcn components. */
+    label:not([data-slot]) { font-size: 11px; font-family: var(--mono); color: var(--text-muted); letter-spacing: 0.06em; font-weight: 500; text-transform: uppercase; }
+    input:not([data-slot]), select:not([data-slot]) { font-family: var(--sans); font-size: 14px; font-weight: 500; color: var(--text); background: var(--bg); border: 1.5px solid var(--border-strong); border-radius: var(--radius-sm); padding: 9px 12px; width: 100%; outline: none; transition: border-color 0.15s, background 0.15s; }
+    input:not([data-slot]):focus, select:not([data-slot]):focus { border-color: var(--taupe); background: #fff; box-shadow: 0 0 0 3px rgba(186,166,150,0.2); }
+    input:not([data-slot])::placeholder { color: var(--text-faint); font-weight: 400; }
+    input:not([data-slot]).error, select:not([data-slot]).error { border-color: var(--brick); background: var(--brick-light); }
 
     /* ── Goal cards ── */
     .goal-card { background: var(--surface2); border: 1.5px solid var(--border); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 10px; }
@@ -191,13 +226,6 @@ button {
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-#sidebar-nav button.nav-item {
-  border: 0;
-  background: transparent;
-  width: 100%;
-  text-align: left;
 }
 
 .nav-section {
@@ -952,17 +980,6 @@ button {
 }
 
 @media (max-width: 760px) {
-  body {
-    display: block;
-  }
-  #sidebar {
-    position: relative;
-    width: 100%;
-    height: auto;
-  }
-  #app-main {
-    margin-left: 0;
-  }
   .landing-grid {
     grid-template-columns: 1fr;
   }
