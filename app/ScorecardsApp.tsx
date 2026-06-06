@@ -51,14 +51,18 @@ import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
 import { Sheet, SheetClose, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Switch } from "@/components/ui/switch";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
   ArrowDownUp,
   CheckCircle2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
+  Circle,
   Download,
   FileText,
   History,
@@ -75,6 +79,7 @@ import {
   Upload,
   UserCog,
   Users as UsersIcon,
+  Wrench,
   X,
 } from "lucide-react";
 
@@ -1369,22 +1374,47 @@ function AuthScreen(props: {
   onSignIn: () => void;
 }) {
   return (
-    <div id="auth-overlay">
-      <div className="auth-card">
-        <div className="auth-title">Pressed Floral</div>
-        <div className="auth-subtitle">Scorecards</div>
-        {props.fixtureMode && <div className="info-banner" style={{ display: "block" }}>Fixture mode signs in automatically. Reload if you were signed out.</div>}
-        {props.error && <div id="auth-error">{props.error}</div>}
-        <div className="field">
-          <label>Email</label>
-          <input value={props.email} onChange={(event) => props.onEmail(event.target.value)} placeholder="you@pressedfloral.com" type="email" />
-        </div>
-        <div className="field">
-          <label>Password</label>
-          <input value={props.password} onChange={(event) => props.onPassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && props.onSignIn()} placeholder="Password" type="password" />
-        </div>
-        <button className="submit-btn" onClick={props.onSignIn}>Sign In</button>
-      </div>
+    <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-sm shadow-xl">
+        <CardHeader className="items-center gap-1 text-center">
+          <div className="text-[20px] font-semibold tracking-tight text-primary">Pressed Floral</div>
+          <div className="text-[12px] text-muted-foreground" style={{ fontFamily: "var(--mono)" }}>Scorecards</div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {props.fixtureMode && (
+            <div className="rounded-md border border-border bg-muted/50 px-3 py-2 text-[12px] leading-relaxed text-muted-foreground">
+              Fixture mode signs in automatically. Reload if you were signed out.
+            </div>
+          )}
+          {props.error && (
+            <div className="rounded-md border border-[#9B2C2C]/20 bg-[#9B2C2C]/10 px-3 py-2 text-[12.5px] text-[#9B2C2C]">
+              {props.error}
+            </div>
+          )}
+          <div className="space-y-1.5">
+            <Label htmlFor="auth-email">Email</Label>
+            <Input
+              id="auth-email"
+              type="email"
+              value={props.email}
+              onChange={(event) => props.onEmail(event.target.value)}
+              placeholder="you@pressedfloral.com"
+            />
+          </div>
+          <div className="space-y-1.5">
+            <Label htmlFor="auth-password">Password</Label>
+            <Input
+              id="auth-password"
+              type="password"
+              value={props.password}
+              onChange={(event) => props.onPassword(event.target.value)}
+              onKeyDown={(event) => event.key === "Enter" && props.onSignIn()}
+              placeholder="••••••••"
+            />
+          </div>
+          <Button className="w-full" onClick={props.onSignIn}>Sign in</Button>
+        </CardContent>
+      </Card>
     </div>
   );
 }
@@ -1494,11 +1524,6 @@ function PersonalScorecardPanel({
       : null,
   [empWithEarnings, liveGoals, currentPeriod, isQuarterly]);
 
-  const thS: React.CSSProperties = { padding: "5px 10px", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", textAlign: "left", borderBottom: "1.5px solid var(--border)", whiteSpace: "nowrap", background: "var(--surface2)" };
-  const thC: React.CSSProperties = { ...thS, textAlign: "center" };
-  const faint = { color: "var(--text-faint)" } as React.CSSProperties;
-  const navBtn = (off: boolean): React.CSSProperties => ({ border: "none", background: "none", cursor: off ? "default" : "pointer", color: off ? "var(--text-faint)" : "var(--text)", fontSize: "18px", padding: "0 6px", lineHeight: 1, flexShrink: 0 });
-
   // What employee/goals/metrics to render
   const displayEmp = submitted
     ? { name: submitted.employeeName, role: submitted.role, department: submitted.department, location: submitted.location, payType: submitted.payType, hourlyRate: submitted.hourlyRate, hours: submitted.hours, annualPay: submitted.annualPay }
@@ -1519,86 +1544,123 @@ function PersonalScorecardPanel({
         return { id: g.id, name: g.name, goalTier: g.goalTier, location: g.location, department: g.department, target: hasTarget ? g.scTarget : null, min: hasTarget ? g.scMin : null, actual: g.scActual, weight: g.scWeight, achievement: calc?.achievement ?? null, bonusContribution: calc?.bonusContribution ?? null, metMin: calc?.metMin ?? null, hasTarget };
       });
 
+  const dash = <span className="text-muted-foreground/40">—</span>;
+
   return (
-    <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", background: "var(--surface)" }}>
-      {/* Navigation bar */}
-      <div style={{ display: "flex", alignItems: "center", gap: "4px", padding: "10px 14px", background: "var(--surface2)", borderBottom: "1px solid var(--border)" }}>
-        <button style={navBtn(safeIdx === 0)} disabled={safeIdx === 0} onClick={() => setIdx(safeIdx - 1)}>◀</button>
-        <div style={{ flex: 1, textAlign: "center", fontWeight: 700, fontSize: "13px" }}>{currentPeriod}</div>
-        <button style={navBtn(safeIdx === sortedPeriods.length - 1)} disabled={safeIdx === sortedPeriods.length - 1} onClick={() => setIdx(safeIdx + 1)}>▶</button>
-        <span style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "99px", fontWeight: 700, fontFamily: "var(--mono)", background: submitted ? "#e8f5e2" : "#f0ece6", color: submitted ? "#2D6B1A" : "#7a7268", flexShrink: 0, marginLeft: "6px" }}>
-          {submitted ? "SUBMITTED" : "PENDING"}
-        </span>
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
+      {/* Period navigator */}
+      <div className="flex items-center gap-1 border-b border-border bg-muted/30 px-3 py-2">
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7 text-muted-foreground"
+          disabled={safeIdx === 0}
+          onClick={() => setIdx(safeIdx - 1)}
+          aria-label="Previous period"
+        >
+          <ChevronLeft className="size-4" />
+        </Button>
+        <div className="flex-1 text-center text-[13px] font-semibold tabular-nums text-foreground">{currentPeriod}</div>
+        <Button
+          variant="ghost"
+          size="icon"
+          className="size-7 text-muted-foreground"
+          disabled={safeIdx === sortedPeriods.length - 1}
+          onClick={() => setIdx(safeIdx + 1)}
+          aria-label="Next period"
+        >
+          <ChevronRight className="size-4" />
+        </Button>
+        <Badge
+          variant={submitted ? "secondary" : "outline"}
+          className={cn(
+            "ml-1.5 font-medium",
+            submitted && "border-transparent bg-[#2D6B1A]/10 text-[#2D6B1A]"
+          )}
+        >
+          {submitted ? "Submitted" : "Pending"}
+        </Badge>
       </div>
 
       {/* Employee info */}
       {displayEmp && (
-        <div style={{ padding: "10px 16px", borderBottom: "1px solid var(--border)" }}>
-          <div style={{ fontSize: "13px", fontWeight: 700 }}>{displayEmp.name}</div>
-          <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "2px" }}>
+        <div className="border-b border-border px-4 py-3">
+          <div className="text-[14px] font-semibold text-foreground">{displayEmp.name}</div>
+          <div className="mt-0.5 text-[12px] text-muted-foreground">
             {displayEmp.role}{displayEmp.department ? ` · ${displayEmp.department}` : ""}{displayEmp.location ? ` · ${displayEmp.location}` : ""}
           </div>
         </div>
       )}
 
       {/* Pay & metrics strip */}
-      <div style={{ display: "flex", gap: "20px", padding: "10px 16px", background: "var(--surface2)", borderBottom: "1px solid var(--border)", flexWrap: "wrap" }}>
-        {displayEmp?.payType === "hourly" && displayEmp.hourlyRate && (
-          <div><div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>HOURLY RATE</div><div style={{ fontSize: "13px", fontWeight: 700 }}>{formatCurrency(displayEmp.hourlyRate)}</div></div>
-        )}
-        {displayEmp?.payType === "salary" && displayEmp.annualPay && (
-          <div><div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>ANNUAL PAY</div><div style={{ fontSize: "13px", fontWeight: 700 }}>{formatCurrency(displayEmp.annualPay)}</div></div>
-        )}
+      <div className="flex flex-wrap items-start gap-x-7 gap-y-3 border-b border-border bg-muted/30 px-4 py-3">
+        {displayEmp?.payType === "hourly" && displayEmp.hourlyRate ? (
+          <PersonalStat label="Hourly rate" value={formatCurrency(displayEmp.hourlyRate)} />
+        ) : null}
+        {displayEmp?.payType === "salary" && displayEmp.annualPay ? (
+          <PersonalStat label="Annual pay" value={formatCurrency(displayEmp.annualPay)} />
+        ) : null}
         {displayMetrics ? (
           <>
-            <div><div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>BASE EARNINGS</div><div style={{ fontSize: "13px", fontWeight: 700 }}>{formatCurrency(displayMetrics.earnings)}</div></div>
-            {displayMetrics.hours ? <div><div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>HOURS</div><div style={{ fontSize: "13px", fontWeight: 700 }}>{(displayMetrics.hours as number).toFixed(2)}</div></div> : null}
-            <div><div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>ACHIEVEMENT</div><div style={{ fontSize: "13px", fontWeight: 700, color: displayMetrics.achievement >= 100 ? "#2D6B1A" : "var(--brick)" }}>{displayMetrics.achievement.toFixed(1)}%{displayMetrics.capped ? " cap" : ""}</div></div>
-            <div><div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>BONUS</div><div style={{ fontSize: "13px", fontWeight: 700, color: "var(--brick)" }}>{formatCurrency(displayMetrics.bonus)}</div></div>
+            <PersonalStat label="Base earnings" value={formatCurrency(displayMetrics.earnings)} />
+            {displayMetrics.hours ? (
+              <PersonalStat label="Hours" value={(displayMetrics.hours as number).toFixed(2)} />
+            ) : null}
+            <PersonalStat
+              label="Achievement"
+              value={`${displayMetrics.achievement.toFixed(1)}%${displayMetrics.capped ? " cap" : ""}`}
+              valueClassName={displayMetrics.achievement >= 100 ? "text-[#2D6B1A]" : "text-primary"}
+            />
+            <PersonalStat label="Bonus" value={formatCurrency(displayMetrics.bonus)} valueClassName="text-primary" />
           </>
         ) : (
-          <div style={{ fontSize: "11px", color: "var(--text-muted)", alignSelf: "center" }}>Earnings not available for this period yet.</div>
+          <div className="self-center text-[12px] text-muted-foreground">Earnings not available for this period yet.</div>
         )}
       </div>
 
       {/* Goals table */}
       {displayGoals.length > 0 ? (
-        <div style={{ overflowX: "auto" }}>
-          <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
-            <thead>
-              <tr>
-                <th style={thS}>Type</th>
-                <th style={thS}>Goal</th>
-                <th style={thC}>Target</th>
-                <th style={thC}>Min</th>
-                <th style={thC}>Actual</th>
-                <th style={thC}>Weight</th>
-                <th style={thC}>Achieve%</th>
-                <th style={thC}>Bonus $</th>
-              </tr>
-            </thead>
-            <tbody>
-              {displayGoals.map((g) => (
-                <tr key={g.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                  <td style={{ padding: "5px 10px" }}><TierBadge tier={g.goalTier} /></td>
-                  <td style={{ padding: "5px 10px", fontWeight: 600, minWidth: "140px" }}>{g.name}<GoalScopeTags location={g.location} department={g.department} /></td>
-                  <td style={{ padding: "5px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{g.target != null ? formatNumber(g.target) : <span style={faint}>—</span>}</td>
-                  <td style={{ padding: "5px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{g.min != null ? formatNumber(g.min) : <span style={faint}>—</span>}</td>
-                  <td style={{ padding: "5px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{g.actual != null ? formatNumber(g.actual) : <span style={faint}>—</span>}</td>
-                  <td style={{ padding: "5px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{g.weight.toFixed(1)}%</td>
-                  <td style={{ padding: "5px 10px", fontFamily: "var(--mono)", textAlign: "center", fontWeight: 700 }}>
-                    {g.achievement != null && g.actual != null
-                      ? (g.metMin ? <span style={{ color: g.achievement >= 100 ? "#2D6B1A" : "var(--brick)" }}>{g.achievement.toFixed(1)}%</span> : <span style={{ color: "#9B2C2C" }}>Below min</span>)
-                      : <span style={faint}>—</span>}
-                  </td>
-                  <td style={{ padding: "5px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{g.bonusContribution != null ? formatCurrency(g.bonusContribution) : <span style={faint}>—</span>}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+        <Table className="text-[12px]">
+          <TableHeader className="bg-muted/40 [&_th]:h-9 [&_th]:px-2.5 [&_th]:text-[10px] [&_th]:font-medium [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
+            <TableRow className="hover:bg-transparent">
+              <TableHead>Type</TableHead>
+              <TableHead>Goal</TableHead>
+              <TableHead className="text-right">Target</TableHead>
+              <TableHead className="text-right">Min</TableHead>
+              <TableHead className="text-right">Actual</TableHead>
+              <TableHead className="text-right">Weight</TableHead>
+              <TableHead className="text-right">Achieve</TableHead>
+              <TableHead className="text-right">Bonus</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody className="[&_td]:px-2.5 [&_td]:py-1.5">
+            {displayGoals.map((g) => (
+              <TableRow key={g.id}>
+                <TableCell><TierBadge tier={g.goalTier} /></TableCell>
+                <TableCell className="font-medium text-foreground">
+                  <span className="inline-flex flex-wrap items-center gap-1.5">
+                    {g.name}
+                    <GoalScopeTags location={g.location} department={g.department} />
+                  </span>
+                </TableCell>
+                <TableCell className="text-right tabular-nums">{g.target != null ? formatNumber(g.target) : dash}</TableCell>
+                <TableCell className="text-right tabular-nums">{g.min != null ? formatNumber(g.min) : dash}</TableCell>
+                <TableCell className="text-right tabular-nums">{g.actual != null ? formatNumber(g.actual) : dash}</TableCell>
+                <TableCell className="text-right tabular-nums text-muted-foreground">{g.weight.toFixed(1)}%</TableCell>
+                <TableCell className="text-right font-semibold tabular-nums">
+                  {g.achievement != null && g.actual != null
+                    ? (g.metMin
+                        ? <span className={g.achievement >= 100 ? "text-[#2D6B1A]" : "text-primary"}>{g.achievement.toFixed(1)}%</span>
+                        : <span className="text-[#9B2C2C]">Below min</span>)
+                    : dash}
+                </TableCell>
+                <TableCell className="text-right tabular-nums">{g.bonusContribution != null ? formatCurrency(g.bonusContribution) : dash}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
       ) : (
-        <div style={{ padding: "20px 16px", textAlign: "center", fontSize: "12px", color: "var(--text-muted)" }}>
+        <div className="px-4 py-6 text-center text-[12.5px] text-muted-foreground">
           No goals assigned for this period yet.
         </div>
       )}
@@ -1606,17 +1668,30 @@ function PersonalScorecardPanel({
   );
 }
 
+function PersonalStat({ label, value, valueClassName }: { label: string; value: string; valueClassName?: string }) {
+  return (
+    <div>
+      <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</div>
+      <div className={cn("mt-0.5 text-[13px] font-semibold tabular-nums text-foreground", valueClassName)}>{value}</div>
+    </div>
+  );
+}
+
 
 function MaintenanceScreen() {
   return (
-    <div style={{ minHeight: "100vh", display: "flex", alignItems: "center", justifyContent: "center", background: "var(--bg)", fontFamily: "var(--sans)" }}>
-      <div style={{ textAlign: "center", maxWidth: "400px", padding: "40px 24px" }}>
-        <div style={{ width: "64px", height: "64px", borderRadius: "14px", background: "var(--brick)", display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 24px", fontSize: "28px" }}>🔧</div>
-        <div style={{ fontSize: "22px", fontWeight: 700, color: "var(--text)", marginBottom: "10px" }}>Down for maintenance</div>
-        <div style={{ fontSize: "14px", color: "var(--text-muted)", lineHeight: 1.6 }}>
-          We&rsquo;re making some updates. The app will be back shortly.
+    <div className="flex min-h-screen w-full items-center justify-center bg-background p-6">
+      <div className="max-w-sm text-center">
+        <div className="mx-auto mb-6 flex size-14 items-center justify-center rounded-2xl bg-primary text-primary-foreground">
+          <Wrench className="size-6" />
         </div>
-        <div style={{ marginTop: "32px", fontSize: "12px", color: "var(--text-faint)" }}>Pressed Floral Scorecards</div>
+        <h1 className="text-[20px] font-semibold tracking-tight text-foreground">Down for maintenance</h1>
+        <p className="mx-auto mt-2 max-w-xs text-[13.5px] leading-relaxed text-muted-foreground">
+          We&rsquo;re making some updates. The app will be back shortly.
+        </p>
+        <div className="mt-8 text-[12px] text-muted-foreground/70" style={{ fontFamily: "var(--mono)" }}>
+          Pressed Floral Scorecards
+        </div>
       </div>
     </div>
   );
@@ -1887,136 +1962,140 @@ function UsersScreen(props: {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
   const sortedUsers = [...props.users].sort((a, b) => a.email.localeCompare(b.email));
+  const editingUser = editingId ? sortedUsers.find((u) => u.id === editingId) : undefined;
 
   return (
-    <div className="screen active users-screen">
-      {props.fixtureMode && <div className="info-banner" style={{ display: "block" }}>Fixture mode simulates invites and permission updates locally.</div>}
+    <div className="screen active">
+      {props.fixtureMode && (
+        <div className="mb-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-[12px] text-muted-foreground">
+          Fixture mode simulates invites and permission updates locally.
+        </div>
+      )}
 
-      {/* Maintenance Mode */}
       <section>
-        <div className="section-title" style={{ marginBottom: 12 }}>Maintenance Mode</div>
-        <div style={{ display: "flex", alignItems: "center", gap: "16px", padding: "16px", background: props.maintenanceMode ? "#703c2e" : "var(--surface2)", borderRadius: "var(--radius)", border: `1.5px solid ${props.maintenanceMode ? "#9B2C2C" : "var(--border)"}`, transition: "background 0.2s, border-color 0.2s" }}>
-          <div style={{ flex: 1 }}>
-            <div style={{ fontWeight: 700, fontSize: "14px", color: props.maintenanceMode ? "#fff" : "var(--text)" }}>
-              {props.maintenanceMode ? "🔴 Maintenance mode is ON" : "🟢 App is live"}
-            </div>
-            <div style={{ fontSize: "12px", color: props.maintenanceMode ? "rgba(255,255,255,0.75)" : "var(--text-muted)", marginTop: "3px" }}>
+        <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-primary">Maintenance mode</div>
+        <div className={`flex items-center gap-4 rounded-lg border p-4 transition-colors ${props.maintenanceMode ? "border-destructive/40 bg-destructive/5" : "border-border bg-muted/30"}`}>
+          <span className={`size-2.5 shrink-0 rounded-full ${props.maintenanceMode ? "bg-destructive" : "bg-[var(--sage-dark)]"}`} />
+          <div className="flex-1">
+            <div className="text-[14px] font-semibold text-foreground">{props.maintenanceMode ? "Maintenance mode is on" : "App is live"}</div>
+            <div className="mt-0.5 text-[12px] text-muted-foreground">
               {props.maintenanceMode
                 ? "All non-admin users see a maintenance page. Admins can still access the app normally."
                 : "All users can access the app. Turn this on before making changes that could break things mid-session."}
             </div>
           </div>
-          <button
-            disabled={props.maintenanceLoading}
-            onClick={() => props.onToggleMaintenance(!props.maintenanceMode)}
-            style={{
-              padding: "8px 20px", fontFamily: "var(--sans)", fontSize: "13px", fontWeight: 700,
-              border: "none", borderRadius: "var(--radius-sm)", cursor: props.maintenanceLoading ? "not-allowed" : "pointer",
-              background: props.maintenanceMode ? "#fff" : "var(--brick)",
-              color: props.maintenanceMode ? "#703c2e" : "#fff",
-              opacity: props.maintenanceLoading ? 0.6 : 1,
-              flexShrink: 0
-            }}
-          >
-            {props.maintenanceLoading ? "Saving…" : props.maintenanceMode ? "Turn Off" : "Turn On"}
-          </button>
+          <Switch checked={props.maintenanceMode} onCheckedChange={(c) => props.onToggleMaintenance(c)} disabled={props.maintenanceLoading} aria-label="Toggle maintenance mode" />
         </div>
       </section>
 
       <section>
-        <div className="toolbar-row">
-          <div className="section-title" style={{ margin: 0, borderBottom: "none", paddingBottom: 0 }}>Invite User</div>
-          <button onClick={props.onRefresh} disabled={props.loading}>{props.loading ? "Refreshing..." : "Refresh"}</button>
+        <div className="mb-3 flex items-center justify-between">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-primary">Invite user</div>
+          <Button variant="outline" size="sm" className="text-[12px]" disabled={props.loading} onClick={props.onRefresh}>{props.loading ? "Refreshing…" : "Refresh"}</Button>
         </div>
         <UserPermissionForm
           mode="invite"
           employees={props.employees}
-          submitLabel="Send Invite"
+          submitLabel="Send invite"
           onSubmit={props.onInvite}
         />
       </section>
 
-      <section>
-        <div className="section-title">Current Users</div>
-        <div className="table-wrap">
-          <table className="data-table users-table">
-            <thead>
-              <tr>
-                <th>Email</th>
-                <th>Status</th>
-                <th>Role</th>
-                <th>Scope</th>
-                <th>Last Activity</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {!sortedUsers.length && (
-                <tr><td colSpan={6}>{props.loading ? "Loading users..." : "No users found."}</td></tr>
-              )}
-              {sortedUsers.map((user) => (
-                <React.Fragment key={user.id}>
-                  <tr>
-                    <td>
-                      <strong>{user.email}</strong>
-                      {user.id === props.currentUserId && <span className="user-self-badge">You</span>}
-                      {!user.hasProfile && <span className="user-warning">No profile</span>}
-                    </td>
-                    <td><span className={`user-status ${user.status}`}>{statusLabel(user)}</span></td>
-                    <td>{roleLabel(user.role)}</td>
-                    <td>{scopeSummary(user)}</td>
-                    <td style={{ fontSize: "12px", color: "var(--text-muted)", whiteSpace: "nowrap" }}>
-                      {user.lastSignInAt
-                        ? <>Last sign in<br />{formatTimestamp(user.lastSignInAt)}</>
-                        : user.invitedAt
-                        ? <>Invited<br />{formatTimestamp(user.invitedAt)}</>
-                        : "—"}
-                    </td>
-                    <td className="row-menu-cell" style={{ display: "flex", gap: "6px", alignItems: "center", flexWrap: "wrap" }}>
-                      <button
-                        title="See exactly what this user sees in the app"
-                        style={{ background: "var(--brick-light)", color: "var(--brick)", fontWeight: 600, border: "1.5px solid var(--brick)", borderRadius: "var(--radius-sm)" }}
-                        onClick={() => props.onViewAs(user)}
-                      >
-                        👁 View as
-                      </button>
-                      <button
-                        disabled={resendingId === user.id}
-                        onClick={async () => {
-                          setResendingId(user.id);
-                          await props.onResendInvite(user);
-                          setResendingId(null);
-                        }}
-                      >
-                        {resendingId === user.id ? "Sending…" : "Resend Invite"}
-                      </button>
-                      <button onClick={() => setEditingId(editingId === user.id ? null : user.id)}>{editingId === user.id ? "Close" : "Edit"}</button>
-                    </td>
-                  </tr>
-                  {editingId === user.id && (
-                    <tr className="user-edit-row">
-                      <td colSpan={6}>
-                        <UserPermissionForm
-                          mode="edit"
-                          user={user}
-                          employees={props.employees}
-                          submitLabel="Save User"
-                          onCancel={() => setEditingId(null)}
-                          onSubmit={async (payload) => {
-                            const saved = await props.onUpdate(payload);
-                            if (saved) setEditingId(null);
-                            return saved;
-                          }}
-                        />
-                      </td>
-                    </tr>
-                  )}
-                </React.Fragment>
-              ))}
-            </tbody>
-          </table>
-        </div>
+      <section style={{ padding: 0 }} className="overflow-hidden">
+        <div className="px-4 pb-2.5 pt-4 text-[11px] font-semibold uppercase tracking-wider text-primary">Current users</div>
+        <Table className="text-[12.5px]">
+          <TableHeader className="bg-muted/40 [&_th]:h-9 [&_th]:px-4 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
+            <TableRow className="hover:bg-transparent">
+              <TableHead>Email</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Scope</TableHead>
+              <TableHead>Last activity</TableHead>
+              <TableHead className="w-10" />
+            </TableRow>
+          </TableHeader>
+          <TableBody className="[&_td]:px-4 [&_td]:py-3">
+            {!sortedUsers.length && (
+              <TableRow><TableCell colSpan={6} className="py-6 text-center text-muted-foreground">{props.loading ? "Loading users…" : "No users found."}</TableCell></TableRow>
+            )}
+            {sortedUsers.map((user) => (
+              <React.Fragment key={user.id}>
+                <TableRow>
+                  <TableCell>
+                    <span className="flex flex-wrap items-center gap-1.5">
+                      <span className="font-medium text-foreground">{user.email}</span>
+                      {user.id === props.currentUserId && <Badge variant="secondary" className="font-medium">You</Badge>}
+                      {!user.hasProfile && <Badge variant="outline" className="font-medium text-[#9B2C2C]">No profile</Badge>}
+                    </span>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant={user.status === "active" ? "success" : user.status === "invited" ? "secondary" : "outline"} className="font-medium">
+                      {user.status === "active" ? "Active" : user.status === "invited" ? "Invited" : "Unconfirmed"}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="text-muted-foreground">{roleLabel(user.role)}</TableCell>
+                  <TableCell className="max-w-[200px] truncate text-muted-foreground">{scopeSummary(user)}</TableCell>
+                  <TableCell className="whitespace-nowrap text-[11.5px] text-muted-foreground">
+                    {user.lastSignInAt
+                      ? <>Last sign in<br />{formatTimestamp(user.lastSignInAt)}</>
+                      : user.invitedAt
+                      ? <>Invited<br />{formatTimestamp(user.invitedAt)}</>
+                      : "—"}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <DropdownMenu>
+                      <DropdownMenuTrigger aria-label="User actions" className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=open]:bg-accent data-[state=open]:text-foreground">
+                        <MoreHorizontal className="size-4" />
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="end" className="w-48">
+                        <DropdownMenuItem onSelect={() => props.onViewAs(user)}>View as user</DropdownMenuItem>
+                        <DropdownMenuItem disabled={resendingId === user.id} onSelect={async () => { setResendingId(user.id); await props.onResendInvite(user); setResendingId(null); }}>
+                          {resendingId === user.id ? "Sending…" : "Resend invite"}
+                        </DropdownMenuItem>
+                        <DropdownMenuItem onSelect={() => setEditingId(user.id)}>Edit user</DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+                  </TableCell>
+                </TableRow>
+              </React.Fragment>
+            ))}
+          </TableBody>
+        </Table>
       </section>
+
+      <Sheet open={!!editingUser} onOpenChange={(o) => { if (!o) setEditingId(null); }}>
+        <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
+          <SheetHeader>
+            <div className="flex items-start justify-between gap-3">
+              <div className="grid gap-1">
+                <SheetTitle>Edit user</SheetTitle>
+                <SheetDescription>{editingUser?.email}</SheetDescription>
+              </div>
+              <SheetClose className="-mr-1 -mt-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50">
+                <X className="size-4" />
+                <span className="sr-only">Close</span>
+              </SheetClose>
+            </div>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto p-5">
+            {editingUser && (
+              <UserPermissionForm
+                key={editingUser.id}
+                mode="edit"
+                user={editingUser}
+                employees={props.employees}
+                submitLabel="Save changes"
+                onCancel={() => setEditingId(null)}
+                onSubmit={async (payload) => {
+                  const saved = await props.onUpdate(payload);
+                  if (saved) setEditingId(null);
+                  return saved;
+                }}
+              />
+            )}
+          </div>
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
@@ -2043,8 +2122,8 @@ function UserPermissionForm(props: {
     setDraft((current) => ({
       ...current,
       role,
-      departments: role === "manager" ? current.departments : [],
-      locations: role === "manager" ? current.locations : [],
+      departments: role === "manager" ? (current.allDepartments ? [...departments] : current.departments) : [],
+      locations: role === "manager" ? (current.allLocations ? [...locations] : current.locations) : [],
       linkedEmployeeName: role === "admin" ? "" : current.linkedEmployeeName,
       allDepartments: role === "manager" ? current.allDepartments : true,
       allLocations: role === "manager" ? current.allLocations : true
@@ -2052,89 +2131,79 @@ function UserPermissionForm(props: {
   }
 
   async function handleSubmit() {
+    const isManager = draft.role === "manager";
+    // "Select all" (every option chosen) maps back to the all-access wire format (empty array + allX flag).
+    const allDepts = isManager && departments.length > 0 && draft.departments.length === departments.length;
+    const allLocs = isManager && locations.length > 0 && draft.locations.length === locations.length;
     const saved = await props.onSubmit({
       id: draft.id,
       email: draft.email,
       role: draft.role,
-      departments: draft.departments,
-      locations: draft.locations,
+      departments: isManager ? (allDepts ? [] : draft.departments) : [],
+      locations: isManager ? (allLocs ? [] : draft.locations) : [],
       linkedEmployeeName: draft.linkedEmployeeName || undefined,
-      allDepartments: draft.allDepartments,
-      allLocations: draft.allLocations
+      allDepartments: !isManager || allDepts,
+      allLocations: !isManager || allLocs
     });
     if (saved && props.mode === "invite") setDraft(userDraftFromUser());
   }
 
   return (
-    <div className="user-form">
-      {/* Row 1: Email + Role */}
-      <div className="user-form-row">
+    <div className="flex flex-col gap-3">
+      <div className="flex flex-wrap items-end gap-3">
         {props.mode === "invite" && (
-          <div className="field" style={{ flex: "1 1 0" }}>
-            <label>Email</label>
-            <input aria-label="Invite email" type="email" value={draft.email} onChange={(event) => setDraft({ ...draft, email: event.target.value })} placeholder="name@pressedfloral.com" />
-          </div>
+          <DrawerField label="Email" htmlFor="user-email" className="min-w-[14rem] flex-1">
+            <Input id="user-email" aria-label="Invite email" type="email" value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} placeholder="name@pressedfloral.com" />
+          </DrawerField>
         )}
-        <div className="field" style={{ flex: "0 0 180px" }}>
-          <label>Role</label>
-          <select aria-label="User role" value={draft.role} onChange={(event) => setRole(event.target.value as ProfileRole)}>
-            <option value="manager">Manager</option>
-            <option value="user">User</option>
-            <option value="admin">Admin</option>
-          </select>
-        </div>
+        <DrawerField label="Role" className="w-[160px]">
+          <Select value={draft.role} onValueChange={(v) => setRole(v as ProfileRole)}>
+            <SelectTrigger className="w-full" aria-label="User role"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="manager">Manager</SelectItem>
+              <SelectItem value="user">User</SelectItem>
+              <SelectItem value="admin">Admin</SelectItem>
+            </SelectContent>
+          </Select>
+        </DrawerField>
       </div>
-      {/* Row 2: Manager scope fields */}
+
       {draft.role === "manager" && (
-        <div className="user-form-row">
-          <div className="field" style={{ flex: "1 1 0" }}>
-            <div className="user-field-header">
-              <label>Departments</label>
-              <label className="check-label user-check">
-                <input type="checkbox" checked={draft.allDepartments} onChange={(event) => setDraft({ ...draft, allDepartments: event.target.checked, departments: event.target.checked ? [] : draft.departments })} />
-                All
-              </label>
-            </div>
-            {!draft.allDepartments && (
-              <MultiSelectDropdown label="Choose departments" options={departmentOptions} selected={draft.departments} onChange={(values) => setDraft({ ...draft, departments: values })} emptyLabel="No departments" />
-            )}
-          </div>
-          <div className="field" style={{ flex: "1 1 0" }}>
-            <div className="user-field-header">
-              <label>Locations</label>
-              <label className="check-label user-check">
-                <input type="checkbox" checked={draft.allLocations} onChange={(event) => setDraft({ ...draft, allLocations: event.target.checked, locations: event.target.checked ? [] : draft.locations })} />
-                All
-              </label>
-            </div>
-            {!draft.allLocations && (
-              <MultiSelectDropdown label="Choose locations" options={locationOptions} selected={draft.locations} onChange={(values) => setDraft({ ...draft, locations: values })} emptyLabel="No locations" />
-            )}
-          </div>
-          <div className="field" style={{ flex: "1 1 0" }}>
-            <label>Reporting Tree Root</label>
-            <select aria-label="Reporting tree root" value={draft.linkedEmployeeName} onChange={(event) => setDraft({ ...draft, linkedEmployeeName: event.target.value })}>
-              <option value="">No linked employee</option>
-              {employeeNames.map((name) => <option key={name} value={name}>{name}</option>)}
-            </select>
-          </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <DrawerField label="Departments" className="min-w-[12rem] flex-1">
+            <MultiSelectDropdown label="All departments" emptyLabel="No departments" triggerClassName="w-full" options={departmentOptions} selected={draft.departments} onChange={(values) => setDraft({ ...draft, departments: values })} />
+          </DrawerField>
+          <DrawerField label="Locations" className="min-w-[12rem] flex-1">
+            <MultiSelectDropdown label="All locations" emptyLabel="No locations" triggerClassName="w-full" options={locationOptions} selected={draft.locations} onChange={(values) => setDraft({ ...draft, locations: values })} />
+          </DrawerField>
+          <DrawerField label="Reporting tree root" className="min-w-[12rem] flex-1">
+            <Select value={draft.linkedEmployeeName || ALL_LOCATIONS} onValueChange={(v) => setDraft({ ...draft, linkedEmployeeName: v === ALL_LOCATIONS ? "" : v })}>
+              <SelectTrigger className="w-full" aria-label="Reporting tree root"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value={ALL_LOCATIONS}>No linked employee</SelectItem>
+                {employeeNames.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </DrawerField>
         </div>
       )}
-      {/* Row 2: User linked employee */}
+
       {draft.role === "user" && (
-        <div className="user-form-row">
-          <div className="field" style={{ flex: "1 1 0" }}>
-            <label>Linked Employee</label>
-            <select aria-label="Linked employee" value={draft.linkedEmployeeName} onChange={(event) => setDraft({ ...draft, linkedEmployeeName: event.target.value })}>
-              <option value="">Choose employee</option>
-              {employeeNames.map((name) => <option key={name} value={name}>{name}</option>)}
-            </select>
-          </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <DrawerField label="Linked employee" className="min-w-[12rem] flex-1">
+            <Select value={draft.linkedEmployeeName || undefined} onValueChange={(v) => setDraft({ ...draft, linkedEmployeeName: v })}>
+              <SelectTrigger className="w-full" aria-label="Linked employee"><SelectValue placeholder="Choose employee" /></SelectTrigger>
+              <SelectContent>
+                {employeeNames.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </DrawerField>
         </div>
       )}
-      <div className="button-row user-form-actions">
-        {props.onCancel && <button onClick={props.onCancel}>Cancel</button>}
-        <button className="submit-btn user-submit" onClick={handleSubmit}>{props.submitLabel}</button>
+
+      <div className="flex items-center gap-2">
+        {props.onCancel && <Button variant="outline" size="sm" onClick={props.onCancel}>Cancel</Button>}
+        <Button size="sm" onClick={handleSubmit}>{props.submitLabel}</Button>
       </div>
     </div>
   );
@@ -2152,15 +2221,19 @@ function userDraftFromUser(user?: AdminManagedUser): AdminUserPayload & { email:
       allLocations: false
     };
   }
+  const isManager = user.role === "manager";
+  const allDepts = !isManager || user.departments.length === 0;
+  const allLocs = !isManager || user.locations.length === 0;
   return {
     id: user.id,
     email: user.email,
     role: user.role,
-    departments: user.departments,
-    locations: user.locations,
+    // Expand "all access" (empty array) to every option selected so the multi-select shows it.
+    departments: isManager ? (allDepts ? [...departments] : user.departments) : [],
+    locations: isManager ? (allLocs ? [...locations] : user.locations) : [],
     linkedEmployeeName: user.linkedEmployeeName || "",
-    allDepartments: user.role !== "manager" || user.departments.length === 0,
-    allLocations: user.role !== "manager" || user.locations.length === 0
+    allDepartments: allDepts,
+    allLocations: allLocs
   };
 }
 
@@ -2539,8 +2612,8 @@ function MultiSelectDropdown({ label, options, selected, onChange, emptyLabel, t
         <ChevronDown className="size-4 shrink-0 text-muted-foreground opacity-50" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="start" className="min-w-[var(--radix-dropdown-menu-trigger-width)]">
-        <DropdownMenuCheckboxItem checked={allChecked} onCheckedChange={toggleAll} onSelect={(e) => e.preventDefault()} className="text-[13px] italic">
-          {label}
+        <DropdownMenuCheckboxItem checked={allChecked} onCheckedChange={toggleAll} onSelect={(e) => e.preventDefault()} className="text-[13px] font-medium">
+          Select all
         </DropdownMenuCheckboxItem>
         <DropdownMenuSeparator />
         {options.map((opt) => (
@@ -4124,35 +4197,113 @@ function RipplingScreen(props: {
   return (
     <div className="screen active">
       <section>
-        <div className="section-title">Upload Rippling CSV</div>
-        <div className="info-banner" style={{ display: "block" }}>
-          Uploading employee data for <strong>{formatMonthLabel(props.month)}</strong>. Export the previous month's completed payroll from Rippling and drop it below.
+        <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-primary">Upload Rippling CSV</div>
+        <div className="mb-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-[12.5px] text-muted-foreground">
+          Uploading employee data for <strong className="font-semibold text-foreground">{formatMonthLabel(props.month)}</strong>. Export the previous month's completed payroll from Rippling and drop it below.
         </div>
-        <label id="rippling-drop-zone">
-          <span className="drop-icon">CSV</span>
-          <strong>Drop your Rippling CSV here</strong>
-          <small>or click to browse — Active_Employees_with_Hourly_and_Annual_Base_Pay.csv</small>
+        <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border bg-muted/20 px-6 py-10 text-center tracking-normal transition-colors [&_span]:normal-case hover:border-primary/40 hover:bg-accent/40">
+          <Upload className="size-7 text-muted-foreground" />
+          <span className="text-[14px] font-semibold text-foreground">Drop your Rippling CSV here</span>
+          <span className="text-[12px] text-muted-foreground">or click to browse — Active_Employees_with_Hourly_and_Annual_Base_Pay.csv</span>
           <input type="file" accept=".csv" hidden onChange={(event) => handleFile(event.target.files?.[0])} />
         </label>
       </section>
-      {!!props.preview.length && <EmployeeTable title="Imported employees" employees={props.preview} action={<button className="submit-btn" onClick={props.onSave}>Save to App</button>} />}
-      <EmployeeTable title="Saved employee data" employees={savedEmployees} action={<button onClick={props.onClear}>Clear all</button>} />
+      {!!props.preview.length && <EmployeeTable title="Imported employees" employees={props.preview} action={<Button size="sm" onClick={props.onSave}>Save to app</Button>} />}
+      <EmployeeTable title="Saved employee data" employees={savedEmployees} action={savedEmployees.length ? <Button variant="outline" size="sm" className="text-[12px]" onClick={props.onClear}>Clear all</Button> : undefined} />
     </div>
   );
 }
 
 function EmployeeTable({ title, employees, action }: { title: string; employees: Employee[]; action?: React.ReactNode }) {
   return (
-    <section>
-      <div className="toolbar-row"><div className="section-title">{title}</div>{action}</div>
-      <div className="table-wrap">
-        <table className="data-table">
-          <thead><tr><th>Name</th><th>Role</th><th>Department</th><th>Location</th><th>Pay</th><th>Hours</th></tr></thead>
-          <tbody>{employees.map((employee) => <tr key={employee.id || employee.name}><td>{employee.name}</td><td>{employee.role}</td><td>{employee.department}</td><td>{employee.location}</td><td>{employee.payType === "salary" ? formatCurrency(employee.annualPay || 0) : formatCurrency(employee.hourlyRate || 0)}</td><td>{employee.hoursWorked || "-"}</td></tr>)}</tbody>
-        </table>
+    <section style={{ padding: 0 }} className="overflow-hidden">
+      <div className="flex items-center justify-between gap-3 px-4 pb-2.5 pt-4">
+        <div className="text-[11px] font-semibold uppercase tracking-wider text-primary">{title}</div>
+        {action}
       </div>
-      {!employees.length && <div className="no-goals-msg" style={{ display: "block" }}>No saved employees for this month</div>}
+      {employees.length === 0 ? (
+        <div className="px-4 pb-6 pt-2 text-center text-[13px] text-muted-foreground">No saved employees for this month</div>
+      ) : (
+        <Table className="text-[12.5px]">
+          <TableHeader className="bg-muted/40 [&_th]:h-9 [&_th]:px-4 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
+            <TableRow className="hover:bg-transparent">
+              <TableHead>Name</TableHead>
+              <TableHead>Role</TableHead>
+              <TableHead>Department</TableHead>
+              <TableHead>Location</TableHead>
+              <TableHead className="text-right">Pay</TableHead>
+              <TableHead className="text-right">Hours</TableHead>
+            </TableRow>
+          </TableHeader>
+          <TableBody className="[&_td]:px-4 [&_td]:py-2.5">
+            {employees.map((employee) => (
+              <TableRow key={employee.id || employee.name}>
+                <TableCell className="font-medium text-foreground">{employee.name}</TableCell>
+                <TableCell className="text-muted-foreground">{employee.role}</TableCell>
+                <TableCell className="text-muted-foreground">{employee.department}</TableCell>
+                <TableCell className="text-muted-foreground">{employee.location}</TableCell>
+                <TableCell className="text-right tabular-nums">{employee.payType === "salary" ? formatCurrency(employee.annualPay || 0) : formatCurrency(employee.hourlyRate || 0)}</TableCell>
+                <TableCell className="text-right tabular-nums">{employee.hoursWorked || "—"}</TableCell>
+              </TableRow>
+            ))}
+          </TableBody>
+        </Table>
+      )}
     </section>
+  );
+}
+
+function TodoGroupCard({ title, meta, done, total, showCompleted, onToggleCompleted, children }: {
+  title: string;
+  meta: React.ReactNode;
+  done: number;
+  total: number;
+  showCompleted: boolean;
+  onToggleCompleted: () => void;
+  children: React.ReactNode;
+}) {
+  return (
+    <section style={{ padding: 0 }} className="overflow-hidden">
+      <div className="flex flex-wrap items-center justify-between gap-2 p-4 pb-3">
+        <div className="flex flex-col">
+          <span className="text-[14px] font-semibold text-foreground">{title}</span>
+          <span className="mt-0.5 flex flex-wrap items-center gap-1.5 text-[12px] text-muted-foreground">{meta}</span>
+        </div>
+        <Button variant="ghost" size="sm" className="h-7 text-[11px] font-medium text-muted-foreground" onClick={onToggleCompleted}>
+          {showCompleted ? "Hide completed" : "Show completed"}
+        </Button>
+      </div>
+      <Progress value={total > 0 ? (done / total) * 100 : 0} className="h-1 rounded-none" />
+      <div className="px-4">{children}</div>
+    </section>
+  );
+}
+
+function TodoRow({ name, goalTier, location, department, saved, children }: {
+  name: string;
+  goalTier: string;
+  location?: string;
+  department?: string;
+  saved: boolean;
+  children?: React.ReactNode;
+}) {
+  return (
+    <div className={`flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-border py-2.5 last:border-b-0 ${saved ? "opacity-55" : ""}`}>
+      {saved ? <CheckCircle2 className="size-4 shrink-0 text-[var(--sage-dark)]" /> : <Circle className="size-4 shrink-0 text-[var(--text-faint)]" />}
+      <span className="text-[13px] font-medium text-foreground">{name}</span>
+      <TierBadge tier={goalTier} />
+      <GoalScopeTags location={location} department={department} />
+      {!saved && children}
+    </div>
+  );
+}
+
+function TodoNumberField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
+  return (
+    <label className="flex flex-col gap-0.5">
+      <span className="text-[9px] font-semibold uppercase tracking-wide text-muted-foreground">{label}</span>
+      <Input type="number" value={value} onChange={(e) => onChange(e.target.value)} className="h-8 w-[88px] text-[12px] tabular-nums" />
+    </label>
   );
 }
 
@@ -4253,9 +4404,9 @@ function TodosScreen({
   const targetDue = dueDate(nYear, nMonth, 1);
 
   function DaysBadge({ diffDays }: { diffDays: number }) {
-    if (diffDays < 0) return <span className="todo-days-badge overdue">{Math.abs(diffDays)}d overdue</span>;
-    if (diffDays === 0) return <span className="todo-days-badge today">Today</span>;
-    return <span className="todo-days-badge">{diffDays}d</span>;
+    if (diffDays < 0) return <Badge className="border-transparent bg-[#9B2C2C]/10 font-medium text-[#9B2C2C]">{Math.abs(diffDays)}d overdue</Badge>;
+    if (diffDays === 0) return <Badge variant="secondary" className="font-medium">Today</Badge>;
+    return <Badge variant="outline" className="font-normal text-muted-foreground">{diffDays}d</Badge>;
   }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -4281,21 +4432,21 @@ function TodosScreen({
     key: "rippling",
     done: ripplingDone,
     node: (
-      <div className={`todo-task-section${ripplingDone ? " done" : ""}`}>
-        <div className="todo-task-row">
-          <span className={`todo-task-icon${ripplingDone ? " done" : ""}`}>{ripplingDone ? "✓" : "⚠"}</span>
-          <div className="todo-task-body">
-            <span className="todo-task-label">Upload Rippling data</span>
-            <span className="todo-task-detail">{ripplingDone ? `${currentMonthLabel} data loaded — provides ${workMonthLabel} earnings` : `${currentMonthLabel} not uploaded — needed for ${workMonthLabel} earnings.`}</span>
+      <div className={`flex flex-col gap-2 border-b border-border py-2.5 last:border-b-0 ${ripplingDone ? "opacity-55" : ""}`}>
+        <div className="flex items-start gap-2">
+          {ripplingDone ? <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-[var(--sage-dark)]" /> : <AlertTriangle className="mt-0.5 size-4 shrink-0 text-[#b8860b]" />}
+          <div className="flex min-w-0 flex-col">
+            <span className="text-[13px] font-medium text-foreground">Upload Rippling data</span>
+            <span className="text-[12px] text-muted-foreground">{ripplingDone ? `${currentMonthLabel} data loaded — provides ${workMonthLabel} earnings` : `${currentMonthLabel} not uploaded — needed for ${workMonthLabel} earnings.`}</span>
           </div>
         </div>
         {!ripplingDone && (
-          <div className="todo-inline-form">
-            <input ref={fileInputRef} type="file" accept=".csv" className="todo-file-input" onChange={handleFileChange} />
+          <div className="pl-6">
+            <input ref={fileInputRef} type="file" accept=".csv" onChange={handleFileChange} className="block text-[12px] text-muted-foreground file:mr-2 file:rounded-md file:border file:border-input file:bg-transparent file:px-2.5 file:py-1 file:text-[12px] file:font-medium file:text-foreground" />
             {ripplingParsed && (
-              <div className="todo-inline-form-row">
-                <span className="todo-task-detail">{ripplingParsed.length} employees parsed from {ripplingFile?.name}</span>
-                <button className="todo-task-action" onClick={handleRipplingSave}>Save to App</button>
+              <div className="mt-2 flex flex-wrap items-center gap-2">
+                <span className="text-[12px] text-muted-foreground">{ripplingParsed.length} employees parsed from {ripplingFile?.name}</span>
+                <Button size="sm" onClick={handleRipplingSave}>Save to app</Button>
               </div>
             )}
           </div>
@@ -4311,31 +4462,12 @@ function TodosScreen({
       key: `actual-${goal.id}`,
       done,
       node: (
-        <div key={goal.id} className={`todo-target-row${done ? " done" : ""}`}>
-          <span className="todo-circle">{done ? "●" : "○"}</span>
-          <span className="todo-target-name">{goal.name}</span>
-          <TierBadge tier={goal.goalTier} />
-          {goal.location && <span className="todo-scope-tag">{goal.location}</span>}
-          {goal.department && <span className="todo-scope-tag">{goal.department}</span>}
-          {!done && (
-            <div className="todo-target-inputs">
-              <label className="todo-input-label">
-                <span>Actual</span>
-                <input
-                  type="number"
-                  className="todo-target-input"
-                  value={draft}
-                  onChange={(e) => setDraftActuals((prev) => ({ ...prev, [goal.id]: e.target.value }))}
-                />
-              </label>
-              <button
-                className="todo-target-submit"
-                disabled={draft === ""}
-                onClick={() => onSaveActual(goal, draft)}
-              >Set</button>
-            </div>
-          )}
-        </div>
+        <TodoRow name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={done}>
+          <div className="ml-auto flex items-end gap-2">
+            <TodoNumberField label="Actual" value={draft} onChange={(v) => setDraftActuals((prev) => ({ ...prev, [goal.id]: v }))} />
+            <Button size="sm" className="h-8" disabled={draft === ""} onClick={() => onSaveActual(goal, draft)}>Set</Button>
+          </div>
+        </TodoRow>
       )
     };
   });
@@ -4345,43 +4477,31 @@ function TodosScreen({
 
   return (
     <div className="screen active">
-      <div className="todo-group-card">
-        <div className="todo-group-header">
-          <div className="todo-group-header-left">
-            <span className="todo-group-title">Monthly Tasks · {workMonthLabel}</span>
-            <span className="todo-group-meta">{adminDoneCount}/{adminTotal} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></span>
-          </div>
-          <button className="todo-show-completed" onClick={() => setShowCompletedAdmin((v) => !v)}>
-            {showCompletedAdmin ? "HIDE COMPLETED" : "SHOW COMPLETED"}
-          </button>
-        </div>
-        <div className="todo-group-bar-wrap">
-          <div className="todo-group-bar" style={{ width: `${(adminDoneCount / adminTotal) * 100}%` }} />
-        </div>
+      <TodoGroupCard
+        title={`Monthly tasks · ${workMonthLabel}`}
+        meta={<>{adminDoneCount}/{adminTotal} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
+        done={adminDoneCount}
+        total={adminTotal}
+        showCompleted={showCompletedAdmin}
+        onToggleCompleted={() => setShowCompletedAdmin((v) => !v)}
+      >
         {visibleAdminRows.length === 0 ? (
-          <div className="todo-empty-row">All monthly tasks complete ✓</div>
+          <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All monthly tasks complete</div>
         ) : (
-          visibleAdminRows.map((row) => (
-            <React.Fragment key={row.key}>{row.node}</React.Fragment>
-          ))
+          visibleAdminRows.map((row) => <React.Fragment key={row.key}>{row.node}</React.Fragment>)
         )}
-      </div>
+      </TodoGroupCard>
 
       {/* Current month targets — shown only when any are missing (always overdue) */}
       {currentTargetTotal > 0 && !allCurrentTargetsDone && (
-        <div className="todo-group-card">
-          <div className="todo-group-header">
-            <div className="todo-group-header-left">
-              <span className="todo-group-title">{currentMonthLabel} Targets</span>
-              <span className="todo-group-meta">{currentTargetDoneCount}/{currentTargetTotal} set · Due {currentTargetDue.label} <DaysBadge diffDays={currentTargetDue.diffDays} /></span>
-            </div>
-            <button className="todo-show-completed" onClick={() => setShowCompletedCurrentTargets((v) => !v)}>
-              {showCompletedCurrentTargets ? "HIDE COMPLETED" : "SHOW COMPLETED"}
-            </button>
-          </div>
-          <div className="todo-group-bar-wrap">
-            <div className="todo-group-bar" style={{ width: `${currentTargetTotal ? (currentTargetDoneCount / currentTargetTotal) * 100 : 0}%`, background: "var(--brick)" }} />
-          </div>
+        <TodoGroupCard
+          title={`${currentMonthLabel} targets`}
+          meta={<>{currentTargetDoneCount}/{currentTargetTotal} set · Due {currentTargetDue.label} <DaysBadge diffDays={currentTargetDue.diffDays} /></>}
+          done={currentTargetDoneCount}
+          total={currentTargetTotal}
+          showCompleted={showCompletedCurrentTargets}
+          onToggleCompleted={() => setShowCompletedCurrentTargets((v) => !v)}
+        >
           {currentTargetGoals
             .filter((g) => showCompletedCurrentTargets || currentActuals[metaKey("target", g)] == null)
             .map((goal) => {
@@ -4391,59 +4511,28 @@ function TodosScreen({
                 min: String(currentActuals[metaKey("min", goal)] ?? "")
               };
               return (
-                <div key={goal.id} className={`todo-target-row${saved ? " done" : ""}`}>
-                  <span className="todo-circle">{saved ? "●" : "○"}</span>
-                  <span className="todo-target-name">{goal.name}</span>
-                  <TierBadge tier={goal.goalTier} />
-                  {goal.department && <span className="todo-scope-tag">{goal.department}</span>}
-                  {!saved && (
-                    <div className="todo-target-inputs">
-                      <label className="todo-input-label">
-                        <span>Target</span>
-                        <input
-                          type="number"
-                          className="todo-target-input"
-                          value={draft.target}
-                          onChange={(e) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: e.target.value } }))}
-                        />
-                      </label>
-                      <label className="todo-input-label">
-                        <span>Min</span>
-                        <input
-                          type="number"
-                          className="todo-target-input"
-                          value={draft.min}
-                          onChange={(e) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: e.target.value } }))}
-                        />
-                      </label>
-                      <button
-                        className="todo-target-submit"
-                        disabled={draft.target === ""}
-                        onClick={() => onSaveCurrentTargetPair(goal, draft.target, draft.min)}
-                      >Set</button>
-                    </div>
-                  )}
-                </div>
+                <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} department={goal.department} saved={saved}>
+                  <div className="ml-auto flex items-end gap-2">
+                    <TodoNumberField label="Target" value={draft.target} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
+                    <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
+                    <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveCurrentTargetPair(goal, draft.target, draft.min)}>Set</Button>
+                  </div>
+                </TodoRow>
               );
             })}
-        </div>
+        </TodoGroupCard>
       )}
 
-      <div className="todo-group-card">
-        <div className="todo-group-header">
-          <div className="todo-group-header-left">
-            <span className="todo-group-title">{nextMonthLabel} Targets</span>
-            <span className="todo-group-meta">{targetDoneCount}/{targetTotal} set · Due {targetDue.label} <DaysBadge diffDays={targetDue.diffDays} /></span>
-          </div>
-          <button className="todo-show-completed" onClick={() => setShowCompletedTargets((v) => !v)}>
-            {showCompletedTargets ? "HIDE COMPLETED" : "SHOW COMPLETED"}
-          </button>
-        </div>
-        <div className="todo-group-bar-wrap">
-          <div className="todo-group-bar" style={{ width: `${targetTotal ? (targetDoneCount / targetTotal) * 100 : 0}%` }} />
-        </div>
+      <TodoGroupCard
+        title={`${nextMonthLabel} targets`}
+        meta={<>{targetDoneCount}/{targetTotal} set · Due {targetDue.label} <DaysBadge diffDays={targetDue.diffDays} /></>}
+        done={targetDoneCount}
+        total={targetTotal}
+        showCompleted={showCompletedTargets}
+        onToggleCompleted={() => setShowCompletedTargets((v) => !v)}
+      >
         {targetGoals.length === 0 ? (
-          <div className="todo-empty-row">No company or department goals in bank</div>
+          <div className="py-3 text-[13px] text-muted-foreground">No company or department goals in bank</div>
         ) : (
           targetGoals
             .filter((g) => showCompletedTargets || nextActuals[metaKey("target", g)] == null)
@@ -4454,43 +4543,17 @@ function TodosScreen({
                 min: String(nextActuals[metaKey("min", goal)] ?? "")
               };
               return (
-                <div key={goal.id} className={`todo-target-row${saved ? " done" : ""}`}>
-                  <span className="todo-circle">{saved ? "●" : "○"}</span>
-                  <span className="todo-target-name">{goal.name}</span>
-                  <TierBadge tier={goal.goalTier} />
-                  {goal.department && <span className="todo-scope-tag">{goal.department}</span>}
-                  {!saved && (
-                    <div className="todo-target-inputs">
-                      <label className="todo-input-label">
-                        <span>Target</span>
-                        <input
-                          type="number"
-                          className="todo-target-input"
-                          value={draft.target}
-                          onChange={(e) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: e.target.value } }))}
-                        />
-                      </label>
-                      <label className="todo-input-label">
-                        <span>Min</span>
-                        <input
-                          type="number"
-                          className="todo-target-input"
-                          value={draft.min}
-                          onChange={(e) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: e.target.value } }))}
-                        />
-                      </label>
-                      <button
-                        className="todo-target-submit"
-                        disabled={draft.target === ""}
-                        onClick={() => onSaveTargetPair(goal, draft.target, draft.min)}
-                      >Set</button>
-                    </div>
-                  )}
-                </div>
+                <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} department={goal.department} saved={saved}>
+                  <div className="ml-auto flex items-end gap-2">
+                    <TodoNumberField label="Target" value={draft.target} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
+                    <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
+                    <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveTargetPair(goal, draft.target, draft.min)}>Set</Button>
+                  </div>
+                </TodoRow>
               );
             })
         )}
-      </div>
+      </TodoGroupCard>
     </div>
   );
 }
@@ -4498,66 +4561,90 @@ function TodosScreen({
 const guideSteps = [
   {
     title: "Upload Rippling Data",
-    bg: "var(--brick-light)", border: "var(--taupe)", numBg: "var(--brick)",
     body: "Start each month by uploading your Rippling CSV. This pre-loads employee names, roles, departments, locations, and pay rates so you don't have to enter them manually.",
     bullets: ["Go to Rippling Data in the sidebar", "Select the payroll month", "Upload the Active_Employees_with_Hourly_and_Annual_Base_Pay.csv file", "Review the preview and click Save to App"]
   },
   {
     title: "Build Your Goal Bank",
-    bg: "#f0f7fa", border: "#b8d4e0", numBg: "#185FA5",
     body: "The Goal Bank is your permanent library of goals. Goals don't expire — they're reused month to month and pulled into scorecards. Set this up once and update as needed.",
     bullets: ["Go to Goals & Actuals in the sidebar", "Click + Add Goal to Bank at the bottom", "Set the type: Company (everyone), Department (dept-wide), or Individual (role-specific)", "Goals can be deactivated without being deleted"]
   },
   {
     title: "Enter Company & Department Actuals",
-    bg: "#f0f7fa", border: "#b8d4e0", numBg: "#185FA5",
     body: "At month end, enter the actual results for company and department goals. These are shared across all employees — enter them once and they'll be available when building scorecards.",
     bullets: ["Go to Goals & Actuals in the sidebar", "Select the month from the filter at the top", "Use the ⋮ menu on each goal row and choose Enter actual", "Individual goal actuals are entered per-employee in the scorecard builder"]
   },
   {
     title: "Build Individual Scorecards",
-    bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
     body: "For each employee, build their scorecard by selecting goals, setting weights, entering individual actuals, and submitting. Company and department actuals you already entered will pre-fill automatically.",
     bullets: ["Go to Team Scorecards in the sidebar", "Select the employee and scorecard month", "Goals load automatically based on their role and department", "Set a weight for each goal (all weights must total 100%)", "Enter actuals for individual goals — company and dept actuals are pre-filled", "Review the calculated bonus summary, then click Submit Scorecard"]
   },
   {
     title: "Review Historical Data",
-    bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
     body: "Search and review all submitted scorecards. Filter by period, employee, department, or location. Export to CSV for payroll or further analysis.",
     bullets: ["Go to Historical Data in the sidebar", "Select a period and optionally filter by location or department", "Each card shows goal-level detail — achievement, actuals, and bonus contribution", "Click ↓ Export filtered results CSV to download a full spreadsheet"]
   }
 ];
 
+const guideTips: React.ReactNode[] = [
+  <>All goal weights on a scorecard must total exactly <strong className="font-semibold text-foreground">100%</strong> — the builder warns you if they don&rsquo;t</>,
+  <>Scorecards are <strong className="font-semibold text-foreground">capped at 200%</strong> total weighted achievement</>,
+  <>Achievements of <strong className="font-semibold text-foreground">120%+</strong> are flagged for review but not capped</>,
+  <>If a goal&rsquo;s actual doesn&rsquo;t meet the <strong className="font-semibold text-foreground">minimum threshold</strong>, that goal contributes $0 to the bonus</>,
+  <>Company and department actuals only need to be entered once — they apply to all scorecards for that month</>,
+  <>Goals can be <strong className="font-semibold text-foreground">deactivated</strong> in the Goal Bank without deleting them, keeping history intact</>,
+];
+
 function GuideScreen() {
   return (
-    <div className="screen active">
-      <section>
-        <div className="section-title">How to use this app</div>
-        <p style={{ fontSize: "13px", color: "var(--text-muted)", lineHeight: 1.7 }}>Follow these steps each month to set up goals, enter actuals, and build employee scorecards.</p>
-      </section>
-      {guideSteps.map((step, index) => (
-        <section key={step.title} style={{ background: step.bg, borderColor: step.border }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px" }}>
-            <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: step.numBg, color: "#fff", fontSize: "13px", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{index + 1}</div>
-            <div className="section-title" style={{ margin: 0 }}>{step.title}</div>
-          </div>
-          <p style={{ fontSize: "13px", color: "var(--text)", lineHeight: 1.7, marginBottom: "8px" }}>{step.body}</p>
-          <ul style={{ fontSize: "13px", color: "var(--text-muted)", lineHeight: 1.9, paddingLeft: "18px" }}>
-            {step.bullets.map((b) => <li key={b}>{b}</li>)}
+    <div className="screen active mx-auto max-w-3xl space-y-4">
+      <div className="space-y-1">
+        <h2 className="text-[15px] font-semibold tracking-tight text-foreground">Monthly workflow</h2>
+        <p className="text-[13px] leading-relaxed text-muted-foreground">
+          Follow these five steps each month to set up goals, enter actuals, and build employee scorecards.
+        </p>
+      </div>
+
+      <div className="space-y-3">
+        {guideSteps.map((step, index) => (
+          <Card key={step.title}>
+            <CardHeader className="flex-row items-center gap-3 pb-3">
+              <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-[13px] font-semibold tabular-nums text-primary-foreground">
+                {index + 1}
+              </span>
+              <CardTitle className="text-[14px]">{step.title}</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <p className="text-[13px] leading-relaxed text-muted-foreground">{step.body}</p>
+              <ul className="space-y-1.5">
+                {step.bullets.map((b) => (
+                  <li key={b} className="flex gap-2 text-[13px] leading-relaxed text-foreground/85">
+                    <ChevronRight className="mt-[3px] size-3.5 shrink-0 text-primary/60" />
+                    <span>{b}</span>
+                  </li>
+                ))}
+              </ul>
+            </CardContent>
+          </Card>
+        ))}
+      </div>
+
+      <Card className="border-dashed bg-muted/30">
+        <CardHeader className="flex-row items-center gap-2 pb-3">
+          <Sparkles className="size-4 text-primary" />
+          <CardTitle className="text-[14px]">Tips &amp; rules</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <ul className="space-y-2">
+            {guideTips.map((tip, i) => (
+              <li key={i} className="flex gap-2.5 text-[13px] leading-relaxed text-muted-foreground">
+                <span className="mt-[7px] size-1.5 shrink-0 rounded-full bg-primary/50" />
+                <span>{tip}</span>
+              </li>
+            ))}
           </ul>
-        </section>
-      ))}
-      <section style={{ background: "var(--surface2)", borderStyle: "dashed" }}>
-        <div className="section-title">Tips</div>
-        <ul style={{ fontSize: "13px", color: "var(--text-muted)", lineHeight: 1.9, paddingLeft: "18px" }}>
-          <li>All goal weights on a scorecard must total exactly <strong>100%</strong> — the builder warns you if they don't</li>
-          <li>Scorecards are <strong>capped at 200%</strong> total weighted achievement</li>
-          <li>Achievements of <strong>120%+</strong> are flagged for review but not capped</li>
-          <li>If a goal's actual doesn't meet the <strong>minimum threshold</strong>, that goal contributes $0 to the bonus</li>
-          <li>Company and department actuals only need to be entered once — they apply to all scorecards for that month</li>
-          <li>Goals can be <strong>deactivated</strong> in the Goal Bank without deleting them, keeping history intact</li>
-        </ul>
-      </section>
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -2,6 +2,11 @@
 
 import { useEffect, useRef, useState } from "react";
 import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import { CheckCircle2, Loader2 } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 
 const SUPABASE_URL =
   process.env.NEXT_PUBLIC_SUPABASE_URL ||
@@ -137,181 +142,96 @@ export default function AcceptInvitePage() {
     }, 1600);
   }
 
-  // ── Styles shared with the main auth card ─────────────────────────────────
-  const inputStyle: React.CSSProperties = {
-    width: "100%",
-    padding: "10px 12px",
-    border: "1.5px solid var(--border)",
-    borderRadius: "var(--radius-sm)",
-    fontSize: "14px",
-    fontFamily: "var(--sans)",
-    background: "var(--surface)",
-    color: "var(--text)",
-    outline: "none",
-  };
-  const labelStyle: React.CSSProperties = {
-    display: "block",
-    fontSize: "11px",
-    fontWeight: 700,
-    color: "var(--text-muted)",
-    marginBottom: "6px",
-    letterSpacing: "0.05em",
-    textTransform: "uppercase",
-  };
-
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        width: "100%",
-        background: "var(--bg)",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        fontFamily: "var(--sans)",
-      }}
-    >
-      <div className="auth-card">
-        {/* Brand */}
-        <div style={{ marginBottom: "24px", textAlign: "center" }}>
-          <div
-            style={{
-              fontSize: "22px",
-              fontWeight: 700,
-              color: "var(--brick)",
-              lineHeight: 1.1,
-            }}
-          >
-            Pressed Floral
-          </div>
-          <div
-            style={{
-              fontSize: "12px",
-              color: "var(--text-muted)",
-              fontFamily: "var(--mono)",
-              marginTop: "2px",
-            }}
-          >
-            Scorecards
-          </div>
-        </div>
-
-        {/* Loading */}
-        {stage === "loading" && (
-          <p
-            style={{
-              fontSize: "13px",
-              color: "var(--text-muted)",
-              textAlign: "center",
-            }}
-          >
-            Verifying your invite…
-          </p>
-        )}
-
-        {/* Error */}
-        {stage === "error" && (
-          <>
-            <div id="auth-error" style={{ marginBottom: "16px" }}>
-              {error}
+    <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
+      <Card className="w-full max-w-sm shadow-xl">
+        <CardHeader className="items-center gap-1 text-center">
+          <div className="text-[20px] font-semibold tracking-tight text-primary">Pressed Floral</div>
+          <div className="text-[12px] text-muted-foreground" style={{ fontFamily: "var(--mono)" }}>Scorecards</div>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          {/* Loading */}
+          {stage === "loading" && (
+            <div className="flex items-center justify-center gap-2 py-2 text-[13px] text-muted-foreground">
+              <Loader2 className="size-4 animate-spin" /> Verifying your invite…
             </div>
-            <a
-              href="/"
-              style={{
-                display: "block",
-                textAlign: "center",
-                fontSize: "13px",
-                color: "var(--brick)",
-                textDecoration: "underline",
-              }}
-            >
-              Back to sign in
-            </a>
-          </>
-        )}
+          )}
 
-        {/* Password setup form */}
-        {stage === "form" && (
-          <>
-            <div className="auth-title">Welcome to Scorecards</div>
-            <div className="auth-subtitle">
-              {email
-                ? `Creating account for ${email}`
-                : "Set up your account to get started."}
-            </div>
-
-            <form onSubmit={handleSubmit}>
-              <div style={{ marginBottom: "14px" }}>
-                <label style={labelStyle}>Password</label>
-                <input
-                  type="password"
-                  autoFocus
-                  autoComplete="new-password"
-                  value={password}
-                  onChange={(e) => setPassword(e.target.value)}
-                  placeholder="At least 8 characters"
-                  required
-                  style={inputStyle}
-                />
+          {/* Error */}
+          {stage === "error" && (
+            <>
+              <div className="rounded-md border border-[#9B2C2C]/20 bg-[#9B2C2C]/10 px-3 py-2 text-[12.5px] leading-relaxed text-[#9B2C2C]">
+                {error}
               </div>
+              <a href="/" className="block text-center text-[13px] font-medium text-primary hover:underline">
+                Back to sign in
+              </a>
+            </>
+          )}
 
-              <div style={{ marginBottom: "8px" }}>
-                <label style={labelStyle}>Confirm Password</label>
-                <input
-                  type="password"
-                  autoComplete="new-password"
-                  value={confirm}
-                  onChange={(e) => setConfirm(e.target.value)}
-                  placeholder="Re-enter your password"
-                  required
-                  style={inputStyle}
-                />
-              </div>
-
-              {error && (
-                <div id="auth-error" style={{ marginBottom: "4px" }}>
-                  {error}
+          {/* Password setup form */}
+          {stage === "form" && (
+            <>
+              <div className="space-y-1 text-center">
+                <div className="text-[15px] font-semibold text-foreground">Welcome to Scorecards</div>
+                <div className="text-[12.5px] text-muted-foreground">
+                  {email
+                    ? `Creating account for ${email}`
+                    : "Set up your account to get started."}
                 </div>
-              )}
+              </div>
 
-              <button
-                type="submit"
-                className="submit-btn"
-                disabled={submitting || !password || !confirm}
-              >
-                {submitting ? "Setting up…" : "Set Password & Sign In"}
-              </button>
-            </form>
-          </>
-        )}
+              <form onSubmit={handleSubmit} className="space-y-4">
+                <div className="space-y-1.5">
+                  <Label htmlFor="invite-password">Password</Label>
+                  <Input
+                    id="invite-password"
+                    type="password"
+                    autoFocus
+                    autoComplete="new-password"
+                    value={password}
+                    onChange={(e) => setPassword(e.target.value)}
+                    placeholder="At least 8 characters"
+                    required
+                  />
+                </div>
 
-        {/* Success */}
-        {stage === "success" && (
-          <div style={{ textAlign: "center" }}>
-            <div
-              style={{
-                fontSize: "36px",
-                marginBottom: "12px",
-                color: "var(--sage-dark)",
-              }}
-            >
-              ✓
+                <div className="space-y-1.5">
+                  <Label htmlFor="invite-confirm">Confirm password</Label>
+                  <Input
+                    id="invite-confirm"
+                    type="password"
+                    autoComplete="new-password"
+                    value={confirm}
+                    onChange={(e) => setConfirm(e.target.value)}
+                    placeholder="Re-enter your password"
+                    required
+                  />
+                </div>
+
+                {error && (
+                  <div className="rounded-md border border-[#9B2C2C]/20 bg-[#9B2C2C]/10 px-3 py-2 text-[12.5px] text-[#9B2C2C]">
+                    {error}
+                  </div>
+                )}
+
+                <Button type="submit" className="w-full" disabled={submitting || !password || !confirm}>
+                  {submitting ? "Setting up…" : "Set password & sign in"}
+                </Button>
+              </form>
+            </>
+          )}
+
+          {/* Success */}
+          {stage === "success" && (
+            <div className="space-y-2 py-2 text-center">
+              <CheckCircle2 className="mx-auto size-9 text-[var(--sage-dark)]" />
+              <div className="text-[15px] font-semibold text-[var(--sage-dark)]">You&apos;re all set!</div>
+              <div className="text-[13px] text-muted-foreground">Taking you to the app…</div>
             </div>
-            <div className="auth-title" style={{ color: "var(--sage-dark)" }}>
-              You&apos;re all set!
-            </div>
-            <div
-              style={{
-                fontSize: "13px",
-                color: "var(--text-muted)",
-                marginTop: "8px",
-              }}
-            >
-              Taking you to the app…
-            </div>
-          </div>
-        )}
-      </div>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

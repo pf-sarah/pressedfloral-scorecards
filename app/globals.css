@@ -1,6 +1,12 @@
 @import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
 @import "tailwindcss";
 
+/* The app is light-only. Make Tailwind's `dark:` variant class-based (a `.dark`
+   ancestor) instead of the default `prefers-color-scheme: dark` media query, so
+   shadcn components' dark-mode styles (e.g. dark:bg-input/30) don't leak into the
+   light UI on dark-mode systems. */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @theme inline {
   --color-background: var(--bg);
   --color-foreground: var(--text);
