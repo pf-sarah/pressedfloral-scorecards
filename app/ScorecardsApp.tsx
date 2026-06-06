@@ -39,6 +39,44 @@ import {
   supabaseClient
 } from "../lib/supabase";
 import type { ActualsByKey, AppData, Employee, Goal, GoalTier, HistoryFilters, ManagerProfile, ProfileRole, Scorecard } from "../lib/types";
+import { AppShell, type NavGroup } from "@/components/AppShell";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Checkbox } from "@/components/ui/checkbox";
+import { DropdownMenu, DropdownMenuCheckboxItem, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Progress } from "@/components/ui/progress";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Separator } from "@/components/ui/separator";
+import { Sheet, SheetClose, SheetContent, SheetDescription, SheetFooter, SheetHeader, SheetTitle } from "@/components/ui/sheet";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import {
+  AlertTriangle,
+  ArrowDownUp,
+  CheckCircle2,
+  ChevronDown,
+  ChevronRight,
+  Download,
+  FileText,
+  History,
+  Info,
+  LayoutDashboard,
+  LayoutGrid,
+  ListChecks,
+  MoreHorizontal,
+  Search,
+  Sparkles,
+  Target,
+  TrendingDown,
+  TrendingUp,
+  Upload,
+  UserCog,
+  Users as UsersIcon,
+  X,
+} from "lucide-react";
 
 type Screen = "landing" | "setup" | "scorecard" | "history" | "rippling" | "guide" | "todos" | "migrate" | "whatif" | "personal" | "users";
 type HistoryView = "table" | "scorecard" | "grid" | "chart";
@@ -802,6 +840,54 @@ export default function ScorecardsApp() {
     return ripplingPending + missingActuals.length + missingCurrentTargets.length + missingNextTargets.length;
   }, [effectiveProfile, appData.rippling, workMonth, missingActuals, missingCurrentTargets, missingNextTargets]);
 
+  // Aggregated data backing the Dashboard (home) screen. Everything here is derived
+  // from existing app state — no new data sources.
+  const dashboard = useMemo(() => {
+    const workMonthLabel = formatMonthLabel(workMonth);
+    const isManagerRole = roleAtLeast(effectiveProfile, "manager");
+
+    // Team / org rollup (manager + admin)
+    const scopedScorecards = scopedScorecardsForProfile(appData.scorecards, effectiveProfile, allRipplingEmployees);
+    const submittedThisMonth = scopedScorecards.filter((sc) => sc.scorecardMonth === workMonthLabel);
+    const scopedEmployees = scopedEmployeesForProfile(appData.rippling[workMonth] || [], effectiveProfile, allRipplingEmployees);
+    const expected = scopedEmployees.length;
+    const submittedCount = submittedThisMonth.length;
+    const totalBonus = submittedThisMonth.reduce((sum, sc) => sum + (sc.bonusAmount || 0), 0);
+    const avgAchievement = submittedThisMonth.length
+      ? submittedThisMonth.reduce((sum, sc) => sum + (sc.weightedAchievement || 0), 0) / submittedThisMonth.length
+      : 0;
+    const flags = submittedThisMonth.filter((sc) => sc.flag120).length;
+    const recent = [...scopedScorecards]
+      .sort((a, b) => (b.submittedAt || "").localeCompare(a.submittedAt || ""))
+      .slice(0, 5);
+    const missingScorecardsScoped = scopedEmployees.filter(
+      (emp) => !submittedThisMonth.some((sc) => sc.employeeName === emp.name)
+    );
+
+    // Prioritized, deep-linked action items
+    const actions: { key: string; label: string; detail: string; action: Screen; count?: number }[] = [];
+    if (roleAtLeast(effectiveProfile, "admin") && !appData.rippling[workMonth]?.length)
+      actions.push({ key: "rippling", label: "Upload Rippling data", detail: `${workMonthLabel} payroll hasn’t been uploaded yet`, action: "rippling" });
+    if (missingActuals.length)
+      actions.push({ key: "actuals", label: "Enter shared actuals", detail: `${missingActuals.length} company/department goal${missingActuals.length > 1 ? "s" : ""} awaiting actuals`, action: "setup", count: missingActuals.length });
+    if (missingCurrentTargets.length)
+      actions.push({ key: "targets", label: "Set this month’s targets", detail: `${missingCurrentTargets.length} goal${missingCurrentTargets.length > 1 ? "s" : ""} still need a target`, action: "todos", count: missingCurrentTargets.length });
+    if (isManagerRole && expected > 0 && missingScorecardsScoped.length)
+      actions.push({ key: "scorecards", label: "Submit team scorecards", detail: `${missingScorecardsScoped.length} of ${expected} not submitted for ${workMonthLabel}`, action: "scorecard", count: missingScorecardsScoped.length });
+
+    // Personal view (user)
+    const myLatest = myOwnScorecards.length ? myOwnScorecards[myOwnScorecards.length - 1] : null;
+    const myPrev = myOwnScorecards.length > 1 ? myOwnScorecards[myOwnScorecards.length - 2] : null;
+    const myRecent = [...myOwnScorecards].reverse().slice(0, 5);
+
+    return {
+      workMonthLabel, isManagerRole,
+      expected, submittedCount, totalBonus, avgAchievement, flags, recent,
+      actions,
+      myLatest, myPrev, myRecent,
+    };
+  }, [appData.scorecards, appData.rippling, workMonth, effectiveProfile, allRipplingEmployees, missingActuals, missingCurrentTargets, myOwnScorecards]);
+
   async function saveGoal(goal: Goal): Promise<Goal | null> {
     let savedGoal = goal;
     if (!isFixture && sb) {
@@ -1040,36 +1126,75 @@ export default function ScorecardsApp() {
     return <MaintenanceScreen />;
   }
 
+  const role = effectiveProfile?.role ?? "user";
+  const isAdmin = role === "admin";
+  const isManager = role === "manager" || isAdmin;
+  const hasLinkedEmployee = !!effectiveProfile?.linkedEmployeeName;
+  const navGroups: NavGroup<Screen>[] = [
+    {
+      items: [
+        { key: "landing", label: "Dashboard", icon: LayoutDashboard, testId: "nav-landing" },
+        { key: "todos", label: "To Do", icon: ListChecks, badge: todoBadgeCount, hidden: !isManager, testId: "nav-todos" },
+        { key: "personal", label: "My Scorecard", icon: Target, hidden: !hasLinkedEmployee, testId: "nav-personal" },
+      ],
+    },
+    {
+      label: "Manage",
+      items: [
+        { key: "setup", label: "Goals & Actuals", icon: LayoutGrid, hidden: !isManager, testId: "nav-setup" },
+        { key: "scorecard", label: "Team Scorecards", icon: UsersIcon, hidden: !isManager, testId: "nav-scorecard" },
+      ],
+    },
+    {
+      label: "Review",
+      items: [
+        { key: "history", label: "Historical Data", icon: History, testId: "nav-history" },
+        { key: "whatif", label: "What If Scorecard", icon: Sparkles, testId: "nav-whatif" },
+        { key: "rippling", label: "Rippling Data", icon: ArrowDownUp, hidden: !isAdmin, testId: "nav-rippling" },
+        { key: "users", label: "Users", icon: UserCog, hidden: !isAdmin, testId: "nav-users" },
+      ],
+    },
+    {
+      items: [
+        { key: "guide", label: "How To Use", icon: Info, testId: "nav-guide" },
+        { key: "migrate", label: "Migrate Data", icon: Upload, hidden: !isAdmin, testId: "nav-migrate" },
+      ],
+    },
+  ];
+  const userSecondary = role === "admin"
+    ? "Admin · full access"
+    : role === "manager"
+    ? (effectiveProfile?.linkedEmployeeName
+        ? `Manager · ${effectiveProfile.linkedEmployeeName}'s team`
+        : `Manager · ${(effectiveProfile?.departments || []).join(", ") || "all depts"}`)
+    : `Viewer · ${effectiveProfile?.linkedEmployeeName || currentUserEmail}`;
+  const viewAsBanner = viewAsProfile ? (
+    <div style={{ background: "#703c2e", color: "#fff", padding: "8px 20px", display: "flex", alignItems: "center", gap: "12px", fontSize: "13px", fontWeight: 500 }}>
+      <span style={{ fontSize: "15px" }}>👁</span>
+      <span>Viewing as <strong>{viewAsProfile.email}</strong> — {viewAsProfile.role === "admin" ? "Admin" : viewAsProfile.role === "manager" ? "Manager" : "Viewer"}{viewAsProfile.linkedEmployeeName ? ` · ${viewAsProfile.linkedEmployeeName}` : ""}</span>
+      <button
+        onClick={() => { setViewAsProfile(null); setMode("users"); }}
+        style={{ marginLeft: "auto", background: "rgba(255,255,255,0.2)", border: "1px solid rgba(255,255,255,0.4)", color: "#fff", borderRadius: "4px", padding: "3px 12px", fontSize: "12px", fontWeight: 600, cursor: "pointer", fontFamily: "var(--sans)" }}
+      >
+        Exit View
+      </button>
+    </div>
+  ) : null;
+
   return (
     <>
-      <Sidebar
-        mode={mode}
-        profile={effectiveProfile}
-        email={currentUserEmail}
-        todoCount={todoBadgeCount}
-        onMode={setMode}
+      <AppShell
+        brand={{ title: "Pressed Floral", subtitle: "Scorecards" }}
+        groups={navGroups}
+        activeKey={mode}
+        onNavigate={setMode}
+        user={{ primary: currentUserEmail || "Not signed in", secondary: userSecondary }}
         onSignOut={signOut}
-      />
-      <div id="app-main">
-        {viewAsProfile && (
-          <div style={{ background: "#703c2e", color: "#fff", padding: "8px 20px", display: "flex", alignItems: "center", gap: "12px", fontSize: "13px", fontWeight: 500, zIndex: 200, position: "sticky", top: 0 }}>
-            <span style={{ fontSize: "15px" }}>👁</span>
-            <span>Viewing as <strong>{viewAsProfile.email}</strong> — {viewAsProfile.role === "admin" ? "Admin" : viewAsProfile.role === "manager" ? "Manager" : "Viewer"}{viewAsProfile.linkedEmployeeName ? ` · ${viewAsProfile.linkedEmployeeName}` : ""}</span>
-            <button
-              onClick={() => { setViewAsProfile(null); setMode("users"); }}
-              style={{ marginLeft: "auto", background: "rgba(255,255,255,0.2)", border: "1px solid rgba(255,255,255,0.4)", color: "#fff", borderRadius: "4px", padding: "3px 12px", fontSize: "12px", fontWeight: 600, cursor: "pointer", fontFamily: "var(--sans)" }}
-            >
-              Exit View
-            </button>
-          </div>
-        )}
-        <header>
-          <div className="header-left">
-            <h1>{pageLabel(mode)}</h1>
-          </div>
-        </header>
+        pageTitle={pageLabel(mode)}
+        banner={viewAsBanner}
+      >
         <main>
-          {mode === "landing" && <LandingScreen onMode={setMode} profile={effectiveProfile} />}
+          {mode === "landing" && <DashboardScreen data={dashboard} profile={effectiveProfile} onMode={setMode} />}
           {mode === "personal" && (
             <div className="screen active">
               <div style={{ maxWidth: "680px", margin: "0 auto", padding: "16px" }}>
@@ -1204,7 +1329,7 @@ export default function ScorecardsApp() {
           )}
           {mode === "migrate" && <MigrateScreen />}
         </main>
-      </div>
+      </AppShell>
       <div className={`toast ${toast ? `show ${toast.type || ""}` : ""}`}>{toast?.message}</div>
       {deleteModal && (
         <DeleteScorecardGoalModal
@@ -1220,7 +1345,7 @@ export default function ScorecardsApp() {
 
 function pageLabel(mode: Screen) {
   return {
-    landing: "Home",
+    landing: "Dashboard",
     setup: "Goals & Actuals",
     scorecard: "Team Scorecards",
     history: "Historical Data",
@@ -1259,67 +1384,6 @@ function AuthScreen(props: {
           <input value={props.password} onChange={(event) => props.onPassword(event.target.value)} onKeyDown={(event) => event.key === "Enter" && props.onSignIn()} placeholder="Password" type="password" />
         </div>
         <button className="submit-btn" onClick={props.onSignIn}>Sign In</button>
-      </div>
-    </div>
-  );
-}
-
-function Sidebar(props: {
-  mode: Screen;
-  profile: ManagerProfile | null;
-  email: string;
-  todoCount: number;
-  onMode: (mode: Screen) => void;
-  onSignOut: () => void;
-}) {
-  const role = props.profile?.role ?? "user";
-  const isAdmin = role === "admin";
-  const isManager = role === "manager" || isAdmin;
-  const hasLinkedEmployee = !!props.profile?.linkedEmployeeName;
-  const nav: { mode: Screen; label: string; icon: string; minRole?: "manager" | "admin"; hidden?: boolean }[] = [
-    { mode: "landing", label: "Home", icon: "⌂" },
-    { mode: "todos", label: "To Do", icon: "☐", minRole: "manager" },
-    { mode: "personal", label: "My Scorecard", icon: "◉", hidden: !hasLinkedEmployee },
-    { mode: "setup", label: "Goals & Actuals", icon: "☰", minRole: "manager" },
-    { mode: "scorecard", label: "Team Scorecards", icon: "👥", minRole: "manager" },
-    { mode: "history", label: "Historical Data", icon: "◷" },
-    { mode: "whatif", label: "What If Scorecard", icon: "◆" },
-    { mode: "rippling", label: "Rippling Data", icon: "⇅", minRole: "admin" },
-    { mode: "users", label: "Users", icon: "◇", minRole: "admin" },
-    { mode: "guide", label: "How To Use", icon: "ⓘ" },
-    { mode: "migrate", label: "Migrate Data", icon: "↑", minRole: "admin" }
-  ];
-  return (
-    <div id="sidebar">
-      <div id="sidebar-header">
-        <h1>Pressed Floral</h1>
-        <p>Scorecards</p>
-      </div>
-      <nav id="sidebar-nav">
-        {nav.map((item) => {
-          if (item.hidden) return null;
-          if (item.minRole === "admin" && !isAdmin) return null;
-          if (item.minRole === "manager" && !isManager) return null;
-          const sectionBreak = item.mode === "setup" || item.mode === "history" || item.mode === "rippling";
-          const sectionLabel = item.mode === "setup" ? "MANAGE" : item.mode === "history" ? "REVIEW" : "";
-          return (
-            <div key={item.mode}>
-              {sectionBreak && <div className="nav-section">{sectionLabel}</div>}
-              <button data-testid={`nav-${item.mode}`} className={`nav-item ${props.mode === item.mode ? "active" : ""}`} onClick={() => props.onMode(item.mode)}>
-                <span className="nav-icon">{item.icon}</span>
-                {item.label}
-                {item.mode === "todos" && props.todoCount > 0 && <span id="todo-badge">{props.todoCount}</span>}
-              </button>
-            </div>
-          );
-        })}
-      </nav>
-      <div id="user-badge">
-        <div id="user-email-display">{props.email || "Not signed in"}</div>
-        <div id="user-role-display">
-          {role === "admin" ? "Admin · full access" : role === "manager" ? (props.profile?.linkedEmployeeName ? `Manager · ${props.profile.linkedEmployeeName}'s team` : `Manager · ${(props.profile?.departments || []).join(", ") || "all depts"}`) : `Viewer · ${props.profile?.linkedEmployeeName || props.email}`}
-        </div>
-        <button onClick={props.onSignOut}>Sign out</button>
       </div>
     </div>
   );
@@ -1558,73 +1622,248 @@ function MaintenanceScreen() {
   );
 }
 
-function LandingScreen({ onMode, profile }: {
-  onMode: (mode: Screen) => void;
-  profile: ManagerProfile | null;
-}) {
-  const isUser = profile?.role === "user";
-  const isAdmin = profile?.role === "admin";
-  const manageCards: { mode: Screen; label: string; text: string; icon: string }[] = [
-    { mode: "setup", label: "Goals & Actuals", text: "Manage goals and enter monthly actuals in one place.", icon: "☰" },
-    { mode: "scorecard", label: "Team Scorecards", text: "View live scorecards for your team based on goals, targets, and actuals.", icon: "✎" },
-  ];
-  const reviewCards: { mode: Screen; label: string; text: string; icon: string; adminOnly?: boolean }[] = [
-    { mode: "history", label: "Historical Data", text: isUser ? "View your submitted scorecards." : "Search and review submitted scorecards across all employees and time periods.", icon: "◷" },
-    { mode: "whatif", label: "What If Scorecard", text: "Explore how targets, actuals, and weights affect bonus calculations. Nothing here is saved.", icon: "◆" },
-    { mode: "rippling", label: "Rippling Data", text: "Upload monthly CSV exports to auto-fill employee pay, title, and location data.", icon: "⇅", adminOnly: true },
-    { mode: "users", label: "Users", text: "Invite users and assign scorecard access.", icon: "◇", adminOnly: true }
-  ];
-  const visibleReview = reviewCards.filter((card) => !card.adminOnly || isAdmin);
+type DashboardData = {
+  workMonthLabel: string;
+  isManagerRole: boolean;
+  expected: number;
+  submittedCount: number;
+  totalBonus: number;
+  avgAchievement: number;
+  flags: number;
+  recent: Scorecard[];
+  actions: { key: string; label: string; detail: string; action: Screen; count?: number }[];
+  myLatest: Scorecard | null;
+  myPrev: Scorecard | null;
+  myRecent: Scorecard[];
+};
+
+const DASH_ACTION_ICONS: Record<string, React.ComponentType<{ className?: string }>> = {
+  rippling: ArrowDownUp,
+  actuals: LayoutGrid,
+  targets: ListChecks,
+  scorecards: UsersIcon,
+};
+
+function dashInitials(name: string) {
   return (
-    <div className="screen active">
-      <div className="landing-wrap">
-        <div className="landing-kicker">{isUser ? `Welcome, ${profile?.linkedEmployeeName || ""}` : "Where would you like to go?"}</div>
-        {/* Personal Scorecard card */}
-        {profile && (
-          <>
-            <div className="landing-section-label">My Scorecard</div>
-            <div className="landing-grid">
-              <button className="landing-card" onClick={() => onMode("personal")}>
-                <span>◉</span>
-                <strong>My Scorecard</strong>
-                <small>{profile.linkedEmployeeName ? `View your scorecard — ${profile.linkedEmployeeName}` : "View your personal scorecard and past submissions."}</small>
-              </button>
-            </div>
-          </>
+    name
+      .split(/\s+/)
+      .filter(Boolean)
+      .map((part) => part[0])
+      .slice(0, 2)
+      .join("")
+      .toUpperCase() || "?"
+  );
+}
+
+function KpiTile({ label, value, sub, accent, onClick, children }: {
+  label: string;
+  value: React.ReactNode;
+  sub?: React.ReactNode;
+  accent?: boolean;
+  onClick?: () => void;
+  children?: React.ReactNode;
+}) {
+  return (
+    <Card
+      onClick={onClick}
+      role={onClick ? "button" : undefined}
+      tabIndex={onClick ? 0 : undefined}
+      onKeyDown={onClick ? (event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); onClick(); } } : undefined}
+      className={`flex flex-col p-4 transition-colors ${onClick ? "cursor-pointer hover:border-primary/40" : ""} ${accent ? "border-primary/40" : ""}`}
+    >
+      <span className="text-[11px] font-medium uppercase tracking-wider text-muted-foreground">{label}</span>
+      <span className="mt-1.5 text-[24px] font-semibold leading-none tracking-tight text-foreground">{value}</span>
+      {sub != null ? <span className="mt-1.5 text-[11.5px] text-muted-foreground">{sub}</span> : null}
+      {children}
+    </Card>
+  );
+}
+
+function RecentScorecards({ title, items, onMode, emptyText, hideName }: {
+  title: string;
+  items: Scorecard[];
+  onMode: (mode: Screen) => void;
+  emptyText: string;
+  hideName?: boolean;
+}) {
+  return (
+    <Card>
+      <CardHeader className="flex-row items-center justify-between pb-3">
+        <CardTitle className="text-[11px] uppercase tracking-wider text-primary">{title}</CardTitle>
+        <button onClick={() => onMode("history")} className="text-[12px] font-medium text-primary transition-colors hover:underline">View all</button>
+      </CardHeader>
+      <CardContent>
+        {items.length === 0 ? (
+          <p className="text-[13px] text-muted-foreground">{emptyText}</p>
+        ) : (
+          <ul className="divide-y divide-border">
+            {items.map((sc) => {
+              const goalsMet = sc.goals.filter((goal) => goal.metMin).length;
+              return (
+                <li key={sc.id} className="flex items-center gap-3 py-2.5 first:pt-0 last:pb-0">
+                  {!hideName && (
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-[11px] font-semibold text-foreground">{dashInitials(sc.employeeName)}</span>
+                  )}
+                  <span className="min-w-0 flex-1">
+                    <span className="block truncate text-[13.5px] font-medium text-foreground">{hideName ? sc.scorecardMonth : sc.employeeName}</span>
+                    <span className="block truncate text-[12px] text-muted-foreground">{hideName ? `${goalsMet}/${sc.goals.length} goals met` : `${sc.scorecardMonth} · ${sc.role}`}</span>
+                  </span>
+                  {sc.flag120 && (
+                    <Badge variant="accent" className="hidden sm:inline-flex">
+                      <AlertTriangle />120%+
+                    </Badge>
+                  )}
+                  <span className="text-right">
+                    <span className="block text-[13.5px] font-semibold text-foreground">{formatCurrency(sc.bonusAmount)}</span>
+                    <span className="block text-[11px] text-muted-foreground">{Math.round(sc.weightedAchievement)}% achieved</span>
+                  </span>
+                </li>
+              );
+            })}
+          </ul>
         )}
-        {!isUser && (
-          <>
-            <div className="landing-section-label" style={{ marginTop: "18px" }}>Manage</div>
-            <div className="landing-grid">
-              {manageCards.map((card) => (
-                <button key={card.mode} className="landing-card" onClick={() => onMode(card.mode)}>
-                  <span>{card.icon}</span>
-                  <strong>{card.label}</strong>
-                  <small>{card.text}</small>
-                </button>
-              ))}
+      </CardContent>
+    </Card>
+  );
+}
+
+function ManagerDashboard({ data, onMode }: { data: DashboardData; onMode: (mode: Screen) => void }) {
+  const submittedPct = data.expected > 0 ? Math.round((data.submittedCount / data.expected) * 100) : 0;
+  return (
+    <>
+      {/* Action center */}
+      <Card>
+        <CardHeader className="flex-row items-center gap-2 pb-3">
+          <CardTitle className="text-[11px] uppercase tracking-wider text-primary">Needs your attention</CardTitle>
+          {data.actions.length > 0 && <Badge>{data.actions.length}</Badge>}
+        </CardHeader>
+        <CardContent>
+          {data.actions.length === 0 ? (
+            <div className="flex items-center gap-2.5 text-[14px] text-foreground">
+              <CheckCircle2 className="size-5 text-[var(--sage-dark)]" />
+              You’re all caught up for {data.workMonthLabel}.
             </div>
-          </>
-        )}
-        <div className="landing-section-label" style={{ marginTop: "18px" }}>Review</div>
-        <div className="landing-grid landing-grid-review">
-          {visibleReview.map((card) => (
-            <button key={card.mode} className="landing-card" onClick={() => onMode(card.mode)}>
-              <span>{card.icon}</span>
-              <strong>{card.label}</strong>
-              <small>{card.text}</small>
-            </button>
-          ))}
-        </div>
-        <div className="guide-callout-wrap">
-          <button className="guide-callout" onClick={() => onMode("guide")}>
-            <span>ⓘ</span>
-            <div>
-              <strong>How To Use</strong>
-              <small>Step-by-step guide to setting up and using the app.</small>
-            </div>
+          ) : (
+            <ul className="flex flex-col gap-2">
+              {data.actions.map((action) => {
+                const Icon = DASH_ACTION_ICONS[action.key] || ListChecks;
+                return (
+                  <li key={action.key}>
+                    <button onClick={() => onMode(action.action)} className="group flex w-full items-center gap-3 rounded-md border border-border bg-background px-3.5 py-3 text-left transition-colors hover:border-primary/30 hover:bg-accent">
+                      <span className="flex size-8 shrink-0 items-center justify-center rounded-md bg-accent text-accent-foreground">
+                        <Icon className="size-4" />
+                      </span>
+                      <span className="min-w-0 flex-1">
+                        <span className="block text-[13.5px] font-medium text-foreground">{action.label}</span>
+                        <span className="block truncate text-[12px] text-muted-foreground">{action.detail}</span>
+                      </span>
+                      {action.count ? <Badge variant="secondary">{action.count}</Badge> : null}
+                      <ChevronRight className="size-4 shrink-0 text-[var(--text-faint)] transition-colors group-hover:text-primary" />
+                    </button>
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <KpiTile label="Submitted" value={`${data.submittedCount}/${data.expected || 0}`} sub={`${data.workMonthLabel} scorecards`}>
+          <Progress value={submittedPct} className="mt-2.5" />
+        </KpiTile>
+        <KpiTile label="Total bonus" value={formatCurrency(data.totalBonus)} sub={data.workMonthLabel} />
+        <KpiTile label="Avg achievement" value={`${Math.round(data.avgAchievement)}%`} sub="weighted, submitted" />
+        <KpiTile label="Flags to review" value={data.flags} sub="over 120% achieved" accent={data.flags > 0} onClick={() => onMode("history")} />
+      </div>
+
+      <RecentScorecards title="Recent scorecards" items={data.recent} onMode={onMode} emptyText="No scorecards submitted yet." />
+    </>
+  );
+}
+
+function PersonalDashboard({ data, onMode }: { data: DashboardData; onMode: (mode: Screen) => void }) {
+  const latest = data.myLatest;
+  if (!latest) {
+    return (
+      <Card className="p-8 text-center">
+        <FileText className="mx-auto size-7 text-[var(--text-faint)]" />
+        <p className="mt-3 text-[14px] font-medium text-foreground">No scorecard yet</p>
+        <p className="mt-1 text-[12.5px] text-muted-foreground">Your scorecard will show up here once it’s submitted for the month.</p>
+      </Card>
+    );
+  }
+  const goalsMet = latest.goals.filter((goal) => goal.metMin).length;
+  const achievementDelta = data.myPrev ? latest.weightedAchievement - data.myPrev.weightedAchievement : null;
+  return (
+    <>
+      {/* Hero: latest scorecard */}
+      <Card className="overflow-hidden border-transparent bg-[var(--forest)] p-6 text-white">
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <span className="text-[11px] font-medium uppercase tracking-wider text-white/60">{latest.scorecardMonth} bonus</span>
+            <div className="mt-1 text-[34px] font-semibold leading-none tracking-tight">{formatCurrency(latest.bonusAmount)}</div>
+            <div className="mt-2 text-[12.5px] text-white/70">{Math.round(latest.weightedAchievement)}% weighted achievement · {goalsMet}/{latest.goals.length} goals met</div>
+          </div>
+          <button onClick={() => onMode("personal")} className="flex shrink-0 items-center gap-1.5 rounded-md bg-white/15 px-3 py-2 text-[12.5px] font-medium text-white transition-colors hover:bg-white/25">
+            View full scorecard <ChevronRight className="size-4" />
           </button>
         </div>
+      </Card>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+        <KpiTile label="Latest bonus" value={formatCurrency(latest.bonusAmount)} sub={latest.scorecardMonth} />
+        <KpiTile
+          label="Achievement"
+          value={`${Math.round(latest.weightedAchievement)}%`}
+          sub={achievementDelta == null ? "this period" : (
+            <span className={`inline-flex items-center gap-0.5 ${achievementDelta >= 0 ? "text-[var(--sage-dark)]" : "text-primary"}`}>
+              {achievementDelta >= 0 ? <TrendingUp className="size-3" /> : <TrendingDown className="size-3" />}
+              {Math.abs(Math.round(achievementDelta))}% vs last
+            </span>
+          )}
+        />
+        <KpiTile label="Goals met" value={`${goalsMet}/${latest.goals.length}`} sub="hit the minimum" />
+      </div>
+
+      <RecentScorecards title="Your scorecard history" items={data.myRecent} onMode={onMode} emptyText="No past scorecards yet." hideName />
+    </>
+  );
+}
+
+function DashboardScreen({ data, profile, onMode }: {
+  data: DashboardData;
+  profile: ManagerProfile | null;
+  onMode: (mode: Screen) => void;
+}) {
+  const isUser = profile?.role === "user";
+  const displayName = profile?.linkedEmployeeName || profile?.email?.split("@")[0] || "there";
+  const todayLabel = new Date().toLocaleDateString(undefined, { weekday: "long", month: "long", day: "numeric" });
+  return (
+    <div className="screen active">
+      <div className="flex flex-col gap-5">
+        <div>
+          <h2 className="text-[22px] font-semibold tracking-tight text-foreground">
+            {isUser ? `Welcome, ${displayName}` : `Welcome back, ${displayName}`}
+          </h2>
+          <p className="mt-1 text-[13px] text-muted-foreground">
+            {todayLabel} ·{" "}
+            {isUser ? (
+              "Here’s your latest scorecard"
+            ) : (
+              <>Working on <span className="font-medium text-foreground">{data.workMonthLabel}</span> scorecards</>
+            )}
+          </p>
+        </div>
+
+        {isUser ? <PersonalDashboard data={data} onMode={onMode} /> : <ManagerDashboard data={data} onMode={onMode} />}
+
+        <button onClick={() => onMode("guide")} className="flex items-center gap-2 self-start text-[12.5px] font-medium text-muted-foreground transition-colors hover:text-primary">
+          <Info className="size-4" /> New here? Read the How-To guide
+        </button>
       </div>
     </div>
   );
@@ -1945,6 +2184,9 @@ function formatTimestamp(value: string) {
     " " + d.toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" });
 }
 
+// Radix Select forbids empty-string item values, so the "all" filter option uses a sentinel.
+const ALL_LOCATIONS = "__all__";
+
 function GoalsScreen(props: {
   month: string;
   months: string[];
@@ -1967,8 +2209,6 @@ function GoalsScreen(props: {
   isAdmin?: boolean;
   allowedDepartments?: string[];
 }) {
-  const [menuOpenId, setMenuOpenId] = useState<string | null>(null);
-  const [menuPos, setMenuPos] = useState<{ top: number; right: number } | null>(null);
   const [actualEditId, setActualEditId] = useState<string | null>(null);
   const [periodTab, setPeriodTab] = useState<"monthly" | "quarterly">("monthly");
 
@@ -2028,70 +2268,138 @@ function GoalsScreen(props: {
     return `Yes (${goal.capPct}%)`;
   }
 
-  const thCtx = { background: "#faf8f5" } as React.CSSProperties;
-  const thGoal = { background: "#f2f7fa" } as React.CSSProperties;
-  const thTarget = { background: "#f5f8f3" } as React.CSSProperties;
-  const thActual = { background: "#eef5ec" } as React.CSSProperties;
-  const thStatus = { background: "#fff" } as React.CSSProperties;
+  const renderGoalRow = (goal: Goal) => {
+    const a = goal.periodType === "quarterly" ? quarterActuals : props.actuals;
+    const isQuarterly = goal.periodType === "quarterly";
+    const on = goal.active && !isMonthlyInactive(goal);
+    const dimmed = !goal.active || isMonthlyInactive(goal);
+    const canEdit = !effectiveReadonly && (props.isAdmin || goal.goalTier !== "company");
+    const canActual = !actualsReadonly && (props.isAdmin || goal.goalTier !== "company");
+    const hasTargets = goalHasTargets(goal);
+    const targetVal = a[metaKey("target", goal)];
+    const minVal = a[metaKey("min", goal)];
+    const actualVal = a[actualKey(goal)];
+    const dash = <span className="text-[var(--text-faint)]">—</span>;
+    return (
+      <React.Fragment key={goal.id}>
+        <TableRow className={dimmed ? "opacity-50" : undefined}>
+          <TableCell><TierBadge tier={goal.goalTier} /></TableCell>
+          <TableCell className="text-muted-foreground">{locLabel(goal.location)}</TableCell>
+          <TableCell className="truncate text-muted-foreground">{goal.department || "—"}</TableCell>
+          <TableCell className="overflow-hidden font-medium text-foreground">
+            <span className="flex min-w-0 items-center gap-1.5">
+              <span className="truncate" title={goal.name}>{goal.name}</span>
+              {goal.goalTier === "individual" && (goal.employeeName || goal.role) ? (
+                <Badge variant="secondary" className="shrink-0 font-normal">{goal.employeeName || goal.role}</Badge>
+              ) : null}
+            </span>
+          </TableCell>
+          <TableCell className="text-muted-foreground">{goal.lowerBetter ? "Yes" : "No"}</TableCell>
+          <TableCell className="text-muted-foreground">{cappedLabel(goal)}</TableCell>
+          <TableCell className="text-right tabular-nums">{targetVal != null ? formatNumber(targetVal as number) : dash}</TableCell>
+          <TableCell className="text-right tabular-nums">{minVal != null ? formatNumber(minVal as number) : dash}</TableCell>
+          <TableCell className="text-right tabular-nums" onClick={(e) => e.stopPropagation()}>
+            {canActual && hasTargets && actualEditId === goal.id ? (
+              <Input
+                autoFocus
+                aria-label={`Actual for ${goal.name}`}
+                type="number"
+                className="h-7 w-full text-right text-[12.5px] tabular-nums"
+                defaultValue={actualVal ?? ""}
+                onBlur={(e) => { const period = isQuarterly ? quarterKey : undefined; props.onActual(goal, e.target.value, period); setActualEditId(null); }}
+                onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setActualEditId(null); }}
+              />
+            ) : (
+              <span title={!hasTargets ? "Set a target and minimum first" : undefined} className={canActual && !hasTargets ? "text-[11px] text-[var(--text-faint)]" : undefined}>
+                {actualVal != null ? formatNumber(actualVal as number) : (canActual && !hasTargets ? "no target" : dash)}
+              </span>
+            )}
+          </TableCell>
+          <TableCell>
+            <Badge variant={on ? "success" : "secondary"} className="font-medium">{on ? "Active" : "Inactive"}</Badge>
+          </TableCell>
+          <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+            {canEdit ? (
+              <DropdownMenu>
+                <DropdownMenuTrigger
+                  aria-label="Goal actions"
+                  className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=open]:bg-accent data-[state=open]:text-foreground"
+                >
+                  <MoreHorizontal className="size-4" />
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-52">
+                  <DropdownMenuItem onClick={() => props.onEdit(goal)}>Edit goal</DropdownMenuItem>
+                  {canActual && hasTargets ? (
+                    <DropdownMenuItem onClick={() => setActualEditId(goal.id)}>Enter actual</DropdownMenuItem>
+                  ) : canActual ? (
+                    <DropdownMenuItem disabled>Set target first</DropdownMenuItem>
+                  ) : null}
+                  <DropdownMenuItem onClick={() => props.onToggleMonth(goal)}>
+                    {isMonthlyInactive(goal) ? "Activate for this month" : "Deactivate for this month"}
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem variant="destructive" onClick={() => props.onDelete(goal.id)}>Delete goal</DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
+            ) : null}
+          </TableCell>
+        </TableRow>
+      </React.Fragment>
+    );
+  };
 
   return (
-    <div className="screen active" onClick={() => { setMenuOpenId(null); setMenuPos(null); setActualEditId(null); }}>
-      <section style={{ padding: "12px 16px 10px" }}>
-        {/* Toolbar: title + month + status | Show inactive */}
-        <div className="toolbar-row" style={{ marginBottom: 10, gap: 10 }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap", minWidth: 0 }}>
-            <div className="section-title" style={{ margin: 0, borderBottom: "none", paddingBottom: 0 }}>Goals & Actuals</div>
-            {periodTab === "quarterly" ? (() => {
-              const curY = now.getFullYear();
-              const curQ = Math.ceil((now.getMonth() + 1) / 3);
-              const quarters: string[] = [];
-              for (let i = -4; i <= 2; i++) {
-                let q = curQ + i; let y = curY;
-                while (q < 1) { q += 4; y--; }
-                while (q > 4) { q -= 4; y++; }
-                const key = `Q${q} ${y}`;
-                if (!quarters.includes(key)) quarters.push(key);
-              }
-              // Sort chronologically (by ISO month of quarter start) newest first
-              quarters.sort((a, b) => quarterToIsoMonth(b).localeCompare(quarterToIsoMonth(a)));
-              return (
-                <select className="bank-filter-select" style={{ flex: "none" }} value={quarterKeyForMonth(props.month)} onChange={(e) => props.onMonth(quarterToIsoMonth(e.target.value))}>
-                  {quarters.map((q) => <option key={q} value={q}>{q}</option>)}
-                </select>
-              );
-            })() : (
-              <select className="bank-filter-select" style={{ flex: "none" }} value={props.month} onChange={(e) => props.onMonth(e.target.value)}>
+    <div className="screen active" onClick={() => setActualEditId(null)}>
+      <section style={{ padding: 0 }} className="overflow-hidden">
+        <div className="flex flex-wrap items-center gap-2 p-2.5">
+          <Tabs value={periodTab} onValueChange={(v) => setPeriodTab(v as "monthly" | "quarterly")}>
+            <TabsList className="h-8">
+              <TabsTrigger value="monthly" className="px-3 text-[12px] data-[state=active]:bg-card data-[state=active]:text-foreground">Monthly</TabsTrigger>
+              <TabsTrigger value="quarterly" className="px-3 text-[12px] data-[state=active]:bg-card data-[state=active]:text-foreground">Quarterly</TabsTrigger>
+            </TabsList>
+          </Tabs>
+
+          {periodTab === "quarterly" ? (() => {
+            const curY = now.getFullYear();
+            const curQ = Math.ceil((now.getMonth() + 1) / 3);
+            const quarters: string[] = [];
+            for (let i = -4; i <= 2; i++) {
+              let q = curQ + i; let y = curY;
+              while (q < 1) { q += 4; y--; }
+              while (q > 4) { q -= 4; y++; }
+              const key = `Q${q} ${y}`;
+              if (!quarters.includes(key)) quarters.push(key);
+            }
+            // Sort chronologically (by ISO month of quarter start) newest first
+            quarters.sort((a, b) => quarterToIsoMonth(b).localeCompare(quarterToIsoMonth(a)));
+            return (
+              <Select value={quarterKeyForMonth(props.month)} onValueChange={(v) => props.onMonth(quarterToIsoMonth(v))}>
+                <SelectTrigger size="sm" className="min-w-[7rem] text-[12px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {quarters.map((q) => <SelectItem key={q} value={q}>{q}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            );
+          })() : (
+            <Select value={props.month} onValueChange={(v) => props.onMonth(v)}>
+              <SelectTrigger size="sm" className="min-w-[8.5rem] text-[12px]"><SelectValue /></SelectTrigger>
+              <SelectContent>
                 {props.months.filter((m) => {
                   if (!/^\d{4}-\d{2}$/.test(m)) return false;
                   const cur = now.getFullYear() * 12 + now.getMonth();
                   const [y, mo] = m.split("-").map(Number);
                   const val = y * 12 + (mo - 1);
                   return val >= cur - 12 && val <= cur + 3;
-                }).sort((a, b) => b.localeCompare(a)).map((month) => <option key={month} value={month}>{formatMonthLabel(month)}</option>)}
-              </select>
-            )}
-            {monthStatus && periodTab === "monthly" && <span className="current-month-tag" style={{ whiteSpace: "nowrap" }}>{monthStatus}</span>}
-          </div>
-          <label className="check-label" style={{ fontSize: "12px", whiteSpace: "nowrap", flexShrink: 0 }}>
-            <input type="checkbox" checked={props.filters.showInactive} onChange={(e) => props.onFilters({ ...props.filters, showInactive: e.target.checked })} style={{ accentColor: "var(--brick)" }} />
-            Show inactive
-          </label>
-        </div>
-        {/* Period tab toggle */}
-        <div style={{ display: "flex", gap: 0, marginBottom: "10px", borderRadius: "var(--radius-sm)", border: "1.5px solid var(--border)", overflow: "hidden", alignSelf: "flex-start", width: "fit-content" }}>
-          <button
-            onClick={() => setPeriodTab("monthly")}
-            style={{ padding: "5px 18px", fontSize: "12px", fontWeight: 700, fontFamily: "var(--sans)", border: "none", cursor: "pointer", background: periodTab === "monthly" ? "var(--brick)" : "var(--surface)", color: periodTab === "monthly" ? "#fff" : "var(--text-muted)", transition: "background 0.15s, color 0.15s" }}
-          >Monthly</button>
-          <button
-            onClick={() => setPeriodTab("quarterly")}
-            style={{ padding: "5px 18px", fontSize: "12px", fontWeight: 700, fontFamily: "var(--sans)", border: "none", borderLeft: "1.5px solid var(--border)", cursor: "pointer", background: periodTab === "quarterly" ? "var(--brick)" : "var(--surface)", color: periodTab === "quarterly" ? "#fff" : "var(--text-muted)", transition: "background 0.15s, color 0.15s" }}
-          >Quarterly</button>
-        </div>
-        {/* Filter row */}
-        <div className="filter-row" style={{ gap: 8 }}>
+                }).sort((a, b) => b.localeCompare(a)).map((month) => <SelectItem key={month} value={month}>{formatMonthLabel(month)}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          )}
+
+          <Separator orientation="vertical" className="mx-0.5 hidden h-5 sm:block" />
+
           <MultiSelectDropdown
             label="All types"
+            triggerClassName="w-auto min-w-[7rem]"
             options={[
               ...(props.isAdmin ? [{ value: "company", label: "Company" }] : []),
               { value: "department", label: "Department" },
@@ -2100,211 +2408,78 @@ function GoalsScreen(props: {
             selected={props.filters.types.filter((t) => props.isAdmin || t !== "company")}
             onChange={(types) => props.onFilters({ ...props.filters, types: props.isAdmin ? types : types.filter((t) => t !== "company") })}
           />
-          <select className="bank-filter-select" value={props.filters.location} onChange={(e) => props.onFilters({ ...props.filters, location: e.target.value })}>
-            <option value="">All locations</option>
-            <option value="Utah">Utah</option>
-            <option value="Georgia">Georgia</option>
-            <option value="Remote">Remote</option>
-          </select>
+          <Select value={props.filters.location || ALL_LOCATIONS} onValueChange={(v) => props.onFilters({ ...props.filters, location: v === ALL_LOCATIONS ? "" : v })}>
+            <SelectTrigger size="sm" className="min-w-[8rem] text-[12px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value={ALL_LOCATIONS}>All locations</SelectItem>
+              <SelectItem value="Utah">Utah</SelectItem>
+              <SelectItem value="Georgia">Georgia</SelectItem>
+              <SelectItem value="Remote">Remote</SelectItem>
+            </SelectContent>
+          </Select>
           <MultiSelectDropdown
             label="All departments"
+            triggerClassName="w-auto min-w-[8rem]"
             options={departments.map((d) => ({ value: d, label: d }))}
             selected={props.filters.departments}
             onChange={(depts) => props.onFilters({ ...props.filters, departments: depts })}
           />
-          <select className="bank-filter-select" value={props.filters.sort} onChange={(e) => props.onFilters({ ...props.filters, sort: e.target.value })}>
-            <option value="goalTier">Sort: Type</option>
-            <option value="department">Sort: Dept</option>
-            <option value="location">Sort: Location</option>
-            <option value="name">Sort: Name</option>
-          </select>
-          <button className="reset-filters-btn" onClick={() => props.onFilters({ types: props.isAdmin ? ["company", "department", "individual"] : ["department", "individual"], location: "", departments: [...departments], sort: "goalTier", showInactive: false })}>Reset</button>
+          <Select value={props.filters.sort} onValueChange={(v) => props.onFilters({ ...props.filters, sort: v })}>
+            <SelectTrigger size="sm" className="min-w-[8rem] text-[12px]"><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="goalTier">Sort: Type</SelectItem>
+              <SelectItem value="department">Sort: Dept</SelectItem>
+              <SelectItem value="location">Sort: Location</SelectItem>
+              <SelectItem value="name">Sort: Name</SelectItem>
+            </SelectContent>
+          </Select>
+
+          <div className="ml-auto flex items-center gap-3 pl-1">
+            <div className="flex items-center gap-2 whitespace-nowrap">
+              <Checkbox id="goal-show-inactive" checked={props.filters.showInactive} onCheckedChange={(c) => props.onFilters({ ...props.filters, showInactive: c === true })} />
+              <Label htmlFor="goal-show-inactive" className="cursor-pointer text-[12px] font-normal text-muted-foreground">Show inactive</Label>
+            </div>
+            <Button variant="ghost" size="sm" className="text-[12px] font-normal text-muted-foreground" onClick={() => props.onFilters({ types: props.isAdmin ? ["company", "department", "individual"] : ["department", "individual"], location: "", departments: [...departments], sort: "goalTier", showInactive: false })}>Reset</Button>
+          </div>
         </div>
+        {monthStatus && periodTab === "monthly" && (
+          <div className="border-t border-border bg-muted/30 px-3 py-1.5 text-[11.5px] text-muted-foreground">{monthStatus}</div>
+        )}
       </section>
-      <section style={{ padding: 0 }}>
-        <div style={{ overflowX: "auto" }}>
-          <table className="data-table bank-table">
-            <colgroup>
-              <col style={{ width: "44px" }} />
-              <col style={{ width: "46px" }} />
-              <col style={{ width: "78px" }} />
-              <col />
-              <col style={{ width: "38px" }} />
-              <col style={{ width: "46px" }} />
-              <col style={{ width: "60px" }} />
-              <col style={{ width: "58px" }} />
-              <col style={{ width: "52px" }} />
-              <col style={{ width: "70px" }} />
-              <col style={{ width: "58px" }} />
-              <col style={{ width: "36px" }} />
-            </colgroup>
-            <thead>
-              <tr>
-                <th style={thCtx}>Type</th>
-                <th style={thCtx}>Loc</th>
-                <th style={thCtx}>Dept</th>
-                <th style={thGoal}>Goal Name</th>
-                <th style={{ ...thGoal, textAlign: "center" }}>Period</th>
-                <th style={thGoal}>Lower is Better</th>
-                <th style={thGoal}>Cap</th>
-                <th style={thTarget}>Target</th>
-                <th style={thTarget}>Min</th>
-                <th style={thActual}>Actual</th>
-                <th style={thStatus}>Status</th>
-                <th style={thStatus}></th>
-              </tr>
-            </thead>
-            <tbody>
-              {(periodTab === "monthly" ? monthlyGoals : []).map((goal) => {
-                const a = props.actuals;
-                return (
-                <React.Fragment key={goal.id}>
-                <tr style={(!goal.active || isMonthlyInactive(goal)) ? { opacity: 0.45 } : undefined}>
-                  <td style={thCtx}><TierBadge tier={goal.goalTier} /></td>
-                  <td style={{ ...thCtx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{locLabel(goal.location)}</td>
-                  <td style={{ ...thCtx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{goal.department || "—"}</td>
-                  <td style={{ ...thGoal, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {goal.name}{goal.goalTier === "individual" && (goal.employeeName || goal.role) && <span style={{ fontSize: "9px", padding: "1px 5px", borderRadius: "99px", background: "#e9e9e9", color: "#555", fontWeight: 600, fontFamily: "var(--mono)", whiteSpace: "nowrap", marginLeft: "4px" }}>{goal.employeeName || goal.role}</span>}
-                  </td>
-                  <td style={{ ...thGoal, textAlign: "center" }}><span style={{ fontSize: "9px", fontWeight: 700, fontFamily: "var(--mono)", color: "var(--text-muted)" }}>M</span></td>
-                  <td style={thGoal}>{goal.lowerBetter ? "Yes" : "No"}</td>
-                  <td style={thGoal}>{cappedLabel(goal)}</td>
-                  <td style={thTarget}>{a[metaKey("target", goal)] != null ? formatNumber(a[metaKey("target", goal)] as number) : "—"}</td>
-                  <td style={thTarget}>{a[metaKey("min", goal)] != null ? formatNumber(a[metaKey("min", goal)] as number) : "—"}</td>
-                  <td style={thActual} onClick={(e) => e.stopPropagation()}>
-                    {!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && goalHasTargets(goal) && actualEditId === goal.id ? (
-                      <input
-                        autoFocus
-                        aria-label={`Actual for ${goal.name}`}
-                        type="number"
-                        className="actual-inline-input"
-                        defaultValue={a[actualKey(goal)] ?? ""}
-                        onBlur={(e) => { const period = goal.periodType === "quarterly" ? quarterKey : undefined; props.onActual(goal, e.target.value, period); setActualEditId(null); }}
-                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setActualEditId(null); }}
-                      />
-                    ) : (
-                      <span className="actual-value" title={!goalHasTargets(goal) ? "Set a target and minimum first" : undefined} style={!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && !goalHasTargets(goal) ? { color: "var(--text-faint)", fontSize: "11px" } : undefined}>
-                        {a[actualKey(goal)] != null ? formatNumber(a[actualKey(goal)] as number) : ((!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && !goalHasTargets(goal)) ? "no target set" : "—")}
-                      </span>
-                    )}
-                  </td>
-                  <td style={thStatus}>
-                    {(() => { const on = goal.active && !isMonthlyInactive(goal); return (
-                      <span style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "99px", fontWeight: 600, background: on ? "#eef5ec" : "#f0ece6", color: on ? "#1a5c1a" : "#7a7268" }}>
-                        {on ? "Active" : "Inactive"}
-                      </span>
-                    ); })()}
-                  </td>
-                  {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && (
-                    <td style={{ ...thStatus, textAlign: "center" }} className="row-menu-cell" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        className="row-menu-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (menuOpenId === goal.id) {
-                            setMenuOpenId(null);
-                            setMenuPos(null);
-                          } else {
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
-                            setMenuOpenId(goal.id);
-                          }
-                        }}
-                      >⋮</button>
-                    </td>
-                  )}
-                  {(effectiveReadonly || (!props.isAdmin && goal.goalTier === "company")) && <td style={thStatus} />}
-                </tr>
-                {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && props.editingGoal?.id === goal.id && (
-                  <tr className="goal-editor-row">
-                    <td colSpan={12}>
-                      <GoalEditor goal={props.editingGoal} actuals={mergedActuals} isAdmin={props.isAdmin} allowedDepartments={props.allowedDepartments} teamEmployees={props.teamEmployees} onCancel={() => props.onEdit(null)} onSave={props.onSave} onSaveTargetPair={handleSaveTargetPair} />
-                    </td>
-                  </tr>
-                )}
-                </React.Fragment>
-                );
-              })}
-              {(periodTab === "quarterly" ? quarterlyGoals : []).map((goal) => {
-                const a = quarterActuals;
-                return (
-                <React.Fragment key={goal.id}>
-                <tr style={(!goal.active || isMonthlyInactive(goal)) ? { opacity: 0.45 } : undefined}>
-                  <td style={thCtx}><TierBadge tier={goal.goalTier} /></td>
-                  <td style={{ ...thCtx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{locLabel(goal.location)}</td>
-                  <td style={{ ...thCtx, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{goal.department || "—"}</td>
-                  <td style={{ ...thGoal, fontWeight: 600, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                    {goal.name}{goal.goalTier === "individual" && (goal.employeeName || goal.role) && <span style={{ fontSize: "9px", padding: "1px 5px", borderRadius: "99px", background: "#e9e9e9", color: "#555", fontWeight: 600, fontFamily: "var(--mono)", whiteSpace: "nowrap", marginLeft: "4px" }}>{goal.employeeName || goal.role}</span>}
-                  </td>
-                  <td style={{ ...thGoal, textAlign: "center" }}><span style={{ fontSize: "9px", fontWeight: 700, fontFamily: "var(--mono)", color: "#7a4400", background: "#fdf0e0", padding: "1px 4px", borderRadius: "3px" }}>Q</span></td>
-                  <td style={thGoal}>{goal.lowerBetter ? "Yes" : "No"}</td>
-                  <td style={thGoal}>{cappedLabel(goal)}</td>
-                  <td style={thTarget}>{a[metaKey("target", goal)] != null ? formatNumber(a[metaKey("target", goal)] as number) : "—"}</td>
-                  <td style={thTarget}>{a[metaKey("min", goal)] != null ? formatNumber(a[metaKey("min", goal)] as number) : "—"}</td>
-                  <td style={thActual} onClick={(e) => e.stopPropagation()}>
-                    {!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && goalHasTargets(goal) && actualEditId === goal.id ? (
-                      <input
-                        autoFocus
-                        aria-label={`Actual for ${goal.name}`}
-                        type="number"
-                        className="actual-inline-input"
-                        defaultValue={a[actualKey(goal)] ?? ""}
-                        onBlur={(e) => { const period = goal.periodType === "quarterly" ? quarterKey : undefined; props.onActual(goal, e.target.value, period); setActualEditId(null); }}
-                        onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setActualEditId(null); }}
-                      />
-                    ) : (
-                      <span className="actual-value" title={!goalHasTargets(goal) ? "Set a target and minimum first" : undefined} style={!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && !goalHasTargets(goal) ? { color: "var(--text-faint)", fontSize: "11px" } : undefined}>
-                        {a[actualKey(goal)] != null ? formatNumber(a[actualKey(goal)] as number) : ((!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && !goalHasTargets(goal)) ? "no target set" : "—")}
-                      </span>
-                    )}
-                  </td>
-                  <td style={thStatus}>
-                    {(() => { const on = goal.active && !isMonthlyInactive(goal); return (
-                      <span style={{ fontSize: "9px", padding: "1px 6px", borderRadius: "99px", fontWeight: 600, background: on ? "#eef5ec" : "#f0ece6", color: on ? "#1a5c1a" : "#7a7268" }}>
-                        {on ? "Active" : "Inactive"}
-                      </span>
-                    ); })()}
-                  </td>
-                  {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && (
-                    <td style={{ ...thStatus, textAlign: "center" }} className="row-menu-cell" onClick={(e) => e.stopPropagation()}>
-                      <button
-                        className="row-menu-btn"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          if (menuOpenId === goal.id) {
-                            setMenuOpenId(null);
-                            setMenuPos(null);
-                          } else {
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            setMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
-                            setMenuOpenId(goal.id);
-                          }
-                        }}
-                      >⋮</button>
-                    </td>
-                  )}
-                  {(effectiveReadonly || (!props.isAdmin && goal.goalTier === "company")) && <td style={thStatus} />}
-                </tr>
-                {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && props.editingGoal?.id === goal.id && (
-                  <tr className="goal-editor-row">
-                    <td colSpan={12}>
-                      <GoalEditor goal={props.editingGoal} actuals={mergedActuals} isAdmin={props.isAdmin} allowedDepartments={props.allowedDepartments} teamEmployees={props.teamEmployees} onCancel={() => props.onEdit(null)} onSave={props.onSave} onSaveTargetPair={handleSaveTargetPair} />
-                    </td>
-                  </tr>
-                )}
-                </React.Fragment>
-                );
-              })}
-              {!effectiveReadonly && props.editingGoal && !props.goals.find((g) => g.id === props.editingGoal!.id) && (
-                <tr className="goal-editor-row">
-                  <td colSpan={12}>
-                    <GoalEditor goal={props.editingGoal} actuals={mergedActuals} isAdmin={props.isAdmin} allowedDepartments={props.allowedDepartments} teamEmployees={props.teamEmployees} onCancel={() => props.onEdit(null)} onSave={props.onSave} onSaveTargetPair={handleSaveTargetPair} />
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+      <section style={{ padding: 0 }} className="overflow-hidden">
+        <Table className="table-fixed text-[12.5px]">
+          <colgroup>
+            <col style={{ width: "44px" }} />
+            <col style={{ width: "38px" }} />
+            <col style={{ width: "68px" }} />
+            <col />
+            <col style={{ width: "42px" }} />
+            <col style={{ width: "68px" }} />
+            <col style={{ width: "52px" }} />
+            <col style={{ width: "46px" }} />
+            <col style={{ width: "72px" }} />
+            <col style={{ width: "66px" }} />
+            <col style={{ width: "46px" }} />
+          </colgroup>
+          <TableHeader className="bg-muted/40 [&_th]:h-9 [&_th]:px-2 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wider [&_th]:text-muted-foreground">
+            <TableRow className="hover:bg-transparent">
+              <TableHead>Type</TableHead>
+              <TableHead>Loc</TableHead>
+              <TableHead>Dept</TableHead>
+              <TableHead>Goal</TableHead>
+              <TableHead>Lower</TableHead>
+              <TableHead>Cap</TableHead>
+              <TableHead className="text-right">Target</TableHead>
+              <TableHead className="text-right">Min</TableHead>
+              <TableHead className="text-right">Actual</TableHead>
+              <TableHead>Status</TableHead>
+              <TableHead />
+            </TableRow>
+          </TableHeader>
+          <TableBody className="[&_td]:px-2 [&_td]:py-2">
+            {(periodTab === "monthly" ? monthlyGoals : quarterlyGoals).map(renderGoalRow)}
+          </TableBody>
+        </Table>
         {(periodTab === "monthly" ? monthlyGoals : quarterlyGoals).length === 0 && <div className="no-goals-msg" style={{ display: "block" }}>No {periodTab} goals match the current filter</div>}
         {!effectiveReadonly && (
           <div style={{ padding: "12px 16px" }}>
@@ -2312,47 +2487,37 @@ function GoalsScreen(props: {
           </div>
         )}
       </section>
-      {menuOpenId && menuPos && (() => {
-        const goal = props.goals.find((g) => g.id === menuOpenId);
-        if (!goal) return null;
-        return (
-          <div
-            className="row-menu"
-            style={{ position: "fixed", top: menuPos.top, right: menuPos.right, zIndex: 1000 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && <button onClick={() => { props.onEdit(goal); setMenuOpenId(null); setMenuPos(null); }}>Edit goal</button>}
-            {!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && goalHasTargets(goal) && <button onClick={() => { setActualEditId(goal.id); setMenuOpenId(null); setMenuPos(null); }}>Enter actual</button>}
-            {!actualsReadonly && (props.isAdmin || goal.goalTier !== "company") && !goalHasTargets(goal) && <span style={{ display: "block", padding: "8px 12px", fontSize: "12px", color: "var(--text-faint)" }}>Set target first</span>}
-            {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && <button onClick={() => { props.onToggleMonth(goal); setMenuOpenId(null); setMenuPos(null); }}>{isMonthlyInactive(goal) ? "Activate for this month" : "Deactivate for this month"}</button>}
-            {!effectiveReadonly && (props.isAdmin || goal.goalTier !== "company") && <button onClick={() => { props.onDelete(goal.id); setMenuOpenId(null); setMenuPos(null); }} style={{ color: "#9B2C2C" }}>Delete goal</button>}
-            {(!props.isAdmin && goal.goalTier === "company") && <span style={{ display: "block", padding: "8px 12px", fontSize: "12px", color: "var(--text-faint)" }}>No edits allowed</span>}
-          </div>
-        );
-      })()}
+
+      <Sheet open={!!props.editingGoal} onOpenChange={(open) => { if (!open) props.onEdit(null); }}>
+        <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
+          {props.editingGoal ? (
+            <GoalEditor
+              key={props.editingGoal.id}
+              goal={props.editingGoal}
+              actuals={mergedActuals}
+              isAdmin={props.isAdmin}
+              allowedDepartments={props.allowedDepartments}
+              teamEmployees={props.teamEmployees}
+              onCancel={() => props.onEdit(null)}
+              onSave={props.onSave}
+              onSaveTargetPair={handleSaveTargetPair}
+            />
+          ) : null}
+        </SheetContent>
+      </Sheet>
     </div>
   );
 }
 
-function MultiSelectDropdown({ label, options, selected, onChange, emptyLabel }: {
+function MultiSelectDropdown({ label, options, selected, onChange, emptyLabel, triggerClassName }: {
   label: string;
   options: { value: string; label: string }[];
   selected: string[];
   onChange: (values: string[]) => void;
   emptyLabel?: string;
+  triggerClassName?: string;
 }) {
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    function close(e: MouseEvent) {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
-    }
-    document.addEventListener("mousedown", close);
-    return () => document.removeEventListener("mousedown", close);
-  }, []);
-
-  const allChecked = selected.length === options.length;
+  const allChecked = selected.length === options.length && options.length > 0;
   const noneChecked = selected.length === 0;
 
   let displayLabel = label;
@@ -2364,31 +2529,33 @@ function MultiSelectDropdown({ label, options, selected, onChange, emptyLabel }:
   }
 
   function toggleOne(value: string) {
-    const next = selected.includes(value)
-      ? selected.filter((v) => v !== value)
-      : [...selected, value];
-    onChange(next);
+    onChange(selected.includes(value) ? selected.filter((v) => v !== value) : [...selected, value]);
   }
 
   return (
-    <div ref={ref} className={`multi-select-dropdown${open ? " open" : ""}`} onClick={(e) => e.stopPropagation()}>
-      <div className="multi-select-trigger" onClick={() => setOpen(!open)}>
-        <span>{displayLabel}</span>
-        <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>&#9660;</span>
-      </div>
-      <div className="multi-select-menu">
-        <label className="multi-select-item" style={{ borderBottom: "1px solid var(--border)", marginBottom: "4px", paddingBottom: "6px" }}>
-          <input type="checkbox" checked={allChecked} onChange={toggleAll} style={{ accentColor: "var(--brick)" }} />
-          <em>{label}</em>
-        </label>
+    <DropdownMenu>
+      <DropdownMenuTrigger className={`flex h-8 items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-[12px] text-foreground shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[state=open]:border-ring ${triggerClassName ?? "w-full"}`}>
+        <span className="truncate">{displayLabel}</span>
+        <ChevronDown className="size-4 shrink-0 text-muted-foreground opacity-50" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start" className="min-w-[var(--radix-dropdown-menu-trigger-width)]">
+        <DropdownMenuCheckboxItem checked={allChecked} onCheckedChange={toggleAll} onSelect={(e) => e.preventDefault()} className="text-[13px] italic">
+          {label}
+        </DropdownMenuCheckboxItem>
+        <DropdownMenuSeparator />
         {options.map((opt) => (
-          <label key={opt.value} className="multi-select-item">
-            <input type="checkbox" value={opt.value} checked={selected.includes(opt.value)} onChange={() => toggleOne(opt.value)} style={{ accentColor: "var(--brick)" }} />
+          <DropdownMenuCheckboxItem
+            key={opt.value}
+            checked={selected.includes(opt.value)}
+            onCheckedChange={() => toggleOne(opt.value)}
+            onSelect={(e) => e.preventDefault()}
+            className="text-[13px]"
+          >
             {opt.label}
-          </label>
+          </DropdownMenuCheckboxItem>
         ))}
-      </div>
-    </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 
@@ -2412,6 +2579,26 @@ function GoalScopeTags({ location, department }: { location?: string; department
       {location && <span style={tagStyle}>{location}</span>}
       {department && <span style={tagStyle}>{department}</span>}
     </>
+  );
+}
+
+// Sentinel for the "all locations / all departments" Select option (Radix forbids empty values).
+const GOAL_ALL = "__all__";
+
+function DrawerField({ label, required, htmlFor, className, children }: {
+  label: string;
+  required?: boolean;
+  htmlFor?: string;
+  className?: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <div className={`grid gap-1.5 ${className ?? ""}`}>
+      <Label htmlFor={htmlFor} className="text-[12px] font-medium text-muted-foreground">
+        {label}{required ? <span className="text-primary"> *</span> : null}
+      </Label>
+      {children}
+    </div>
   );
 }
 
@@ -2472,100 +2659,142 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, teamEmployees,
     const savedGoal = await onSave(finalGoal);
     if (savedGoal === null) return;
     await onSaveTargetPair(savedGoal || finalGoal, target, min);
+    onCancel(); // close the drawer on success
   }
 
-  const reqStyle: React.CSSProperties = { color: "var(--brick)", marginLeft: 2 };
-
   return (
-    <div className="goal-editor-inline">
-      <div className="section-title" style={{ marginBottom: 12 }}>{goal.name ? "Edit Goal" : "Add Goal"}</div>
-      <div className="fields-grid">
-        <div className="field">
-          <label>Type<span style={reqStyle}>*</span></label>
-          <select value={tierVal} onChange={(e) => { setTierVal(e.target.value); setEmpVal("__unset__"); }} style={!tierVal ? { color: "var(--text-muted)" } : undefined}>
-            <option value="" disabled hidden>— select —</option>
-            {isAdmin && <option value="company">Company</option>}
-            <option value="department">Department</option>
-            <option value="individual">Individual</option>
-          </select>
-        </div>
-        {!isIndividual && (
-          <div className="field">
-            <label>Location<span style={reqStyle}>*</span></label>
-            <select value={locVal} onChange={(e) => setLocVal(e.target.value)} style={locVal === "__unset__" ? { color: "var(--text-muted)" } : undefined}>
-              <option value="__unset__" disabled hidden>— select —</option>
-              <option value="">All locations</option>
-              <option>Utah</option>
-              <option>Georgia</option>
-              <option>Remote</option>
-            </select>
+    <>
+      <SheetHeader>
+        <div className="flex items-start justify-between gap-3">
+          <div className="grid gap-1">
+            <SheetTitle>{isNew ? "New goal" : "Edit goal"}</SheetTitle>
+            <SheetDescription>
+              {isNew ? "Add a goal to the bank." : (draft.name || "Edit this goal’s details.")}
+            </SheetDescription>
           </div>
-        )}
-        <div className="field">
-          <label>Department<span style={reqStyle}>*</span></label>
-          <select value={deptVal} onChange={(e) => { setDeptVal(e.target.value); setEmpVal("__unset__"); }} style={deptVal === "__unset__" ? { color: "var(--text-muted)" } : undefined}>
-            <option value="__unset__" disabled hidden>— select —</option>
-            {isAdmin && !isIndividual && <option value="">All departments</option>}
-            {visibleDepartments.map((d) => <option key={d}>{d}</option>)}
-          </select>
+          <SheetClose className="-mr-1 -mt-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50">
+            <X className="size-4" />
+            <span className="sr-only">Close</span>
+          </SheetClose>
         </div>
-        {isIndividual && (
-          <div className="field">
-            <label>Employee<span style={reqStyle}>*</span></label>
-            <select value={empVal} onChange={(e) => setEmpVal(e.target.value)} style={empVal === "__unset__" ? { color: "var(--text-muted)" } : undefined}>
-              <option value="__unset__" disabled hidden>— select —</option>
-              {filteredEmployees.length > 0
-                ? filteredEmployees.map((e) => <option key={e.name} value={e.name}>{e.name}</option>)
-                : (teamEmployees || []).sort((a, b) => a.name.localeCompare(b.name)).map((e) => <option key={e.name} value={e.name}>{e.name}</option>)
-              }
-            </select>
+      </SheetHeader>
+
+      <div className="flex-1 overflow-y-auto px-5 py-4">
+        <div className="grid gap-4">
+          <DrawerField label="Goal name" required htmlFor="goal-name">
+            <Input id="goal-name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Monthly Revenue" />
+          </DrawerField>
+
+          <DrawerField label="Type" required>
+            <Select value={tierVal || undefined} onValueChange={(v) => { setTierVal(v); setEmpVal("__unset__"); }}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select type…" /></SelectTrigger>
+              <SelectContent>
+                {isAdmin && <SelectItem value="company">Company</SelectItem>}
+                <SelectItem value="department">Department</SelectItem>
+                <SelectItem value="individual">Individual</SelectItem>
+              </SelectContent>
+            </Select>
+          </DrawerField>
+
+          {!isIndividual && (
+            <DrawerField label="Location" required>
+              <Select value={locVal === "__unset__" ? undefined : (locVal === "" ? GOAL_ALL : locVal)} onValueChange={(v) => setLocVal(v === GOAL_ALL ? "" : v)}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Select location…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value={GOAL_ALL}>All locations</SelectItem>
+                  <SelectItem value="Utah">Utah</SelectItem>
+                  <SelectItem value="Georgia">Georgia</SelectItem>
+                  <SelectItem value="Remote">Remote</SelectItem>
+                </SelectContent>
+              </Select>
+            </DrawerField>
+          )}
+
+          <DrawerField label="Department" required>
+            <Select value={deptVal === "__unset__" ? undefined : (deptVal === "" ? GOAL_ALL : deptVal)} onValueChange={(v) => { setDeptVal(v === GOAL_ALL ? "" : v); setEmpVal("__unset__"); }}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select department…" /></SelectTrigger>
+              <SelectContent>
+                {isAdmin && !isIndividual && <SelectItem value={GOAL_ALL}>All departments</SelectItem>}
+                {visibleDepartments.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </DrawerField>
+
+          {isIndividual && (
+            <DrawerField label="Employee" required>
+              <Select value={empVal === "__unset__" ? undefined : empVal} onValueChange={(v) => setEmpVal(v)}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Select employee…" /></SelectTrigger>
+                <SelectContent>
+                  {(filteredEmployees.length > 0 ? filteredEmployees : (teamEmployees || []).slice().sort((a, b) => a.name.localeCompare(b.name))).map((e) => (
+                    <SelectItem key={e.name} value={e.name}>{e.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </DrawerField>
+          )}
+
+          <DrawerField label="Period" required>
+            <Select value={periodVal || undefined} onValueChange={(v) => setPeriodVal(v)}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select period…" /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="monthly">Monthly</SelectItem>
+                <SelectItem value="quarterly">Quarterly</SelectItem>
+              </SelectContent>
+            </Select>
+          </DrawerField>
+
+          <div className="grid grid-cols-2 gap-3">
+            <DrawerField label="Target" htmlFor="goal-target">
+              <Input id="goal-target" type="number" value={target} onChange={(e) => setTarget(e.target.value)} />
+            </DrawerField>
+            <DrawerField label="Minimum" htmlFor="goal-min">
+              <Input id="goal-min" type="number" value={min} onChange={(e) => setMin(e.target.value)} />
+            </DrawerField>
           </div>
-        )}
-        <div className="field half"><label>Goal Name<span style={reqStyle}>*</span></label><input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Monthly Revenue" /></div>
-        <div className="field"><label>Target</label><input type="number" value={target} onChange={(e) => setTarget(e.target.value)} /></div>
-        <div className="field"><label>Minimum</label><input type="number" value={min} onChange={(e) => setMin(e.target.value)} /></div>
-        <div className="field">
-          <label>Lower is Better<span style={reqStyle}>*</span></label>
-          <select value={lowerVal} onChange={(e) => setLowerVal(e.target.value)} style={!lowerVal ? { color: "var(--text-muted)" } : undefined}>
-            <option value="" disabled hidden>— select —</option>
-            <option value="false">No</option>
-            <option value="true">Yes</option>
-          </select>
-        </div>
-        <div className="field">
-          <label>Capped<span style={reqStyle}>*</span></label>
-          <select value={cappedVal} onChange={(e) => setCappedVal(e.target.value)} style={!cappedVal ? { color: "var(--text-muted)" } : undefined}>
-            <option value="" disabled hidden>— select —</option>
-            <option value="no">No</option>
-            <option value="yes">Yes</option>
-          </select>
-        </div>
-        {cappedVal === "yes" && (
-          <div className="field"><label>Cap %</label><input type="number" value={draft.capPct} onChange={(e) => setDraft({ ...draft, capPct: Number(e.target.value) })} /></div>
-        )}
-        <div className="field">
-          <label>Period Type<span style={reqStyle}>*</span></label>
-          <select value={periodVal} onChange={(e) => setPeriodVal(e.target.value)} style={!periodVal ? { color: "var(--text-muted)" } : undefined}>
-            <option value="" disabled hidden>— select —</option>
-            <option value="monthly">Monthly</option>
-            <option value="quarterly">Quarterly</option>
-          </select>
-        </div>
-        <div className="field">
-          <label>Weight %<span style={reqStyle}>*</span></label>
-          <input type="number" min="0" max="100" step="0.1" value={weightVal} onChange={(e) => setWeightVal(e.target.value)} placeholder="e.g. 25" />
+
+          <div className="grid grid-cols-2 gap-3">
+            <DrawerField label="Lower is better" required>
+              <Select value={lowerVal || undefined} onValueChange={(v) => setLowerVal(v)}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Select…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="false">No</SelectItem>
+                  <SelectItem value="true">Yes</SelectItem>
+                </SelectContent>
+              </Select>
+            </DrawerField>
+            <DrawerField label="Capped" required>
+              <Select value={cappedVal || undefined} onValueChange={(v) => setCappedVal(v)}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Select…" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="no">No</SelectItem>
+                  <SelectItem value="yes">Yes</SelectItem>
+                </SelectContent>
+              </Select>
+            </DrawerField>
+          </div>
+
+          {cappedVal === "yes" && (
+            <DrawerField label="Cap %" htmlFor="goal-cap">
+              <Input id="goal-cap" type="number" value={draft.capPct} onChange={(e) => setDraft({ ...draft, capPct: Number(e.target.value) })} />
+            </DrawerField>
+          )}
+
+          <DrawerField label="Weight %" required htmlFor="goal-weight">
+            <Input id="goal-weight" type="number" min="0" max="100" step="0.1" value={weightVal} onChange={(e) => setWeightVal(e.target.value)} placeholder="e.g. 25" />
+          </DrawerField>
         </div>
       </div>
-      {!canSave && missing.length > 0 && (
-        <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: 8, fontFamily: "var(--sans)" }}>
-          Required: {missing.join(", ")}
-        </div>
-      )}
-      <div className="button-row">
-        <button className="submit-btn" onClick={handleSave} disabled={!canSave} title={!canSave ? `Complete required fields: ${missing.join(", ")}` : undefined}>Save Goal</button>
-        <button onClick={onCancel}>Cancel</button>
-      </div>
-    </div>
+
+      <SheetFooter>
+        {!canSave && missing.length > 0 && (
+          <p className="mr-auto text-[11.5px] text-muted-foreground sm:self-center">Required: {missing.join(", ")}</p>
+        )}
+        <Button variant="outline" onClick={onCancel}>Cancel</Button>
+        <Button onClick={handleSave} disabled={!canSave} title={!canSave ? `Complete required fields: ${missing.join(", ")}` : undefined}>
+          {isNew ? "Create goal" : "Save changes"}
+        </Button>
+      </SheetFooter>
+    </>
   );
 }
 
@@ -2586,7 +2815,6 @@ function ScorecardsScreen(props: {
   const [filterEmployees, setFilterEmployees] = useState<string[]>([]);
   const [filterDepts, setFilterDepts] = useState<string[]>([]);
   const [filterLocations, setFilterLocations] = useState<string[]>([]);
-  const [monthPickerOpen, setMonthPickerOpen] = useState(false);
   const [globalPeriodType, setGlobalPeriodType] = useState<"monthly" | "quarterly">("monthly");
 
   // Single-month mode = exactly one month selected → live draft cards
@@ -2698,114 +2926,95 @@ function ScorecardsScreen(props: {
     ? formatMonthLabel(props.selectedMonths[0])
     : `${props.selectedMonths.length} months selected`;
 
-  const filterStyle: React.CSSProperties = { display: "block", padding: "7px 10px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", fontFamily: "var(--sans)", fontSize: "12px", background: "var(--surface)" };
-  const filterLabelStyle: React.CSSProperties = { fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.5px", fontFamily: "var(--mono)", marginBottom: "4px" };
-
   return (
-    <div className="screen active" onClick={() => setMonthPickerOpen(false)}>
-      <section style={{ padding: "14px 16px", borderBottom: "1px solid var(--border)" }}>
-        <div style={{ display: "flex", alignItems: "flex-end", gap: "12px", flexWrap: "wrap" }}>
-          {/* Month multi-select */}
-          <div onClick={(e) => e.stopPropagation()}>
-            <div style={filterLabelStyle}>MONTH</div>
-            <div style={{ position: "relative" }}>
-              <button
-                style={{ ...filterStyle, cursor: "pointer", display: "flex", alignItems: "center", gap: "8px", minWidth: 180 }}
-                onClick={() => setMonthPickerOpen(!monthPickerOpen)}
-              >
-                <span style={{ flex: 1, textAlign: "left" }}>{monthPickerLabel}</span>
-                <span style={{ fontSize: "10px", color: "var(--text-muted)" }}>▾</span>
-              </button>
-              {monthPickerOpen && (
-                <div style={{ position: "absolute", top: "calc(100% + 4px)", left: 0, background: "var(--surface)", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", boxShadow: "0 4px 16px rgba(0,0,0,0.12)", zIndex: 200, minWidth: "200px", maxHeight: "300px", overflowY: "auto" }}>
-                  <button
-                    style={{ display: "block", width: "100%", padding: "8px 14px", border: "none", borderBottom: "1px solid var(--border)", background: props.selectedMonths.length === 0 ? "var(--surface2)" : "none", textAlign: "left", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "12px", fontWeight: 600, color: "var(--text)" }}
-                    onClick={() => { props.onMonths([]); setFilterEmployees([]); setMonthPickerOpen(false); }}
-                  >All months</button>
-                  {relevantMonths.map((m) => (
-                    <label key={m} style={{ display: "flex", alignItems: "center", gap: "10px", padding: "7px 14px", cursor: "pointer", fontSize: "12px", fontFamily: "var(--sans)", color: "var(--text)", whiteSpace: "nowrap", userSelect: "none" }}>
-                      <input
-                        type="checkbox"
-                        checked={props.selectedMonths.includes(m)}
-                        onChange={(e) => {
-                          const next = e.target.checked
-                            ? [...props.selectedMonths, m].sort().reverse()
-                            : props.selectedMonths.filter((x) => x !== m);
-                          props.onMonths(next);
-                          setFilterEmployees([]);
-                        }}
-                        style={{ cursor: "pointer", accentColor: "var(--brick)", width: 14, height: 14, flexShrink: 0, margin: 0 }}
-                      />
-                      <span>{formatMonthLabel(m)}</span>
-                    </label>
-                  ))}
-                </div>
-              )}
-            </div>
-          </div>
+    <div className="screen active">
+      <section style={{ padding: 0 }} className="overflow-hidden">
+        <div className="flex flex-wrap items-center gap-2 p-2.5">
+          <Tabs value={globalPeriodType} onValueChange={(v) => setGlobalPeriodType(v as "monthly" | "quarterly")}>
+            <TabsList className="h-8">
+              <TabsTrigger value="monthly" className="px-3 text-[12px] data-[state=active]:bg-card data-[state=active]:text-foreground">Monthly</TabsTrigger>
+              <TabsTrigger value="quarterly" className="px-3 text-[12px] data-[state=active]:bg-card data-[state=active]:text-foreground">Quarterly</TabsTrigger>
+            </TabsList>
+          </Tabs>
 
-          {/* Global Monthly / Quarterly toggle */}
-          <div>
-            <div style={filterLabelStyle}>PERIOD</div>
-            <div style={{ display: "flex", borderRadius: "var(--radius-sm)", border: "1.5px solid var(--border)", overflow: "hidden" }}>
-              <button style={{ padding: "6px 16px", border: "none", fontFamily: "var(--sans)", fontSize: "12px", fontWeight: 700, cursor: "pointer", background: globalPeriodType === "monthly" ? "var(--brick)" : "var(--surface)", color: globalPeriodType === "monthly" ? "#fff" : "var(--text-muted)", transition: "background 0.15s, color 0.15s" }} onClick={() => setGlobalPeriodType("monthly")}>Monthly</button>
-              <button style={{ padding: "6px 16px", border: "none", borderLeft: "1.5px solid var(--border)", fontFamily: "var(--sans)", fontSize: "12px", fontWeight: 700, cursor: "pointer", background: globalPeriodType === "quarterly" ? "var(--brick)" : "var(--surface)", color: globalPeriodType === "quarterly" ? "#fff" : "var(--text-muted)", transition: "background 0.15s, color 0.15s" }} onClick={() => setGlobalPeriodType("quarterly")}>Quarterly</button>
-            </div>
-          </div>
+          <DropdownMenu>
+            <DropdownMenuTrigger className="flex h-8 w-auto min-w-[9rem] items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-[12px] text-foreground shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[state=open]:border-ring">
+              <span className="truncate">{monthPickerLabel}</span>
+              <ChevronDown className="size-4 shrink-0 text-muted-foreground opacity-50" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="start" className="max-h-[320px] overflow-y-auto">
+              <DropdownMenuCheckboxItem
+                checked={props.selectedMonths.length === 0}
+                onCheckedChange={() => { props.onMonths([]); setFilterEmployees([]); }}
+                onSelect={(e) => e.preventDefault()}
+                className="text-[13px] font-medium"
+              >All months</DropdownMenuCheckboxItem>
+              <DropdownMenuSeparator />
+              {relevantMonths.map((m) => (
+                <DropdownMenuCheckboxItem
+                  key={m}
+                  checked={props.selectedMonths.includes(m)}
+                  onCheckedChange={(checked) => {
+                    const next = checked
+                      ? [...props.selectedMonths, m].sort().reverse()
+                      : props.selectedMonths.filter((x) => x !== m);
+                    props.onMonths(next);
+                    setFilterEmployees([]);
+                  }}
+                  onSelect={(e) => e.preventDefault()}
+                  className="text-[13px]"
+                >{formatMonthLabel(m)}</DropdownMenuCheckboxItem>
+              ))}
+            </DropdownMenuContent>
+          </DropdownMenu>
+
+          <Separator orientation="vertical" className="mx-0.5 hidden h-5 sm:block" />
 
           {showLocationFilter && (
-            <div>
-              <div style={filterLabelStyle}>LOCATION</div>
-              <MultiSelectDropdown
-                label="All locations"
-                emptyLabel="All locations"
-                options={teamLocations.map((l) => ({ value: l, label: l }))}
-                selected={filterLocations}
-                onChange={(v) => { setFilterLocations(v); setFilterEmployees([]); }}
-              />
-            </div>
+            <MultiSelectDropdown
+              label="All locations"
+              emptyLabel="All locations"
+              triggerClassName="w-auto min-w-[8rem]"
+              options={teamLocations.map((l) => ({ value: l, label: l }))}
+              selected={filterLocations}
+              onChange={(v) => { setFilterLocations(v); setFilterEmployees([]); }}
+            />
           )}
           {showDeptFilter && (
-            <div>
-              <div style={filterLabelStyle}>DEPARTMENT</div>
-              <MultiSelectDropdown
-                label="All departments"
-                emptyLabel="All departments"
-                options={teamDepts.map((d) => ({ value: d, label: d }))}
-                selected={filterDepts}
-                onChange={(v) => { setFilterDepts(v); setFilterEmployees([]); }}
-              />
-            </div>
-          )}
-          <div>
-            <div style={filterLabelStyle}>EMPLOYEE</div>
             <MultiSelectDropdown
-              label="All employees"
-              emptyLabel="All employees"
-              options={employeeOptions.map((name) => ({ value: name, label: name }))}
-              selected={filterEmployees}
-              onChange={setFilterEmployees}
+              label="All departments"
+              emptyLabel="All departments"
+              triggerClassName="w-auto min-w-[8rem]"
+              options={teamDepts.map((d) => ({ value: d, label: d }))}
+              selected={filterDepts}
+              onChange={(v) => { setFilterDepts(v); setFilterEmployees([]); }}
             />
-          </div>
+          )}
+          <MultiSelectDropdown
+            label="All employees"
+            emptyLabel="All employees"
+            triggerClassName="w-auto min-w-[9rem]"
+            options={employeeOptions.map((name) => ({ value: name, label: name }))}
+            selected={filterEmployees}
+            onChange={setFilterEmployees}
+          />
         </div>
       </section>
 
       {singleMonthMode ? (
-        <section>
-          <div style={{ padding: "14px 16px 6px" }}>
-            <div className="section-title" style={{ margin: 0 }}>
-              {filteredEmployees.length} team member{filteredEmployees.length !== 1 ? "s" : ""}
-              <span style={{ fontWeight: 400, color: "var(--text-muted)", marginLeft: 6, fontSize: "12px" }}>
-                {filterEmployees.length === 1
-                  ? filterEmployees[0]
-                  : [
-                      filterLocations.length > 0 && filterLocations.length < teamLocations.length ? filterLocations.join(", ") : "",
-                      filterDepts.length > 0 && filterDepts.length < teamDepts.length ? filterDepts.join(", ") : "",
-                    ].filter(Boolean).join(" · ") || periodLabel}
-              </span>
-            </div>
+        <section style={{ background: "transparent", border: "none", boxShadow: "none", padding: 0 }}>
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-0.5 pb-3 pt-1">
+            <h2 className="text-[13px] font-semibold text-foreground">{filteredEmployees.length} team member{filteredEmployees.length !== 1 ? "s" : ""}</h2>
+            <span className="text-[12px] text-muted-foreground">
+              {filterEmployees.length === 1
+                ? filterEmployees[0]
+                : [
+                    filterLocations.length > 0 && filterLocations.length < teamLocations.length ? filterLocations.join(", ") : "",
+                    filterDepts.length > 0 && filterDepts.length < teamDepts.length ? filterDepts.join(", ") : "",
+                  ].filter(Boolean).join(" · ") || periodLabel}
+            </span>
           </div>
-          <div className="scorecard-list" style={{ padding: "8px 16px 16px" }}>
+          <div className="scorecard-list" style={{ padding: 0 }}>
             {noRippling && (
               <div className="no-goals-msg" style={{ display: "block" }}>No employee data available. Upload a Rippling CSV first.</div>
             )}
@@ -2835,21 +3044,19 @@ function ScorecardsScreen(props: {
           </div>
         </section>
       ) : (
-        <section>
-          <div style={{ padding: "14px 16px 6px" }}>
-            <div className="section-title" style={{ margin: 0 }}>
-              {displayMonths.length} month{displayMonths.length !== 1 ? "s" : ""}
-              <span style={{ fontWeight: 400, color: "var(--text-muted)", marginLeft: 6, fontSize: "12px" }}>
-                {filterEmployees.length === 1
-                  ? filterEmployees[0]
-                  : [
-                      filterLocations.length > 0 && filterLocations.length < teamLocations.length ? filterLocations.join(", ") : "",
-                      filterDepts.length > 0 && filterDepts.length < teamDepts.length ? filterDepts.join(", ") : "",
-                    ].filter(Boolean).join(" · ") || monthPickerLabel.toLowerCase()}
-              </span>
-            </div>
+        <section style={{ background: "transparent", border: "none", boxShadow: "none", padding: 0 }}>
+          <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-0.5 pb-3 pt-1">
+            <h2 className="text-[13px] font-semibold text-foreground">{displayMonths.length} month{displayMonths.length !== 1 ? "s" : ""}</h2>
+            <span className="text-[12px] text-muted-foreground">
+              {filterEmployees.length === 1
+                ? filterEmployees[0]
+                : [
+                    filterLocations.length > 0 && filterLocations.length < teamLocations.length ? filterLocations.join(", ") : "",
+                    filterDepts.length > 0 && filterDepts.length < teamDepts.length ? filterDepts.join(", ") : "",
+                  ].filter(Boolean).join(" · ") || monthPickerLabel.toLowerCase()}
+            </span>
           </div>
-          <div className="scorecard-list" style={{ padding: "8px 16px 16px" }}>
+          <div className="scorecard-list" style={{ padding: 0 }}>
             {displayMonths.length === 0 ? (
               <div className="no-goals-msg" style={{ display: "block" }}>No data available. Upload a Rippling CSV to get started.</div>
             ) : displayMonths.map((m) => {
@@ -2869,8 +3076,8 @@ function ScorecardsScreen(props: {
                 ...(props.allActuals[quarterKeyForMonth(m)] || {}),
               };
               return (
-                <div key={m}>
-                  <div style={{ fontSize: "11px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)", letterSpacing: "0.5px", padding: "10px 0 6px", textTransform: "uppercase" }}>
+                <div key={m} className="flex flex-col gap-2.5">
+                  <div className="px-0.5 pb-0 pt-2 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
                     {mLabel}
                   </div>
                   {mFiltered.length === 0 ? (
@@ -2907,6 +3114,48 @@ function ScorecardsScreen(props: {
   );
 }
 
+function GoalRowMenu({ goalName, currentWeight, onApplyWeight, onRemove }: {
+  goalName: string;
+  currentWeight: string;
+  onApplyWeight: (weight: string) => void;
+  onRemove: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [weight, setWeight] = useState(currentWeight);
+  return (
+    <DropdownMenu open={open} onOpenChange={(o) => { setOpen(o); if (o) setWeight(currentWeight); }}>
+      <DropdownMenuTrigger
+        aria-label="Goal options"
+        className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=open]:bg-accent data-[state=open]:text-foreground"
+      >
+        <MoreHorizontal className="size-4" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56" onCloseAutoFocus={(e) => e.preventDefault()}>
+        <DropdownMenuLabel className="truncate">{goalName}</DropdownMenuLabel>
+        <DropdownMenuSeparator />
+        <div className="px-2 py-1.5">
+          <Label className="mb-1.5 block text-[11px] font-medium text-muted-foreground">Weight %</Label>
+          <div className="flex items-center gap-2">
+            <Input
+              type="number"
+              min="0"
+              max="100"
+              step="0.1"
+              value={weight}
+              onChange={(e) => setWeight(e.target.value)}
+              onKeyDown={(e) => { e.stopPropagation(); if (e.key === "Enter") { onApplyWeight(weight); setOpen(false); } }}
+              className="h-7 w-20 text-[12px] tabular-nums"
+            />
+            <Button size="sm" className="h-7 text-[12px]" onClick={() => { onApplyWeight(weight); setOpen(false); }}>Apply</Button>
+          </div>
+        </div>
+        <DropdownMenuSeparator />
+        <DropdownMenuItem variant="destructive" onSelect={onRemove}>Remove goal</DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function LiveScorecardCard({
   employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, onSubmit, onDeleteGoal, currentUserEmail
 }: {
@@ -2928,9 +3177,6 @@ function LiveScorecardCard({
   const [goalIds, setGoalIds] = useState<string[]>(() => baseGoals.filter((g) => globalPeriodType === "quarterly" ? g.periodType === "quarterly" : g.periodType !== "quarterly").map((g) => g.id));
   const [indActuals, setIndActuals] = useState<Record<string, string>>({});
   const [weightOverrides, setWeightOverrides] = useState<Record<string, string>>({});
-  const [goalMenuOpen, setGoalMenuOpen] = useState<string | null>(null);
-  const [goalMenuPos, setGoalMenuPos] = useState<{ top: number; right: number } | null>(null);
-  const [goalMenuWeight, setGoalMenuWeight] = useState<string>("");
 
   // Sync period type when the global toggle changes
   useEffect(() => {
@@ -2940,7 +3186,6 @@ function LiveScorecardCard({
 
   // Actuals can only be entered for past months, not the current month
   const isCurrentMonth = isoMonth === currentMonthValue();
-  const [addGoalOpen, setAddGoalOpen] = useState(false);
   const [lastSubmitted, setLastSubmitted] = useState<Scorecard | null>(null);
 
   const quarterKey = quarterKeyForMonth(isoMonth);
@@ -3026,247 +3271,164 @@ function LiveScorecardCard({
     return cardPeriodType === "quarterly" ? g.periodType === "quarterly" : g.periodType !== "quarterly";
   });
   const achColor = liveScorecard.weightedAchievement >= 100 ? "#2D6B1A" : "var(--brick)";
-
-  const thS: React.CSSProperties = { padding: "6px 10px", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", textAlign: "left", borderBottom: "1.5px solid var(--border)", whiteSpace: "nowrap", background: "var(--surface2)" };
-  const thC: React.CSSProperties = { ...thS, textAlign: "center" };
+  const hasAnyActual = liveScorecard.goals.some((g) => g.actual != null);
 
   return (
-    <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", background: "var(--surface)" }} onClick={() => { if (goalMenuOpen) { setGoalMenuOpen(null); setGoalMenuPos(null); } }}>
-      <div onClick={() => setOpen(!open)} style={{ display: "flex", alignItems: "center", gap: "12px", padding: "13px 16px", cursor: "pointer" }} className="sc-card-head">
-        <div style={{ fontSize: "12px", color: "var(--text-muted)", transition: "transform 0.2s", flexShrink: 0, transform: open ? "rotate(90deg)" : "none" }}>▶</div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>{employee.name}</div>
-          <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "1px" }}>
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <button type="button" onClick={() => setOpen(!open)} className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40">
+        <ChevronRight className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-[11px] font-semibold text-foreground">{dashInitials(employee.name)}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13.5px] font-medium text-foreground">{employee.name}</span>
+          <span className="block truncate text-[11.5px] text-muted-foreground">
             {employee.role}{employee.department ? ` · ${employee.department}` : ""}{employee.location ? ` · ${employee.location}` : ""}
-          </div>
-        </div>
-        {currentGoals.length > 0 && (() => {
-          const hasAnyActual = liveScorecard.goals.some((g) => g.actual != null);
-          return (
-            <>
-              <div style={{ textAlign: "right", flexShrink: 0 }}>
-                <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>Achievement</div>
-                {hasAnyActual
-                  ? <div style={{ fontSize: "17px", fontWeight: 700, color: achColor }}>{liveScorecard.weightedAchievement.toFixed(1)}%</div>
-                  : <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-muted)" }}>Pending</div>}
-              </div>
-              <div style={{ textAlign: "right", flexShrink: 0, minWidth: "80px" }}>
-                <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>Est. Bonus</div>
-                {hasAnyActual
-                  ? <div style={{ fontSize: "17px", fontWeight: 700, color: "var(--brick)" }}>{formatCurrency(liveScorecard.bonusAmount)}</div>
-                  : <div style={{ fontSize: "13px", fontWeight: 600, color: "var(--text-muted)" }}>Pending</div>}
-              </div>
-            </>
-          );
-        })()}
-        <span title="This scorecard hasn't been submitted yet" style={{ fontSize: "10px", padding: "2px 8px", borderRadius: "99px", background: "#f0ece6", color: "#7a7268", fontWeight: 600, fontFamily: "var(--sans)", flexShrink: 0, cursor: "default" }}>Not Submitted</span>
-      </div>
+          </span>
+        </span>
+        {currentGoals.length > 0 ? (
+          <>
+            <span className="hidden text-right sm:block">
+              <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">Achievement</span>
+              {hasAnyActual
+                ? <span className="block text-[15px] font-semibold tabular-nums" style={{ color: achColor }}>{liveScorecard.weightedAchievement.toFixed(1)}%</span>
+                : <span className="block text-[13px] font-medium text-muted-foreground">Pending</span>}
+            </span>
+            <span className="min-w-[5rem] text-right">
+              <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">Est. Bonus</span>
+              {hasAnyActual
+                ? <span className="block text-[15px] font-semibold tabular-nums text-primary">{formatCurrency(liveScorecard.bonusAmount)}</span>
+                : <span className="block text-[13px] font-medium text-muted-foreground">Pending</span>}
+            </span>
+          </>
+        ) : null}
+        <Badge variant="secondary" title="This scorecard hasn't been submitted yet" className="shrink-0 font-medium">Not Submitted</Badge>
+      </button>
 
       {open && (
         <>
-          <div style={{ display: "flex", gap: "24px", padding: "10px 16px", background: "var(--surface2)", borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
+          <div className="flex flex-wrap gap-6 border-t border-border bg-muted/30 px-4 py-2.5">
             <div>
-              <div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>{cardPeriodType === "quarterly" ? `QUARTERLY EARNINGS · ${quarterKey}` : "BASE EARNINGS"}</div>
-              <div style={{ fontSize: "13px", fontWeight: 700 }}>{formatCurrency(liveScorecard.baseEarnings)}</div>
+              <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{cardPeriodType === "quarterly" ? `Quarterly earnings · ${quarterKey}` : "Base earnings"}</div>
+              <div className="text-[13px] font-semibold tabular-nums">{formatCurrency(liveScorecard.baseEarnings)}</div>
             </div>
             {activeEmployee.hoursWorked ? (
               <div>
-                <div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>HOURS WORKED{cardPeriodType === "quarterly" ? " (QTR)" : ""}</div>
-                <div style={{ fontSize: "13px", fontWeight: 700 }}>{activeEmployee.hoursWorked.toFixed(2)}</div>
+                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Hours worked{cardPeriodType === "quarterly" ? " (qtr)" : ""}</div>
+                <div className="text-[13px] font-semibold tabular-nums">{activeEmployee.hoursWorked.toFixed(2)}</div>
               </div>
             ) : null}
           </div>
 
           {hasNoTarget && (
-            <div style={{ padding: "8px 16px", background: "#fffbf0", borderTop: "1px solid #f0e0a0", fontSize: "11px", color: "#7a5c00" }}>
-              ⚠ Some goals are missing targets or minimums for {activeMonth}. Set them in Goals & Actuals before submitting.
+            <div className="flex items-start gap-2 border-t border-[#f0e0a0] bg-[#fffbf0] px-4 py-2 text-[11.5px] text-[#7a5c00]">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              <span>Some goals are missing targets or minimums for {activeMonth}. Set them in Goals &amp; Actuals before submitting.</span>
             </div>
           )}
 
           {currentGoals.length > 0 ? (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
-                <thead>
-                  <tr>
-                    <th style={thS}>Type</th>
-                    <th style={thS}>Goal</th>
-                    <th style={thC}>Target</th>
-                    <th style={thC}>Min</th>
-                    <th style={thC}>Actual</th>
-                    <th style={thC}>Weight</th>
-                    <th style={thC}>Achieve%</th>
-                    <th style={thC}>Est. Bonus $</th>
-                    <th style={{ ...thC, width: "36px" }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {currentGoals.map((goal) => {
-                    const sc = liveScorecard.goals.find((g) => g.name === goal.name);
-                    const noTarget = periodActuals[metaKey("target", goal)] == null || periodActuals[metaKey("min", goal)] == null;
-                    const isInd = goal.goalTier === "individual";
-                    return (
-                      <tr key={goal.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                        <td style={{ padding: "6px 10px" }}><TierBadge tier={goal.goalTier} /></td>
-                        <td style={{ padding: "6px 10px", fontWeight: 600, minWidth: "140px" }}>
-                          {goal.name}<GoalScopeTags location={goal.location} department={goal.department} />
-                        </td>
-                        <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>
-                          {noTarget ? <span style={{ color: "var(--text-faint)", fontSize: "10px" }}>not set</span> : formatNumber(goal.scTarget)}
-                        </td>
-                        <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>
-                          {noTarget ? <span style={{ color: "var(--text-faint)", fontSize: "10px" }}>not set</span> : formatNumber(goal.scMin)}
-                        </td>
-                        <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
-                          {isInd && !isCurrentMonth ? (
-                            <input
-                              aria-label={`Actual for ${goal.name}`}
-                              type="number"
-                              className="actual-inline-input"
-                              value={indActuals[goal.name] ?? ""}
-                              onChange={(e) => setIndActuals((prev) => ({ ...prev, [goal.name]: e.target.value }))}
-                              style={{ width: "68px" }}
-                            />
-                          ) : (
-                            <span style={{ color: goal.scActual == null ? "var(--text-faint)" : undefined }}>
-                              {goal.scActual != null ? formatNumber(goal.scActual) : "—"}
-                            </span>
-                          )}
-                        </td>
-                        <td style={{ padding: "4px 6px", textAlign: "center", fontFamily: "var(--mono)", fontSize: "11px" }}>
-                          {(weightOverrides[goal.name] != null ? Number(weightOverrides[goal.name]) : goal.scWeight).toFixed(1)}%
-                        </td>
-                        <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center", fontWeight: 700 }}>
-                          {sc?.actual != null
-                            ? (sc.metMin
-                              ? <span style={{ color: sc.achievement >= 100 ? "#2D6B1A" : "var(--brick)" }}>{sc.achievement.toFixed(1)}%</span>
-                              : <span style={{ color: "#9B2C2C" }}>Below min</span>)
-                            : <span style={{ color: "var(--text-faint)" }}>—</span>}
-                        </td>
-                        <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{formatCurrency(sc?.bonusContribution ?? 0)}</td>
-                        <td style={{ padding: "4px 6px", textAlign: "center" }} onClick={(e) => e.stopPropagation()}>
-                          <button
-                            title="Goal options"
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              if (goalMenuOpen === goal.id) {
-                                setGoalMenuOpen(null);
-                                setGoalMenuPos(null);
-                              } else {
-                                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
-                                setGoalMenuPos({ top: rect.bottom + 4, right: window.innerWidth - rect.right });
-                                setGoalMenuOpen(goal.id);
-                                setGoalMenuWeight(weightOverrides[goal.name] ?? goal.scWeight.toFixed(1));
-                              }
-                            }}
-                            style={{ border: "none", background: "none", color: "var(--text-muted)", fontSize: "16px", cursor: "pointer", padding: "0 2px", lineHeight: 1, fontWeight: 700, letterSpacing: "0.05em" }}
-                          >⋮</button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <Table className="border-t border-border text-[12px]">
+              <TableHeader className="bg-muted/40 [&_th]:h-8 [&_th]:px-2.5 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Type</TableHead>
+                  <TableHead>Goal</TableHead>
+                  <TableHead className="text-center">Target</TableHead>
+                  <TableHead className="text-center">Min</TableHead>
+                  <TableHead className="text-center">Actual</TableHead>
+                  <TableHead className="text-center">Weight</TableHead>
+                  <TableHead className="text-center">Achieve</TableHead>
+                  <TableHead className="text-right">Est. Bonus</TableHead>
+                  <TableHead className="w-10" />
+                </TableRow>
+              </TableHeader>
+              <TableBody className="[&_td]:px-2.5 [&_td]:py-2">
+                {currentGoals.map((goal) => {
+                  const sc = liveScorecard.goals.find((g) => g.name === goal.name);
+                  const noTarget = periodActuals[metaKey("target", goal)] == null || periodActuals[metaKey("min", goal)] == null;
+                  const isInd = goal.goalTier === "individual";
+                  return (
+                    <TableRow key={goal.id}>
+                      <TableCell><TierBadge tier={goal.goalTier} /></TableCell>
+                      <TableCell className="font-medium text-foreground">
+                        <span className="flex items-center gap-1.5">{goal.name}<GoalScopeTags location={goal.location} department={goal.department} /></span>
+                      </TableCell>
+                      <TableCell className="text-center tabular-nums">{noTarget ? <span className="text-[10px] text-[var(--text-faint)]">not set</span> : formatNumber(goal.scTarget)}</TableCell>
+                      <TableCell className="text-center tabular-nums">{noTarget ? <span className="text-[10px] text-[var(--text-faint)]">not set</span> : formatNumber(goal.scMin)}</TableCell>
+                      <TableCell className="text-center tabular-nums" onClick={(e) => e.stopPropagation()}>
+                        {isInd && !isCurrentMonth ? (
+                          <Input
+                            aria-label={`Actual for ${goal.name}`}
+                            type="number"
+                            value={indActuals[goal.name] ?? ""}
+                            onChange={(e) => setIndActuals((prev) => ({ ...prev, [goal.name]: e.target.value }))}
+                            className="h-7 w-[72px] text-center text-[12px] tabular-nums"
+                          />
+                        ) : (
+                          <span className={goal.scActual == null ? "text-[var(--text-faint)]" : undefined}>{goal.scActual != null ? formatNumber(goal.scActual) : "—"}</span>
+                        )}
+                      </TableCell>
+                      <TableCell className="text-center tabular-nums">{(weightOverrides[goal.name] != null ? Number(weightOverrides[goal.name]) : goal.scWeight).toFixed(1)}%</TableCell>
+                      <TableCell className="text-center font-semibold tabular-nums">
+                        {sc?.actual != null
+                          ? (sc.metMin
+                            ? <span style={{ color: sc.achievement >= 100 ? "#2D6B1A" : "var(--brick)" }}>{sc.achievement.toFixed(1)}%</span>
+                            : <span className="text-[#9B2C2C]">Below min</span>)
+                          : <span className="text-[var(--text-faint)]">—</span>}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{formatCurrency(sc?.bonusContribution ?? 0)}</TableCell>
+                      <TableCell className="text-right" onClick={(e) => e.stopPropagation()}>
+                        <GoalRowMenu
+                          goalName={goal.name}
+                          currentWeight={weightOverrides[goal.name] ?? goal.scWeight.toFixed(1)}
+                          onApplyWeight={(w) => setWeightOverrides((prev) => ({ ...prev, [goal.name]: w }))}
+                          onRemove={() => setGoalIds((prev) => prev.filter((id) => id !== goal.id))}
+                        />
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           ) : (
-            <div className="no-goals-msg" style={{ display: "block", margin: "12px 16px" }}>
+            <div className="border-t border-border px-4 py-4 text-center text-[12.5px] text-muted-foreground">
               {cardPeriodType === "quarterly" ? `No quarterly goals assigned for ${employee.name}.` : "No goals assigned for this employee and month."}
             </div>
           )}
 
-          <div style={{ padding: "10px 16px", display: "flex", alignItems: "center", gap: "10px", borderTop: "1px solid var(--border)", flexWrap: "wrap" }} onClick={(e) => e.stopPropagation()}>
-            <div style={{ position: "relative" }}>
-              <button
-                style={{ fontSize: "12px", padding: "5px 10px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", background: "none", cursor: "pointer", fontFamily: "var(--sans)" }}
-                onClick={() => setAddGoalOpen(!addGoalOpen)}
-              >+ Add Goal</button>
-              {addGoalOpen && (
-                <div style={{ position: "absolute", bottom: "calc(100% + 4px)", left: 0, background: "var(--surface)", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", boxShadow: "0 4px 12px rgba(0,0,0,0.12)", zIndex: 100, minWidth: "220px", maxHeight: "220px", overflowY: "auto" }}>
-                  {availableToAdd.length === 0 ? (
-                    <div style={{ padding: "10px 12px", fontSize: "11px", color: "var(--text-muted)" }}>No more goals available</div>
-                  ) : availableToAdd.map((g) => (
-                    <button key={g.id}
-                      style={{ display: "block", width: "100%", padding: "7px 12px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "12px" }}
-                      onClick={() => { setGoalIds((prev) => [...prev, g.id]); setAddGoalOpen(false); }}>
-                      {g.name}<GoalScopeTags location={g.location} department={g.department} />
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
+          <div className="flex flex-wrap items-center gap-2.5 border-t border-border px-4 py-3" onClick={(e) => e.stopPropagation()}>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <Button variant="outline" size="sm" className="text-[12px]">+ Add goal</Button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="start" side="top" className="max-h-[240px] w-56 overflow-y-auto">
+                {availableToAdd.length === 0 ? (
+                  <div className="px-2 py-2 text-[11px] text-muted-foreground">No more goals available</div>
+                ) : availableToAdd.map((g) => (
+                  <DropdownMenuItem key={g.id} onSelect={() => setGoalIds((prev) => [...prev, g.id])} className="text-[12.5px]">
+                    <span className="flex items-center gap-1.5">{g.name}<GoalScopeTags location={g.location} department={g.department} /></span>
+                  </DropdownMenuItem>
+                ))}
+              </DropdownMenuContent>
+            </DropdownMenu>
             {isCurrentMonth && (
-              <span style={{ fontSize: "11px", color: "var(--text-muted)", fontStyle: "italic" }}>
-                Actuals can only be entered for past months
-              </span>
+              <span className="text-[11.5px] italic text-muted-foreground">Actuals can only be entered for past months</span>
             )}
             {currentGoals.length > 0 && (
-              <span style={{ fontSize: "11px", fontFamily: "var(--mono)", color: weightsValid ? "var(--text-muted)" : "var(--brick)", fontWeight: weightsValid ? 400 : 700 }}>
-                Weights: {totalWeight.toFixed(1)}%{!weightsValid ? " ⚠ must equal 100" : ""}
+              <span className={`text-[11.5px] tabular-nums ${weightsValid ? "text-muted-foreground" : "font-semibold text-primary"}`}>
+                Weights: {totalWeight.toFixed(1)}%{!weightsValid ? " — must equal 100" : ""}
               </span>
             )}
-            <button
-              className="submit-btn"
-              style={{ marginLeft: "auto", padding: "6px 18px", fontSize: "12px" }}
+            <Button
+              size="sm"
+              className="ml-auto"
               disabled={isCurrentMonth || hasNoTarget || currentGoals.length === 0 || !weightsValid}
               title={isCurrentMonth ? "Scorecards can only be submitted for past months" : hasNoTarget ? "Set targets and minimums first" : !weightsValid ? "Weights must add up to 100%" : undefined}
-              onClick={() => {
-                onSubmit(liveScorecard);
-                setLastSubmitted(liveScorecard);
-              }}
+              onClick={() => { onSubmit(liveScorecard); setLastSubmitted(liveScorecard); }}
             >
-              Submit Scorecard
-            </button>
+              Submit scorecard
+            </Button>
           </div>
         </>
       )}
-      {goalMenuOpen && goalMenuPos && (() => {
-        const menuGoal = currentGoals.find((g) => g.id === goalMenuOpen);
-        if (!menuGoal) return null;
-        return (
-          <div
-            className="row-menu"
-            style={{ position: "fixed", top: goalMenuPos.top, right: goalMenuPos.right, zIndex: 1000 }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            <div style={{ padding: "8px 12px 4px", fontSize: "10px", fontWeight: 700, color: "var(--text-muted)", fontFamily: "var(--mono)", borderBottom: "1px solid var(--border)", marginBottom: "4px" }}>
-              {menuGoal.name}
-            </div>
-            <div style={{ padding: "6px 12px" }}>
-              <label style={{ fontSize: "11px", fontWeight: 600, display: "block", marginBottom: "4px" }}>Weight %</label>
-              <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-                <input
-                  type="number"
-                  min="0"
-                  max="100"
-                  step="0.1"
-                  className="actual-inline-input"
-                  value={goalMenuWeight}
-                  onChange={(e) => setGoalMenuWeight(e.target.value)}
-                  style={{ width: "64px" }}
-                  autoFocus
-                />
-                <button
-                  style={{ fontSize: "11px", padding: "3px 10px", background: "var(--brick)", color: "#fff", border: "none", borderRadius: "var(--radius-sm)", cursor: "pointer", fontFamily: "var(--sans)", fontWeight: 600 }}
-                  onClick={() => {
-                    setWeightOverrides((prev) => ({ ...prev, [menuGoal.name]: goalMenuWeight }));
-                    setGoalMenuOpen(null);
-                    setGoalMenuPos(null);
-                  }}
-                >Apply</button>
-              </div>
-            </div>
-            <div style={{ borderTop: "1px solid var(--border)", marginTop: "4px" }}>
-              <button
-                style={{ display: "block", width: "100%", padding: "7px 12px", border: "none", background: "none", textAlign: "left", cursor: "pointer", fontFamily: "var(--sans)", fontSize: "12px", color: "#9B2C2C" }}
-                onClick={() => {
-                  setGoalIds((prev) => prev.filter((id) => id !== goalMenuOpen));
-                  setGoalMenuOpen(null);
-                  setGoalMenuPos(null);
-                }}
-              >Remove goal</button>
-            </div>
-          </div>
-        );
-      })()}
     </div>
   );
 }
@@ -3296,86 +3458,91 @@ function ScorecardCard({ scorecard, onDeleteGoal }: { scorecard: Scorecard; onDe
     ? ((scorecard.baseEarnings + scorecard.bonusAmount) / scorecard.hours).toFixed(2)
     : null;
   const weight = scorecard.goals.length ? (100 / scorecard.goals.length).toFixed(1) : "0";
-  const thS: React.CSSProperties = { padding: "6px 10px", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", textAlign: "left", borderBottom: "1.5px solid var(--border)", whiteSpace: "nowrap", background: "var(--surface2)" };
-  const thC: React.CSSProperties = { ...thS, textAlign: "center" };
   return (
-    <div style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius)", overflow: "hidden", background: "var(--surface)" }}>
-      <div
+    <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <button
+        type="button"
         data-testid={`scorecard-card-${scorecard.id}`}
         onClick={() => setOpen(!open)}
-        style={{ display: "flex", alignItems: "center", gap: "12px", padding: "13px 16px", cursor: "pointer", background: "var(--surface)" }}
-        className="sc-card-head"
+        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40"
       >
-        <div style={{ fontSize: "12px", color: "var(--text-muted)", transition: "transform 0.2s", flexShrink: 0, transform: open ? "rotate(90deg)" : "none" }}>▶</div>
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ fontSize: "13px", fontWeight: 700, color: "var(--text)" }}>{scorecard.employeeName}</div>
-          <div style={{ fontSize: "11px", color: "var(--text-muted)", marginTop: "1px" }}>
+        <ChevronRight className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
+        <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-[11px] font-semibold text-foreground">{dashInitials(scorecard.employeeName)}</span>
+        <span className="min-w-0 flex-1">
+          <span className="block truncate text-[13.5px] font-medium text-foreground">{scorecard.employeeName}</span>
+          <span className="block truncate text-[11.5px] text-muted-foreground">
             {scorecard.role}{scorecard.department ? ` · ${scorecard.department}` : ""}{scorecard.location ? ` · ${scorecard.location}` : ""}
-          </div>
-        </div>
-        <div style={{ textAlign: "right", flexShrink: 0 }}>
-          <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>Achievement</div>
-          <div style={{ fontSize: "17px", fontWeight: 700, color: achColor }}>{scorecard.weightedAchievement.toFixed(1)}%{scorecard.scorecardCapped ? " cap" : ""}</div>
-        </div>
-        <div style={{ textAlign: "right", flexShrink: 0, minWidth: "80px" }}>
-          <div style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>Bonus</div>
-          <div style={{ fontSize: "17px", fontWeight: 700, color: "var(--brick)" }}>{formatCurrency(scorecard.bonusAmount)}</div>
-        </div>
-      </div>
+          </span>
+        </span>
+        <span className="hidden text-right sm:block">
+          <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">Achievement</span>
+          <span className="block text-[15px] font-semibold tabular-nums" style={{ color: achColor }}>{scorecard.weightedAchievement.toFixed(1)}%{scorecard.scorecardCapped ? " cap" : ""}</span>
+        </span>
+        <span className="min-w-[5rem] text-right">
+          <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">Bonus</span>
+          <span className="block text-[15px] font-semibold tabular-nums text-primary">{formatCurrency(scorecard.bonusAmount)}</span>
+        </span>
+        <Badge variant="success" className="shrink-0 font-medium">Submitted</Badge>
+      </button>
       {open && (
         <>
-          <div style={{ display: "flex", gap: "24px", padding: "10px 16px", background: "var(--surface2)", borderTop: "1px solid var(--border)", flexWrap: "wrap" }}>
+          <div className="flex flex-wrap gap-6 border-t border-border bg-muted/30 px-4 py-2.5">
             {[
-              { label: "MONTHLY EARNINGS", value: formatCurrency(scorecard.baseEarnings) },
-              scorecard.hours ? { label: "HOURS WORKED", value: scorecard.hours.toFixed(2) } : null,
-              scorecard.hourlyRate ? { label: "HOURLY RATE", value: formatCurrency(scorecard.hourlyRate) } : null,
-              effectiveHourly ? { label: "EFFECTIVE HOURLY", value: `$${effectiveHourly}` } : null,
-              { label: "BONUS AMOUNT", value: formatCurrency(scorecard.bonusAmount), color: "var(--brick)" }
+              { label: "Monthly earnings", value: formatCurrency(scorecard.baseEarnings) },
+              scorecard.hours ? { label: "Hours worked", value: scorecard.hours.toFixed(2) } : null,
+              scorecard.hourlyRate ? { label: "Hourly rate", value: formatCurrency(scorecard.hourlyRate) } : null,
+              effectiveHourly ? { label: "Effective hourly", value: `$${effectiveHourly}` } : null,
+              { label: "Bonus amount", value: formatCurrency(scorecard.bonusAmount), color: "var(--brick)" }
             ].filter(Boolean).map((item) => item && (
               <div key={item.label}>
-                <div style={{ fontSize: "9px", color: "var(--text-muted)", fontWeight: 700, fontFamily: "var(--mono)" }}>{item.label}</div>
-                <div style={{ fontSize: "13px", fontWeight: 700, color: item.color || "var(--text)" }}>{item.value}</div>
+                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{item.label}</div>
+                <div className="text-[13px] font-semibold tabular-nums" style={item.color ? { color: item.color } : undefined}>{item.value}</div>
               </div>
             ))}
           </div>
-          <div style={{ overflowX: "auto" }}>
-            <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
-              <thead>
-                <tr>
-                  <th style={thS}>Type</th>
-                  <th style={thS}>Goal</th>
-                  <th style={thC}>Target</th>
-                  <th style={thC}>Min</th>
-                  <th style={thC}>Weight</th>
-                  <th style={thC}>Actual</th>
-                  <th style={thC}>Achieve%</th>
-                  <th style={thC}>Bonus $</th>
-                  <th style={{ ...thC, width: "28px" }}></th>
-                </tr>
-              </thead>
-              <tbody>
-                {scorecard.goals.map((goal) => (
-                  <tr key={goal.name} className="sc-goal-row" style={{ borderBottom: "1px solid var(--border)" }}>
-                    <td style={{ padding: "6px 10px" }}><TierBadge tier={goal.goalTier} /></td>
-                    <td style={{ padding: "6px 10px", fontWeight: 600, minWidth: "140px" }}>
-                      {goal.name}<GoalScopeTags location={goal.location} department={goal.department} />
-                    </td>
-                    <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{goal.target ?? "—"}</td>
-                    <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{goal.min ?? "—"}</td>
-                    <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{weight}%</td>
-                    <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{goal.actual ?? "—"}</td>
-                    <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center", fontWeight: 700, color: goal.metMin ? (goal.achievement >= 100 ? "#2D6B1A" : "var(--brick)") : "#9B2C2C" }}>
-                      {goal.metMin ? `${goal.achievement.toFixed(1)}%` : <span style={{ color: "#9B2C2C", fontWeight: 700 }}>Below min</span>}
-                    </td>
-                    <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{formatCurrency(goal.bonusContribution)}</td>
-                    <td style={{ padding: "4px 6px", textAlign: "center", width: "28px" }}>
-                      <button className="sc-del-btn" title="Remove goal" onClick={() => onDeleteGoal({ scorecardId: scorecard.id, goalName: goal.name })} style={{ border: "none", background: "none", color: "#9B2C2C", fontSize: "14px", cursor: "pointer", padding: 0, lineHeight: 1, opacity: 0, transition: "opacity 0.15s" }}>✕</button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
+          <Table className="border-t border-border text-[12px]">
+            <TableHeader className="bg-muted/40 [&_th]:h-8 [&_th]:px-2.5 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
+              <TableRow className="hover:bg-transparent">
+                <TableHead>Type</TableHead>
+                <TableHead>Goal</TableHead>
+                <TableHead className="text-center">Target</TableHead>
+                <TableHead className="text-center">Min</TableHead>
+                <TableHead className="text-center">Weight</TableHead>
+                <TableHead className="text-center">Actual</TableHead>
+                <TableHead className="text-center">Achieve</TableHead>
+                <TableHead className="text-right">Bonus</TableHead>
+                <TableHead className="w-8" />
+              </TableRow>
+            </TableHeader>
+            <TableBody className="[&_td]:px-2.5 [&_td]:py-2">
+              {scorecard.goals.map((goal) => (
+                <TableRow key={goal.name} className="group">
+                  <TableCell><TierBadge tier={goal.goalTier} /></TableCell>
+                  <TableCell className="font-medium text-foreground">
+                    <span className="flex items-center gap-1.5">{goal.name}<GoalScopeTags location={goal.location} department={goal.department} /></span>
+                  </TableCell>
+                  <TableCell className="text-center tabular-nums">{goal.target ?? "—"}</TableCell>
+                  <TableCell className="text-center tabular-nums">{goal.min ?? "—"}</TableCell>
+                  <TableCell className="text-center tabular-nums">{weight}%</TableCell>
+                  <TableCell className="text-center tabular-nums">{goal.actual ?? "—"}</TableCell>
+                  <TableCell className="text-center font-semibold tabular-nums" style={{ color: goal.metMin ? (goal.achievement >= 100 ? "#2D6B1A" : "var(--brick)") : "#9B2C2C" }}>
+                    {goal.metMin ? `${goal.achievement.toFixed(1)}%` : "Below min"}
+                  </TableCell>
+                  <TableCell className="text-right tabular-nums">{formatCurrency(goal.bonusContribution)}</TableCell>
+                  <TableCell className="text-right">
+                    <button
+                      type="button"
+                      title="Remove goal"
+                      onClick={() => onDeleteGoal({ scorecardId: scorecard.id, goalName: goal.name })}
+                      className="inline-flex size-6 items-center justify-center rounded-md text-[#9B2C2C] opacity-0 transition-opacity hover:bg-[#9B2C2C]/10 focus-visible:opacity-100 group-hover:opacity-100"
+                    >
+                      <X className="size-3.5" />
+                    </button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </>
       )}
     </div>
@@ -3414,6 +3581,15 @@ function niceYTicks(min: number, max: number): number[] {
   const ticks: number[] = [];
   for (let t = start; t <= end + step * 0.001; t += step) ticks.push(Math.round(t * 1000) / 1000);
   return ticks;
+}
+
+function ReportControl({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-1">
+      <span className="px-0.5 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{label}</span>
+      {children}
+    </div>
+  );
 }
 
 function HistoryScreen(props: {
@@ -3534,8 +3710,6 @@ function HistoryScreen(props: {
     return "var(--text)";
   }
 
-  const fLabel: React.CSSProperties = { fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", letterSpacing: "0.5px", fontFamily: "var(--mono)", marginBottom: "4px" };
-  const fSelect: React.CSSProperties = { display: "block", padding: "7px 10px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", fontFamily: "var(--sans)", fontSize: "12px", background: "var(--surface)" };
 
   const VIEW_BTNS: { key: HistoryView; label: string }[] = [
     { key: "table", label: "Table" },
@@ -3547,62 +3721,98 @@ function HistoryScreen(props: {
   return (
     <div className="screen active">
       {/* View toggle header */}
-      <section style={{ borderBottom: "1px solid var(--border)", paddingBottom: 14 }}>
-        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
-          <div className="section-title" style={{ margin: 0 }}>Historical Data</div>
-          <div style={{ display: "flex", gap: "6px" }}>
+      <section style={{ background: "transparent", border: "none", boxShadow: "none", padding: 0, marginBottom: 12 }}>
+        <Tabs value={props.view} onValueChange={(v) => props.onView(v as HistoryView)}>
+          <TabsList className="h-8">
             {VIEW_BTNS.map(({ key, label }) => (
-              <button
+              <TabsTrigger
                 key={key}
+                value={key}
                 data-testid={key === "scorecard" ? "history-scorecard-view" : undefined}
-                onClick={() => props.onView(key)}
-                style={{ padding: "6px 14px", border: `1.5px solid ${props.view === key ? "var(--brick)" : "var(--border)"}`, borderRadius: "var(--radius-sm)", background: props.view === key ? "var(--brick)" : "none", color: props.view === key ? "#fff" : "var(--text-muted)", fontFamily: "var(--sans)", fontSize: "12px", fontWeight: 600, cursor: "pointer" }}
-              >{label}</button>
+                className="px-3 text-[12px] data-[state=active]:bg-card data-[state=active]:text-foreground"
+              >{label}</TabsTrigger>
             ))}
-          </div>
-        </div>
+          </TabsList>
+        </Tabs>
       </section>
 
       {/* TABLE view — existing filter + flat list */}
       {props.view === "table" && (
         <>
           {!props.readonly && (
-            <section>
-              <div className="section-title">Filters</div>
-              <div className="fields-grid">
-                <div className="field"><label>Period</label><select value={props.filters.period} onChange={(e) => props.onFilters({ ...props.filters, period: e.target.value })}><option value="">All periods</option>{Array.from(new Set(props.allScorecards.map((sc) => sc.scorecardMonth))).map((p) => <option key={p}>{p}</option>)}</select></div>
-                <div className="field"><label>Search</label><input value={props.filters.search} onChange={(e) => props.onFilters({ ...props.filters, search: e.target.value })} placeholder="e.g. Jane Smith, Utah" /></div>
-                <div className="field"><label>Location</label><select value={props.filters.location} onChange={(e) => props.onFilters({ ...props.filters, location: e.target.value })}><option value="">All locations</option><option>Utah</option><option>Georgia</option><option>Remote</option></select></div>
-                <div className="field"><label>Department</label><select value={props.filters.department} onChange={(e) => props.onFilters({ ...props.filters, department: e.target.value })}><option value="">All departments</option>{departments.map((d) => <option key={d}>{d}</option>)}</select></div>
-                <div className="field"><label>Goal</label><select value={props.filters.goal} onChange={(e) => props.onFilters({ ...props.filters, goal: e.target.value })}><option value="">All goals</option>{allGoalNames.map((g) => <option key={g}>{g}</option>)}</select></div>
+            <section style={{ padding: 0 }} className="overflow-hidden">
+              <div className="flex flex-wrap items-center gap-2 p-2.5">
+                <div className="relative">
+                  <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
+                  <Input value={props.filters.search} onChange={(e) => props.onFilters({ ...props.filters, search: e.target.value })} placeholder="Search employee, location…" className="h-8 w-[220px] pl-8 text-[12px]" />
+                </div>
+                <Separator orientation="vertical" className="mx-0.5 hidden h-5 sm:block" />
+                <Select value={props.filters.period || ALL_LOCATIONS} onValueChange={(v) => props.onFilters({ ...props.filters, period: v === ALL_LOCATIONS ? "" : v })}>
+                  <SelectTrigger size="sm" className="min-w-[8rem] text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_LOCATIONS}>All periods</SelectItem>
+                    {Array.from(new Set(props.allScorecards.map((sc) => sc.scorecardMonth))).map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Select value={props.filters.location || ALL_LOCATIONS} onValueChange={(v) => props.onFilters({ ...props.filters, location: v === ALL_LOCATIONS ? "" : v })}>
+                  <SelectTrigger size="sm" className="min-w-[8rem] text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_LOCATIONS}>All locations</SelectItem>
+                    <SelectItem value="Utah">Utah</SelectItem>
+                    <SelectItem value="Georgia">Georgia</SelectItem>
+                    <SelectItem value="Remote">Remote</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={props.filters.department || ALL_LOCATIONS} onValueChange={(v) => props.onFilters({ ...props.filters, department: v === ALL_LOCATIONS ? "" : v })}>
+                  <SelectTrigger size="sm" className="min-w-[8rem] text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_LOCATIONS}>All departments</SelectItem>
+                    {departments.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Select value={props.filters.goal || ALL_LOCATIONS} onValueChange={(v) => props.onFilters({ ...props.filters, goal: v === ALL_LOCATIONS ? "" : v })}>
+                  <SelectTrigger size="sm" className="min-w-[8rem] text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_LOCATIONS}>All goals</SelectItem>
+                    {allGoalNames.map((g) => <SelectItem key={g} value={g}>{g}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
             </section>
           )}
-          <section>
-            <div className="table-wrap">
-              <table className="data-table">
-                <thead><tr><th>Employee</th><th>Period</th><th>Department</th><th>Location</th><th style={{ textAlign: "right" }}>Achievement</th><th style={{ textAlign: "right" }}>Bonus</th></tr></thead>
-                <tbody>
-                  {props.scorecards.map((sc) => (
-                    <tr key={sc.id}>
-                      <td>{sc.employeeName}</td>
-                      <td style={{ color: "var(--text-muted)", fontFamily: "var(--mono)", fontSize: "11px" }}>{sc.scorecardMonth}</td>
-                      <td>{sc.department}</td>
-                      <td>{sc.location}</td>
-                      <td style={{ textAlign: "right", fontFamily: "var(--mono)", fontWeight: 600, color: sc.weightedAchievement >= 100 ? "#2D6B1A" : "var(--brick)" }}>{sc.weightedAchievement.toFixed(1)}%</td>
-                      <td style={{ textAlign: "right", fontFamily: "var(--mono)" }}>{formatCurrency(sc.bonusAmount)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-            {!props.scorecards.length && <div className="no-goals-msg" style={{ display: "block" }}>No scorecards match the current filters.</div>}
+          <section style={{ padding: 0 }} className="overflow-hidden">
+            <Table className="text-[12.5px]">
+              <TableHeader className="bg-muted/40 [&_th]:h-9 [&_th]:px-3 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Employee</TableHead>
+                  <TableHead>Period</TableHead>
+                  <TableHead>Department</TableHead>
+                  <TableHead>Location</TableHead>
+                  <TableHead className="text-right">Achievement</TableHead>
+                  <TableHead className="text-right">Bonus</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="[&_td]:px-3 [&_td]:py-2.5">
+                {props.scorecards.map((sc) => (
+                  <TableRow key={sc.id}>
+                    <TableCell className="font-medium text-foreground">{sc.employeeName}</TableCell>
+                    <TableCell className="text-muted-foreground">{sc.scorecardMonth}</TableCell>
+                    <TableCell className="text-muted-foreground">{sc.department}</TableCell>
+                    <TableCell className="text-muted-foreground">{sc.location}</TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums" style={{ color: sc.weightedAchievement >= 100 ? "#2D6B1A" : "var(--brick)" }}>{sc.weightedAchievement.toFixed(1)}%</TableCell>
+                    <TableCell className="text-right tabular-nums">{formatCurrency(sc.bonusAmount)}</TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+            {!props.scorecards.length && <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">No scorecards match the current filters.</div>}
           </section>
           {!props.readonly && (
-            <section style={{ background: "var(--surface2)", borderStyle: "dashed" }}>
-              <div className="section-title">Export</div>
-              <button style={{ width: "100%", padding: "10px", border: "1.5px solid var(--border-strong)", borderRadius: "var(--radius-sm)", background: "none", fontFamily: "var(--sans)", fontSize: "13px", fontWeight: 500, cursor: "pointer", color: "var(--text)" }} onClick={() => downloadCsv(scorecardsToCsv(props.scorecards), "scorecards-history.csv")}>↓ Export filtered results CSV</button>
-            </section>
+            <div className="mt-3 flex justify-end">
+              <Button variant="outline" size="sm" className="text-[12px]" onClick={() => downloadCsv(scorecardsToCsv(props.scorecards), "scorecards-history.csv")}>
+                <Download className="size-3.5" /> Export filtered results CSV
+              </Button>
+            </div>
           )}
         </>
       )}
@@ -3611,17 +3821,37 @@ function HistoryScreen(props: {
       {props.view === "scorecard" && (
         <>
           {!props.readonly && (
-            <section>
-              <div className="fields-grid">
-                <div className="field"><label>Period</label><select value={props.filters.period} onChange={(e) => props.onFilters({ ...props.filters, period: e.target.value })}><option value="">All periods</option>{Array.from(new Set(props.allScorecards.map((sc) => sc.scorecardMonth))).map((p) => <option key={p}>{p}</option>)}</select></div>
-                <div className="field"><label>Location</label><select value={props.filters.location} onChange={(e) => props.onFilters({ ...props.filters, location: e.target.value })}><option value="">All locations</option><option>Utah</option><option>Georgia</option><option>Remote</option></select></div>
-                <div className="field"><label>Department</label><select value={props.filters.department} onChange={(e) => props.onFilters({ ...props.filters, department: e.target.value })}><option value="">All departments</option>{departments.map((d) => <option key={d}>{d}</option>)}</select></div>
+            <section style={{ padding: 0 }} className="overflow-hidden">
+              <div className="flex flex-wrap items-center gap-2 p-2.5">
+                <Select value={props.filters.period || ALL_LOCATIONS} onValueChange={(v) => props.onFilters({ ...props.filters, period: v === ALL_LOCATIONS ? "" : v })}>
+                  <SelectTrigger size="sm" className="min-w-[8rem] text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_LOCATIONS}>All periods</SelectItem>
+                    {Array.from(new Set(props.allScorecards.map((sc) => sc.scorecardMonth))).map((p) => <SelectItem key={p} value={p}>{p}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+                <Select value={props.filters.location || ALL_LOCATIONS} onValueChange={(v) => props.onFilters({ ...props.filters, location: v === ALL_LOCATIONS ? "" : v })}>
+                  <SelectTrigger size="sm" className="min-w-[8rem] text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_LOCATIONS}>All locations</SelectItem>
+                    <SelectItem value="Utah">Utah</SelectItem>
+                    <SelectItem value="Georgia">Georgia</SelectItem>
+                    <SelectItem value="Remote">Remote</SelectItem>
+                  </SelectContent>
+                </Select>
+                <Select value={props.filters.department || ALL_LOCATIONS} onValueChange={(v) => props.onFilters({ ...props.filters, department: v === ALL_LOCATIONS ? "" : v })}>
+                  <SelectTrigger size="sm" className="min-w-[8rem] text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_LOCATIONS}>All departments</SelectItem>
+                    {departments.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                  </SelectContent>
+                </Select>
               </div>
             </section>
           )}
-          <section>
-            <div className="scorecard-list">{props.scorecards.map((sc) => <ScorecardCard key={sc.id} scorecard={sc} onDeleteGoal={() => {}} />)}</div>
-            {!props.scorecards.length && <div className="no-goals-msg" style={{ display: "block" }}>No scorecards match the current filters.</div>}
+          <section style={{ background: "transparent", border: "none", boxShadow: "none", padding: 0 }}>
+            <div className="scorecard-list" style={{ padding: 0 }}>{props.scorecards.map((sc) => <ScorecardCard key={sc.id} scorecard={sc} onDeleteGoal={() => {}} />)}</div>
+            {!props.scorecards.length && <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">No scorecards match the current filters.</div>}
           </section>
         </>
       )}
@@ -3630,112 +3860,125 @@ function HistoryScreen(props: {
       {(props.view === "grid" || props.view === "chart") && (
         <>
           {/* Config bar */}
-          <section style={{ borderBottom: "1px solid var(--border)" }}>
-            <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", alignItems: "flex-end" }}>
-              <div>
-                <div style={fLabel}>FROM</div>
-                <select style={fSelect} value={fromMonth} onChange={(e) => setFromMonth(e.target.value)}>
-                  <option value="">Earliest</option>
-                  {allMonthIsos.map((m) => <option key={m} value={m}>{formatMonthLabel(m)}</option>)}
-                </select>
-              </div>
-              <div>
-                <div style={fLabel}>TO</div>
-                <select style={fSelect} value={toMonth} onChange={(e) => setToMonth(e.target.value)}>
-                  <option value="">Latest</option>
-                  {allMonthIsos.map((m) => <option key={m} value={m}>{formatMonthLabel(m)}</option>)}
-                </select>
-              </div>
-              <div>
-                <div style={fLabel}>LOCATION</div>
-                <select style={fSelect} value={selLocation} onChange={(e) => setSelLocation(e.target.value)}>
-                  <option value="">All locations</option>
-                  {allLocations.map((l) => <option key={l}>{l}</option>)}
-                </select>
-              </div>
-              <div>
-                <div style={fLabel}>DEPARTMENT</div>
-                <select style={fSelect} value={selDept} onChange={(e) => setSelDept(e.target.value)}>
-                  <option value="">All departments</option>
-                  {allDepts.map((d) => <option key={d}>{d}</option>)}
-                </select>
-              </div>
-              <div>
-                <div style={fLabel}>EMPLOYEE</div>
-                <select style={fSelect} value={selEmployee} onChange={(e) => setSelEmployee(e.target.value)}>
-                  <option value="">All employees</option>
-                  {allEmployeeNames.map((n) => <option key={n}>{n}</option>)}
-                </select>
-              </div>
-              <div>
-                <div style={fLabel}>GROUP BY</div>
-                <select style={fSelect} value={groupBy} onChange={(e) => setGroupBy(e.target.value as "employee" | "department" | "location")}>
-                  <option value="employee">Employee</option>
-                  <option value="department">Department</option>
-                  <option value="location">Location</option>
-                </select>
-              </div>
-              <div>
-                <div style={fLabel}>METRIC</div>
-                <select style={fSelect} value={metric} onChange={(e) => { setMetric(e.target.value as "achievement" | "bonus" | "goal"); setMetricGoal(""); }}>
-                  <option value="achievement">Achievement %</option>
-                  <option value="bonus">Bonus Amount</option>
-                  <option value="goal">Goal Achievement</option>
-                </select>
-              </div>
+          <section style={{ padding: 0 }} className="overflow-hidden">
+            <div className="flex flex-wrap items-end gap-x-3 gap-y-2 p-3">
+              <ReportControl label="From">
+                <Select value={fromMonth || ALL_LOCATIONS} onValueChange={(v) => setFromMonth(v === ALL_LOCATIONS ? "" : v)}>
+                  <SelectTrigger size="sm" className="min-w-[8rem] text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_LOCATIONS}>Earliest</SelectItem>
+                    {allMonthIsos.map((m) => <SelectItem key={m} value={m}>{formatMonthLabel(m)}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </ReportControl>
+              <ReportControl label="To">
+                <Select value={toMonth || ALL_LOCATIONS} onValueChange={(v) => setToMonth(v === ALL_LOCATIONS ? "" : v)}>
+                  <SelectTrigger size="sm" className="min-w-[8rem] text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_LOCATIONS}>Latest</SelectItem>
+                    {allMonthIsos.map((m) => <SelectItem key={m} value={m}>{formatMonthLabel(m)}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </ReportControl>
+              <ReportControl label="Location">
+                <Select value={selLocation || ALL_LOCATIONS} onValueChange={(v) => setSelLocation(v === ALL_LOCATIONS ? "" : v)}>
+                  <SelectTrigger size="sm" className="min-w-[8rem] text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_LOCATIONS}>All locations</SelectItem>
+                    {allLocations.map((l) => <SelectItem key={l} value={l}>{l}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </ReportControl>
+              <ReportControl label="Department">
+                <Select value={selDept || ALL_LOCATIONS} onValueChange={(v) => setSelDept(v === ALL_LOCATIONS ? "" : v)}>
+                  <SelectTrigger size="sm" className="min-w-[8rem] text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_LOCATIONS}>All departments</SelectItem>
+                    {allDepts.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </ReportControl>
+              <ReportControl label="Employee">
+                <Select value={selEmployee || ALL_LOCATIONS} onValueChange={(v) => setSelEmployee(v === ALL_LOCATIONS ? "" : v)}>
+                  <SelectTrigger size="sm" className="min-w-[9rem] text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value={ALL_LOCATIONS}>All employees</SelectItem>
+                    {allEmployeeNames.map((n) => <SelectItem key={n} value={n}>{n}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </ReportControl>
+              <ReportControl label="Group by">
+                <Select value={groupBy} onValueChange={(v) => setGroupBy(v as "employee" | "department" | "location")}>
+                  <SelectTrigger size="sm" className="min-w-[8rem] text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="employee">Employee</SelectItem>
+                    <SelectItem value="department">Department</SelectItem>
+                    <SelectItem value="location">Location</SelectItem>
+                  </SelectContent>
+                </Select>
+              </ReportControl>
+              <ReportControl label="Metric">
+                <Select value={metric} onValueChange={(v) => { setMetric(v as "achievement" | "bonus" | "goal"); setMetricGoal(""); }}>
+                  <SelectTrigger size="sm" className="min-w-[9rem] text-[12px]"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="achievement">Achievement %</SelectItem>
+                    <SelectItem value="bonus">Bonus Amount</SelectItem>
+                    <SelectItem value="goal">Goal Achievement</SelectItem>
+                  </SelectContent>
+                </Select>
+              </ReportControl>
               {metric === "goal" && (
-                <div>
-                  <div style={fLabel}>GOAL</div>
-                  <select style={fSelect} value={metricGoal} onChange={(e) => setMetricGoal(e.target.value)}>
-                    <option value="">Select a goal…</option>
-                    {allGoalNames.map((g) => <option key={g}>{g}</option>)}
-                  </select>
-                </div>
+                <ReportControl label="Goal">
+                  <Select value={metricGoal || undefined} onValueChange={(v) => setMetricGoal(v)}>
+                    <SelectTrigger size="sm" className="min-w-[9rem] text-[12px]"><SelectValue placeholder="Select a goal…" /></SelectTrigger>
+                    <SelectContent>
+                      {allGoalNames.map((g) => <SelectItem key={g} value={g}>{g}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </ReportControl>
               )}
             </div>
           </section>
 
           {/* GRID — pivot table */}
           {props.view === "grid" && (
-            <section>
-              <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "12px" }}>
-                <div className="section-title" style={{ margin: 0 }}>{metricLabel}</div>
-                <span style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>by {groupBy} × month</span>
+            <section style={{ padding: 0 }} className="overflow-hidden">
+              <div className="flex items-baseline gap-2 border-b border-border px-3 py-2.5">
+                <h2 className="text-[13px] font-semibold text-foreground">{metricLabel}</h2>
+                <span className="text-[11.5px] text-muted-foreground">by {groupBy} × month</span>
               </div>
               {reportMonths.length === 0 ? (
-                <div className="no-goals-msg" style={{ display: "block" }}>No submitted scorecards in this range.</div>
+                <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">No submitted scorecards in this range.</div>
               ) : (
-                <div className="table-wrap" style={{ overflowX: "auto" }}>
-                  <table className="data-table" style={{ minWidth: `${160 + reportMonths.length * 110}px` }}>
-                    <thead>
-                      <tr>
-                        <th style={{ textAlign: "left", minWidth: 150, position: "sticky", left: 0, background: "var(--surface)", zIndex: 2 }}>{groupBy.charAt(0).toUpperCase() + groupBy.slice(1)}</th>
-                        {reportMonths.map((m) => <th key={m} style={{ textAlign: "right", whiteSpace: "nowrap", fontFamily: "var(--mono)", fontSize: "11px" }}>{shortMonthLabel(m)}</th>)}
-                        <th style={{ textAlign: "right", borderLeft: "2px solid var(--border)", fontFamily: "var(--mono)", fontSize: "11px" }}>AVG</th>
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {groupKeys.map((key) => {
-                        const vals = reportMonths.map((m) => getGroupMonthValue(key, m));
-                        const defined = vals.filter((v): v is number => v !== null);
-                        const avg = defined.length ? defined.reduce((a, b) => a + b, 0) / defined.length : null;
-                        return (
-                          <tr key={key}>
-                            <td style={{ fontWeight: 600, position: "sticky", left: 0, background: "var(--surface)", zIndex: 1 }}>{key}</td>
-                            {vals.map((v, i) => (
-                              <td key={i} style={{ textAlign: "right", background: cellBg(v), color: cellFg(v), fontWeight: v !== null ? 600 : 400, fontFamily: "var(--mono)", fontSize: "12px", transition: "background 0.15s" }}>
-                                {formatMetric(v)}
-                              </td>
-                            ))}
-                            <td style={{ textAlign: "right", borderLeft: "2px solid var(--border)", background: cellBg(avg), color: cellFg(avg), fontWeight: 700, fontFamily: "var(--mono)", fontSize: "12px" }}>
-                              {formatMetric(avg)}
-                            </td>
-                          </tr>
-                        );
-                      })}
-                    </tbody>
-                  </table>
-                </div>
+                <Table style={{ minWidth: `${160 + reportMonths.length * 110}px` }} className="text-[12px]">
+                  <TableHeader className="bg-muted/40 [&_th]:h-8 [&_th]:px-3 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
+                    <TableRow className="hover:bg-transparent">
+                      <TableHead className="sticky left-0 z-20 bg-[var(--surface2)]" style={{ minWidth: 150 }}>{groupBy.charAt(0).toUpperCase() + groupBy.slice(1)}</TableHead>
+                      {reportMonths.map((m) => <TableHead key={m} className="text-right tabular-nums">{shortMonthLabel(m)}</TableHead>)}
+                      <TableHead className="border-l border-border text-right tabular-nums">AVG</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody className="[&_td]:px-3 [&_td]:py-2">
+                    {groupKeys.map((key) => {
+                      const vals = reportMonths.map((m) => getGroupMonthValue(key, m));
+                      const defined = vals.filter((v): v is number => v !== null);
+                      const avg = defined.length ? defined.reduce((a, b) => a + b, 0) / defined.length : null;
+                      return (
+                        <TableRow key={key} className="hover:bg-transparent">
+                          <TableCell className="sticky left-0 z-10 bg-card font-medium text-foreground">{key}</TableCell>
+                          {vals.map((v, i) => (
+                            <TableCell key={i} className="text-right tabular-nums" style={{ background: cellBg(v), color: cellFg(v), fontWeight: v !== null ? 600 : 400 }}>
+                              {formatMetric(v)}
+                            </TableCell>
+                          ))}
+                          <TableCell className="border-l border-border text-right font-bold tabular-nums" style={{ background: cellBg(avg), color: cellFg(avg) }}>
+                            {formatMetric(avg)}
+                          </TableCell>
+                        </TableRow>
+                      );
+                    })}
+                  </TableBody>
+                </Table>
               )}
             </section>
           )}
@@ -3743,12 +3986,12 @@ function HistoryScreen(props: {
           {/* CHART — SVG line graph */}
           {props.view === "chart" && (
             <section>
-              <div style={{ display: "flex", alignItems: "baseline", gap: "8px", marginBottom: "12px" }}>
-                <div className="section-title" style={{ margin: 0 }}>{metricLabel}</div>
-                <span style={{ fontSize: "11px", color: "var(--text-muted)", fontFamily: "var(--mono)" }}>over time · by {groupBy}</span>
+              <div className="mb-3 flex items-baseline gap-2">
+                <h2 className="text-[13px] font-semibold text-foreground">{metricLabel}</h2>
+                <span className="text-[11.5px] text-muted-foreground">over time · by {groupBy}</span>
               </div>
               {reportMonths.length < 2 || groupKeys.length === 0 ? (
-                <div className="no-goals-msg" style={{ display: "block" }}>Select a range with at least 2 months of submitted scorecards to draw a chart.</div>
+                <div className="px-4 py-8 text-center text-[13px] text-muted-foreground">Select a range with at least 2 months of submitted scorecards to draw a chart.</div>
               ) : (
                 <ReportLineChart
                   months={reportMonths}
@@ -4409,61 +4652,37 @@ function WhatIfScreen(props: {
     setPlayGoals((prev) => prev.map((pg) => pg.id === id ? { ...pg, [field]: value } : pg));
   }
 
-  const thS: React.CSSProperties = { padding: "6px 10px", fontSize: "9px", fontWeight: 700, color: "var(--text-muted)", textAlign: "left", borderBottom: "1.5px solid var(--border)", whiteSpace: "nowrap", background: "var(--surface2)" };
-  const thC: React.CSSProperties = { ...thS, textAlign: "center" };
-
   return (
     <div className="screen active">
-      <section>
-        <div className="section-title">What If Scorecard</div>
-        <p style={{ fontSize: "13px", color: "var(--text-muted)", lineHeight: 1.7, marginTop: "4px" }}>
-          Explore how changes to targets, actuals, and weights affect bonus calculations. Nothing here is saved.
-        </p>
-      </section>
+      <p className="mb-1 text-[13px] text-muted-foreground">
+        Explore how changes to targets, actuals, and weights affect bonus calculations. Nothing here is saved.
+      </p>
 
       <section>
-        <div style={{ display: "flex", gap: "16px", flexWrap: "wrap", alignItems: "flex-end" }}>
+        <div className="flex flex-wrap items-end gap-3">
           {!isUser && (
-            <div className="field" style={{ flex: "1 1 220px", minWidth: 0 }}>
-              <label>Employee</label>
-              <select value={selectedEmpName} onChange={(e) => setSelectedEmpName(e.target.value)}>
-                <option value="">— select employee —</option>
-                {employeeOptions.map((emp) => (
-                  <option key={emp.id} value={emp.name}>{emp.name}</option>
-                ))}
-              </select>
-            </div>
+            <DrawerField label="Employee" className="min-w-[12rem] flex-1">
+              <Select value={selectedEmpName || undefined} onValueChange={(v) => setSelectedEmpName(v)}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Select employee…" /></SelectTrigger>
+                <SelectContent>
+                  {employeeOptions.map((emp) => <SelectItem key={emp.id} value={emp.name}>{emp.name}</SelectItem>)}
+                </SelectContent>
+              </Select>
+            </DrawerField>
           )}
           {isUser && props.profile?.linkedEmployeeName && (
-            <div className="field" style={{ flex: "1 1 220px", minWidth: 0 }}>
-              <label>Employee</label>
-              <div style={{ padding: "8px 10px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", fontSize: "13px", background: "var(--surface2)" }}>
-                {props.profile.linkedEmployeeName}
-              </div>
-            </div>
+            <DrawerField label="Employee" className="min-w-[12rem] flex-1">
+              <div className="flex h-9 items-center rounded-md border border-input bg-muted/50 px-3 text-[13px] text-foreground">{props.profile.linkedEmployeeName}</div>
+            </DrawerField>
           )}
-          <div className="field" style={{ flex: "1 1 160px", minWidth: 0 }}>
-            <label>Base Earnings</label>
-            <input
-              type="number"
-              value={earningsInput}
-              onChange={(e) => setEarningsInput(e.target.value)}
-              placeholder="0.00"
-              style={{ fontFamily: "var(--mono)" }}
-            />
-          </div>
-          <div className="field" style={{ flex: "1 1 140px", minWidth: 0 }}>
-            <label>Hourly Rate</label>
-            <input
-              type="number"
-              value={hourlyRateInput}
-              onChange={(e) => setHourlyRateInput(e.target.value)}
-              placeholder="0.00"
-              style={{ fontFamily: "var(--mono)" }}
-            />
-          </div>
+          <DrawerField label="Base earnings" htmlFor="wi-earnings" className="w-[140px]">
+            <Input id="wi-earnings" type="number" value={earningsInput} onChange={(e) => setEarningsInput(e.target.value)} placeholder="0.00" className="tabular-nums" />
+          </DrawerField>
+          <DrawerField label="Hourly rate" htmlFor="wi-hourly" className="w-[130px]">
+            <Input id="wi-hourly" type="number" value={hourlyRateInput} onChange={(e) => setHourlyRateInput(e.target.value)} placeholder="0.00" className="tabular-nums" />
+          </DrawerField>
           {selectedEmp && (
-            <div style={{ flex: "1 1 auto", fontSize: "12px", color: "var(--text-muted)", paddingBottom: "8px" }}>
+            <div className="pb-2 text-[12px] text-muted-foreground">
               {selectedEmp.role}{selectedEmp.department ? ` · ${selectedEmp.department}` : ""}{selectedEmp.location ? ` · ${selectedEmp.location}` : ""}
             </div>
           )}
@@ -4471,137 +4690,100 @@ function WhatIfScreen(props: {
       </section>
 
       {selectedEmpName && (
-        <section>
+        <section style={{ padding: 0 }} className="overflow-hidden">
           {playGoals.length > 0 ? (
-            <div style={{ overflowX: "auto" }}>
-              <table style={{ width: "100%", borderCollapse: "collapse", fontSize: "11px" }}>
-                <thead>
-                  <tr>
-                    <th style={thS}>Type</th>
-                    <th style={thS}>Goal</th>
-                    <th style={thC}>Target</th>
-                    <th style={thC}>Min</th>
-                    <th style={thC}>Actual</th>
-                    <th style={thC}>Lower↓</th>
-                    <th style={thC}>Weight %</th>
-                    <th style={thC}>Achieve %</th>
-                    <th style={thC}>Bonus $</th>
-                    <th style={{ ...thC, width: "28px" }}></th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {playGoals.map((pg, i) => {
-                    const sc = liveGoals[i];
-                    const isCustom = pg.id.startsWith("custom-");
-                    return (
-                      <tr key={pg.id} style={{ borderBottom: "1px solid var(--border)" }}>
-                        <td style={{ padding: "4px 6px" }}>
-                          {isCustom ? (
-                            <select
-                              value={pg.goalTier}
-                              onChange={(e) => updateGoal(pg.id, "goalTier", e.target.value)}
-                              style={{ fontSize: "10px", padding: "2px 4px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", fontFamily: "var(--sans)", background: "var(--surface)", cursor: "pointer" }}
-                            >
-                              <option value="company">Company</option>
-                              <option value="department">Dept</option>
-                              <option value="individual">Individual</option>
-                            </select>
-                          ) : <TierBadge tier={pg.goalTier} />}
-                        </td>
-                        <td style={{ padding: "4px 6px", fontWeight: 600, minWidth: "140px" }}>
-                          {isCustom ? (
-                            <input
-                              type="text"
-                              className="actual-inline-input"
-                              value={pg.name}
-                              onChange={(e) => updateGoal(pg.id, "name", e.target.value)}
-                              placeholder="Goal name"
-                              style={{ width: "140px" }}
-                            />
-                          ) : <>{pg.name}<GoalScopeTags location={pg.location} department={pg.department} /></>}
-                        </td>
-                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
-                          <input type="number" className="actual-inline-input" value={pg.target}
-                            onChange={(e) => updateGoal(pg.id, "target", e.target.value)} style={{ width: "68px" }} />
-                        </td>
-                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
-                          <input type="number" className="actual-inline-input" value={pg.min}
-                            onChange={(e) => updateGoal(pg.id, "min", e.target.value)} style={{ width: "68px" }} />
-                        </td>
-                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
-                          <input type="number" className="actual-inline-input" value={pg.actual}
-                            onChange={(e) => updateGoal(pg.id, "actual", e.target.value)} style={{ width: "68px" }} placeholder="—" />
-                        </td>
-                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
-                          <button
-                            onClick={() => setPlayGoals((prev) => prev.map((g) => g.id === pg.id ? { ...g, lowerBetter: !g.lowerBetter } : g))}
-                            title={pg.lowerBetter ? "Lower is better (click to toggle)" : "Higher is better (click to toggle)"}
-                            style={{ border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", background: pg.lowerBetter ? "var(--brick)" : "var(--surface)", color: pg.lowerBetter ? "#fff" : "var(--text-muted)", fontSize: "11px", padding: "2px 7px", cursor: "pointer", fontFamily: "var(--sans)", fontWeight: 600 }}
-                          >
-                            {pg.lowerBetter ? "Yes" : "No"}
-                          </button>
-                        </td>
-                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
-                          <input type="number" className="actual-inline-input" value={pg.weight}
-                            onChange={(e) => updateGoal(pg.id, "weight", e.target.value)} style={{ width: "60px" }} />
-                        </td>
-                        <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center", fontWeight: 700 }}>
-                          {sc.actual != null
-                            ? (sc.metMin
-                              ? <span style={{ color: sc.achievement >= 100 ? "#2D6B1A" : "var(--brick)" }}>{sc.achievement.toFixed(1)}%</span>
-                              : <span style={{ color: "#9B2C2C" }}>Below min</span>)
-                            : <span style={{ color: "var(--text-faint)" }}>—</span>}
-                        </td>
-                        <td style={{ padding: "6px 10px", fontFamily: "var(--mono)", textAlign: "center" }}>{formatCurrency(sc.bonusContribution)}</td>
-                        <td style={{ padding: "4px 6px", textAlign: "center" }}>
-                          <button
-                            onClick={() => setPlayGoals((prev) => prev.filter((g) => g.id !== pg.id))}
-                            style={{ border: "none", background: "none", color: "#9B2C2C", fontSize: "14px", cursor: "pointer", padding: 0, lineHeight: 1, opacity: 0.6 }}
-                            title="Remove goal"
-                          >✕</button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
+            <Table className="text-[12px]">
+              <TableHeader className="bg-muted/40 [&_th]:h-8 [&_th]:px-2 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Type</TableHead>
+                  <TableHead>Goal</TableHead>
+                  <TableHead className="text-center">Target</TableHead>
+                  <TableHead className="text-center">Min</TableHead>
+                  <TableHead className="text-center">Actual</TableHead>
+                  <TableHead className="text-center">Lower</TableHead>
+                  <TableHead className="text-center">Weight</TableHead>
+                  <TableHead className="text-center">Achieve</TableHead>
+                  <TableHead className="text-right">Bonus</TableHead>
+                  <TableHead className="w-8" />
+                </TableRow>
+              </TableHeader>
+              <TableBody className="[&_td]:px-2 [&_td]:py-1.5">
+                {playGoals.map((pg, i) => {
+                  const sc = liveGoals[i];
+                  const isCustom = pg.id.startsWith("custom-");
+                  return (
+                    <TableRow key={pg.id} className="group hover:bg-transparent">
+                      <TableCell>
+                        {isCustom ? (
+                          <Select value={pg.goalTier} onValueChange={(v) => updateGoal(pg.id, "goalTier", v)}>
+                            <SelectTrigger size="sm" className="h-7 w-[112px] text-[11px]"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="company">Company</SelectItem>
+                              <SelectItem value="department">Department</SelectItem>
+                              <SelectItem value="individual">Individual</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        ) : <TierBadge tier={pg.goalTier} />}
+                      </TableCell>
+                      <TableCell className="font-medium text-foreground">
+                        {isCustom ? (
+                          <Input type="text" value={pg.name} onChange={(e) => updateGoal(pg.id, "name", e.target.value)} placeholder="Goal name" className="h-7 w-[150px] text-[12px]" />
+                        ) : <span className="flex items-center gap-1.5">{pg.name}<GoalScopeTags location={pg.location} department={pg.department} /></span>}
+                      </TableCell>
+                      <TableCell className="text-center"><Input type="number" value={pg.target} onChange={(e) => updateGoal(pg.id, "target", e.target.value)} className="h-7 w-[72px] text-center text-[12px] tabular-nums" /></TableCell>
+                      <TableCell className="text-center"><Input type="number" value={pg.min} onChange={(e) => updateGoal(pg.id, "min", e.target.value)} className="h-7 w-[72px] text-center text-[12px] tabular-nums" /></TableCell>
+                      <TableCell className="text-center"><Input type="number" value={pg.actual} onChange={(e) => updateGoal(pg.id, "actual", e.target.value)} placeholder="—" className="h-7 w-[72px] text-center text-[12px] tabular-nums" /></TableCell>
+                      <TableCell className="text-center">
+                        <Button type="button" variant={pg.lowerBetter ? "default" : "outline"} size="sm" className="h-7 px-2.5 text-[11px]" title={pg.lowerBetter ? "Lower is better (click to toggle)" : "Higher is better (click to toggle)"} onClick={() => setPlayGoals((prev) => prev.map((g) => g.id === pg.id ? { ...g, lowerBetter: !g.lowerBetter } : g))}>
+                          {pg.lowerBetter ? "Yes" : "No"}
+                        </Button>
+                      </TableCell>
+                      <TableCell className="text-center"><Input type="number" value={pg.weight} onChange={(e) => updateGoal(pg.id, "weight", e.target.value)} className="h-7 w-[64px] text-center text-[12px] tabular-nums" /></TableCell>
+                      <TableCell className="text-center font-semibold tabular-nums">
+                        {sc.actual != null
+                          ? (sc.metMin
+                            ? <span style={{ color: sc.achievement >= 100 ? "#2D6B1A" : "var(--brick)" }}>{sc.achievement.toFixed(1)}%</span>
+                            : <span className="text-[#9B2C2C]">Below min</span>)
+                          : <span className="text-[var(--text-faint)]">—</span>}
+                      </TableCell>
+                      <TableCell className="text-right tabular-nums">{formatCurrency(sc.bonusContribution)}</TableCell>
+                      <TableCell className="text-right">
+                        <button type="button" title="Remove goal" onClick={() => setPlayGoals((prev) => prev.filter((g) => g.id !== pg.id))} className="inline-flex size-6 items-center justify-center rounded-md text-[#9B2C2C] opacity-0 transition-opacity hover:bg-[#9B2C2C]/10 focus-visible:opacity-100 group-hover:opacity-100">
+                          <X className="size-3.5" />
+                        </button>
+                      </TableCell>
+                    </TableRow>
+                  );
+                })}
+              </TableBody>
+            </Table>
           ) : (
-            <div className="no-goals-msg" style={{ display: "block" }}>No goals found for this employee. Add one below.</div>
+            <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">No goals found for this employee. Add one below.</div>
           )}
 
-          <div style={{ padding: "10px 0", display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
-            <div style={{ position: "relative" }}>
-              <button
-                style={{ fontSize: "12px", padding: "5px 10px", border: "1.5px solid var(--border)", borderRadius: "var(--radius-sm)", background: "none", cursor: "pointer", fontFamily: "var(--sans)" }}
-                onClick={() => {
-                  setPlayGoals((prev) => [
-                    ...prev.map((g) => ({ ...g, weight: "0" })),
-                    {
-                      id: `custom-${Date.now()}`, name: "", goalTier: "individual" as const,
-                      lowerBetter: false, capped: "no" as const, capPct: 100,
-                      target: "", min: "", actual: "", weight: "0"
-                    }
-                  ]);
-                }}
-              >+ Add Goal</button>
-            </div>
-            <div style={{ marginLeft: "auto", fontSize: "12px", color: totalWeight !== 100 ? "var(--brick)" : "var(--text-muted)", fontFamily: "var(--mono)" }}>
-              Total weight: {totalWeight.toFixed(1)}%{totalWeight !== 100 ? " ⚠ must equal 100" : ""}
-            </div>
+          <div className="flex flex-wrap items-center gap-2.5 border-t border-border px-3 py-3">
+            <Button variant="outline" size="sm" className="text-[12px]" onClick={() => {
+              setPlayGoals((prev) => [
+                ...prev.map((g) => ({ ...g, weight: "0" })),
+                { id: `custom-${Date.now()}`, name: "", goalTier: "individual" as const, lowerBetter: false, capped: "no" as const, capPct: 100, target: "", min: "", actual: "", weight: "0" }
+              ]);
+            }}>+ Add goal</Button>
+            <span className={`ml-auto text-[11.5px] tabular-nums ${totalWeight !== 100 ? "font-semibold text-primary" : "text-muted-foreground"}`}>
+              Total weight: {totalWeight.toFixed(1)}%{totalWeight !== 100 ? " — must equal 100" : ""}
+            </span>
           </div>
         </section>
       )}
 
       {selectedEmpName && playGoals.length > 0 && (
-        <div className="results-section">
-          <div className="section-title" style={{ marginBottom: "12px" }}>Live Results</div>
-          <div className="metrics-grid">
-            <Metric label="Base Earnings" value={formatCurrency(earnings)} />
-            <Metric label="Weighted Achievement" value={`${weightedAchievement.toFixed(1)}%${weightedAchievement > 200 ? " → capped 200%" : ""}`} highlight />
-            <Metric label="Estimated Bonus" value={formatCurrency(bonusAmount)} highlight />
-            <Metric label="Total Pay" value={formatCurrency(earnings + bonusAmount)} />
-            {effectiveHourly !== null && <Metric label="Effective Hourly Rate" value={`$${effectiveHourly.toFixed(2)}/hr`} />}
+        <div>
+          <h2 className="mb-3 text-[13px] font-semibold text-foreground">Live results</h2>
+          <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+            <KpiTile label="Base earnings" value={formatCurrency(earnings)} />
+            <KpiTile label="Weighted achievement" value={`${weightedAchievement.toFixed(1)}%`} sub={weightedAchievement > 200 ? "capped at 200%" : undefined} accent />
+            <KpiTile label="Estimated bonus" value={formatCurrency(bonusAmount)} accent />
+            <KpiTile label="Total pay" value={formatCurrency(earnings + bonusAmount)} />
+            {effectiveHourly !== null && <KpiTile label="Effective hourly" value={`$${effectiveHourly.toFixed(2)}/hr`} />}
           </div>
         </div>
       )}
