@@ -1285,6 +1285,8 @@ export default function ScorecardsApp() {
               profile={effectiveProfile}
               latestEmployees={latestRipplingEmployees}
               allEmployees={allRipplingEmployees}
+              periodActuals={appData.actuals[formatMonthLabel(workMonth)] || {}}
+              workMonth={workMonth}
             />
           )}
           {mode === "users" && (
@@ -4819,6 +4821,8 @@ function WhatIfScreen(props: {
   profile: ManagerProfile | null;
   latestEmployees: Employee[];
   allEmployees: Employee[];
+  periodActuals: ActualsByKey;
+  workMonth: string;
 }) {
   const isUser = props.profile?.role === "user";
   const defaultEmpName = isUser ? (props.profile?.linkedEmployeeName || "") : "";
@@ -4888,6 +4892,42 @@ function WhatIfScreen(props: {
     setPlayGoals((prev) => prev.map((pg) => pg.id === id ? { ...pg, [field]: value } : pg));
   }
 
+  function loadCurrentScorecard() {
+    const emp = props.latestEmployees.find((e) => e.name === selectedEmpName);
+    if (!emp) return;
+    // Pre-fill earnings from Rippling data
+    const earnings = baseEarnings({ payType: emp.payType, hourlyRate: emp.hourlyRate, hours: emp.hoursWorked, annualPay: emp.annualPay, grossEarnings: emp.grossEarnings });
+    if (earnings > 0) setEarningsInput(earnings.toFixed(2));
+    if (emp.hourlyRate) setHourlyRateInput(String(emp.hourlyRate));
+    // Load goals with targets/mins/actuals from the current period actuals
+    const applicable = props.allGoals.filter((g) => {
+      if (g.goalTier === "company") return false;
+      if (g.goalTier === "department") return !g.department || g.department === emp.department;
+      if (g.goalTier === "individual") {
+        if (g.employeeName) return g.employeeName === emp.name;
+        return !g.role || g.role === emp.role;
+      }
+      return false;
+    });
+    const n = applicable.length;
+    const allHaveWeight = applicable.every((g) => g.weight != null && g.weight > 0);
+    const eq = n > 0 ? Number((100 / n).toFixed(2)) : 0;
+    setPlayGoals(applicable.map((g, i) => {
+      const tVal = props.periodActuals[metaKey("target", g)];
+      const mVal = props.periodActuals[metaKey("min", g)];
+      const aVal = g.goalTier !== "individual" ? props.periodActuals[actualKey(g)] : null;
+      const defaultWeight = allHaveWeight ? g.weight! : (i === n - 1 ? Number((100 - eq * (n - 1)).toFixed(2)) : eq);
+      return {
+        id: g.id, name: g.name, goalTier: g.goalTier, location: g.location, department: g.department,
+        role: g.role, lowerBetter: g.lowerBetter, capped: g.capped, capPct: g.capPct,
+        target: tVal != null ? String(tVal) : String(g.goalValue || ""),
+        min: mVal != null ? String(mVal) : String(g.minValue || ""),
+        actual: aVal != null ? String(aVal) : "",
+        weight: String(defaultWeight)
+      };
+    }));
+  }
+
   return (
     <div className="screen active">
       <p className="mb-1 text-[13px] text-muted-foreground">
@@ -4917,9 +4957,20 @@ function WhatIfScreen(props: {
           <DrawerField label="Hourly rate" htmlFor="wi-hourly" className="w-[130px]">
             <Input id="wi-hourly" type="number" value={hourlyRateInput} onChange={(e) => setHourlyRateInput(e.target.value)} placeholder="0.00" className="tabular-nums" />
           </DrawerField>
-          {selectedEmp && (
-            <div className="pb-2 text-[12px] text-muted-foreground">
-              {selectedEmp.role}{selectedEmp.department ? ` · ${selectedEmp.department}` : ""}{selectedEmp.location ? ` · ${selectedEmp.location}` : ""}
+          {selectedEmpName && (
+            <div className="flex flex-col gap-1 pb-1">
+              <button
+                onClick={loadCurrentScorecard}
+                style={{ padding: "6px 14px", fontSize: "12px", fontFamily: "var(--sans)", fontWeight: 600, border: "1.5px solid var(--brick)", borderRadius: "var(--radius-sm)", background: "var(--brick-light)", color: "var(--brick)", cursor: "pointer", whiteSpace: "nowrap" }}
+                title={`Load goals, targets, actuals, and earnings from ${formatMonthLabel(props.workMonth)}`}
+              >
+                ↓ Use current scorecard
+              </button>
+              {selectedEmp && (
+                <div className="text-[11px] text-muted-foreground">
+                  {selectedEmp.role}{selectedEmp.department ? ` · ${selectedEmp.department}` : ""}{selectedEmp.location ? ` · ${selectedEmp.location}` : ""}
+                </div>
+              )}
             </div>
           )}
         </div>
