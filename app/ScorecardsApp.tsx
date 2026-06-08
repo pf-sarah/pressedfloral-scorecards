@@ -1278,7 +1278,7 @@ export default function ScorecardsApp() {
               }}
             />
           )}
-          {mode === "guide" && <GuideScreen />}
+          {mode === "guide" && <GuideScreen profile={effectiveProfile} />}
           {mode === "whatif" && (
             <WhatIfScreen
               allGoals={appData.goals.filter((g) => g.active)}
@@ -4558,93 +4558,242 @@ function TodosScreen({
   );
 }
 
-const guideSteps = [
-  {
-    title: "Upload Rippling Data",
-    body: "Start each month by uploading your Rippling CSV. This pre-loads employee names, roles, departments, locations, and pay rates so you don't have to enter them manually.",
-    bullets: ["Go to Rippling Data in the sidebar", "Select the payroll month", "Upload the Active_Employees_with_Hourly_and_Annual_Base_Pay.csv file", "Review the preview and click Save to App"]
-  },
-  {
-    title: "Build Your Goal Bank",
-    body: "The Goal Bank is your permanent library of goals. Goals don't expire — they're reused month to month and pulled into scorecards. Set this up once and update as needed.",
-    bullets: ["Go to Goals & Actuals in the sidebar", "Click + Add Goal to Bank at the bottom", "Set the type: Company (everyone), Department (dept-wide), or Individual (role-specific)", "Goals can be deactivated without being deleted"]
-  },
-  {
-    title: "Enter Company & Department Actuals",
-    body: "At month end, enter the actual results for company and department goals. These are shared across all employees — enter them once and they'll be available when building scorecards.",
-    bullets: ["Go to Goals & Actuals in the sidebar", "Select the month from the filter at the top", "Use the ⋮ menu on each goal row and choose Enter actual", "Individual goal actuals are entered per-employee in the scorecard builder"]
-  },
-  {
-    title: "Build Individual Scorecards",
-    body: "For each employee, build their scorecard by selecting goals, setting weights, entering individual actuals, and submitting. Company and department actuals you already entered will pre-fill automatically.",
-    bullets: ["Go to Team Scorecards in the sidebar", "Select the employee and scorecard month", "Goals load automatically based on their role and department", "Set a weight for each goal (all weights must total 100%)", "Enter actuals for individual goals — company and dept actuals are pre-filled", "Review the calculated bonus summary, then click Submit Scorecard"]
-  },
-  {
-    title: "Review Historical Data",
-    body: "Search and review all submitted scorecards. Filter by period, employee, department, or location. Export to CSV for payroll or further analysis.",
-    bullets: ["Go to Historical Data in the sidebar", "Select a period and optionally filter by location or department", "Each card shows goal-level detail — achievement, actuals, and bonus contribution", "Click ↓ Export filtered results CSV to download a full spreadsheet"]
-  }
-];
+type GuideStep = { title: string; bg: string; border: string; numBg: string; body: string; bullets: string[] };
 
-const guideTips: React.ReactNode[] = [
-  <>All goal weights on a scorecard must total exactly <strong className="font-semibold text-foreground">100%</strong> — the builder warns you if they don&rsquo;t</>,
-  <>Scorecards are <strong className="font-semibold text-foreground">capped at 200%</strong> total weighted achievement</>,
-  <>Achievements of <strong className="font-semibold text-foreground">120%+</strong> are flagged for review but not capped</>,
-  <>If a goal&rsquo;s actual doesn&rsquo;t meet the <strong className="font-semibold text-foreground">minimum threshold</strong>, that goal contributes $0 to the bonus</>,
-  <>Company and department actuals only need to be entered once — they apply to all scorecards for that month</>,
-  <>Goals can be <strong className="font-semibold text-foreground">deactivated</strong> in the Goal Bank without deleting them, keeping history intact</>,
-];
+const guideStepsByRole: Record<"user" | "manager" | "admin", GuideStep[]> = {
+  user: [
+    {
+      title: "View Your Scorecard",
+      bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
+      body: "My Scorecard shows all the scorecards that have been submitted for you. Each card includes your goals, actuals, achievement percentages, and final bonus amount.",
+      bullets: [
+        "Click My Scorecard in the sidebar",
+        "Expand any card to see goal-by-goal detail",
+        "Scorecards are submitted by your manager — reach out to them if one is missing"
+      ]
+    },
+    {
+      title: "Explore What If Scenarios",
+      bg: "#f0f7fa", border: "#b8d4e0", numBg: "#185FA5",
+      body: "The What If Scorecard lets you model how different actuals would affect your bonus — without saving anything. Great for understanding how close you are to hitting your targets.",
+      bullets: [
+        "Click What If Scorecard in the sidebar",
+        "Your name and goals are pre-loaded",
+        "Enter your base earnings and adjust actuals to see live bonus estimates",
+        "Nothing here is saved — experiment freely"
+      ]
+    }
+  ],
+  manager: [
+    {
+      title: "Enter Department Actuals",
+      bg: "var(--brick-light)", border: "var(--taupe)", numBg: "var(--brick)",
+      body: "At the end of each month, enter the actual results for department goals. These are shared across everyone in the department — enter them once and they'll pre-fill on all scorecards.",
+      bullets: [
+        "Go to Goals & Actuals in the sidebar",
+        "Select the month from the filter at the top",
+        "Use the ⋮ menu on each department goal row and choose Enter actual",
+        "Individual goal actuals are entered directly on each employee's scorecard"
+      ]
+    },
+    {
+      title: "Build & Submit Team Scorecards",
+      bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
+      body: "For each employee, open their scorecard card, review goals and weights, enter individual actuals, and submit. Department actuals you already entered will pre-fill automatically.",
+      bullets: [
+        "Go to Team Scorecards in the sidebar",
+        "Select the scorecard month at the top",
+        "Expand an employee's card to see their goals",
+        "Enter actuals for individual goals — department actuals are pre-filled",
+        "Use the ⋮ menu on any goal row to adjust its weight",
+        "All weights must total 100% before you can submit",
+        "Click Submit Scorecard to save"
+      ]
+    },
+    {
+      title: "Review Historical Scorecards",
+      bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
+      body: "Search and review all submitted scorecards for your team. Filter by period, employee, department, or location.",
+      bullets: [
+        "Go to Historical Data in the sidebar",
+        "Select a period and optionally filter by name or department",
+        "Each card shows goal-level detail — achievement, actuals, and bonus contribution",
+        "Click ↓ Export filtered results CSV to download a spreadsheet"
+      ]
+    },
+    {
+      title: "Explore What If Scenarios",
+      bg: "#f0f7fa", border: "#b8d4e0", numBg: "#185FA5",
+      body: "Model how different actuals, targets, or weights affect bonus calculations for any employee on your team — without saving anything.",
+      bullets: [
+        "Click What If Scorecard in the sidebar",
+        "Select an employee from your team",
+        "Adjust actuals, weights, and earnings to explore scenarios",
+        "Nothing here is saved — experiment freely"
+      ]
+    }
+  ],
+  admin: [
+    {
+      title: "Upload Rippling Data",
+      bg: "var(--brick-light)", border: "var(--taupe)", numBg: "var(--brick)",
+      body: "At the start of each month, upload the previous month's Rippling CSV. This pre-loads employee names, roles, departments, locations, pay rates, and hours so scorecards calculate correctly.",
+      bullets: [
+        "Go to Rippling Data in the sidebar",
+        "Export Active_Employees_with_Hourly_and_Annual_Base_Pay.csv from Rippling for the previous (completed) month",
+        "Drop the file onto the upload area and review the preview",
+        "Click Save to App — this becomes the active employee bank"
+      ]
+    },
+    {
+      title: "Manage the Goal Bank",
+      bg: "#f0f7fa", border: "#b8d4e0", numBg: "#185FA5",
+      body: "The Goal Bank is your permanent library of goals. Goals are reused month to month and pulled into scorecards automatically. Set it up once and update as needed.",
+      bullets: [
+        "Go to Goals & Actuals in the sidebar",
+        "Click + Add Goal to Bank to create a new goal",
+        "Set the type: Department (dept-wide) or Individual (specific employee)",
+        "Set a Weight % so it pre-fills on scorecards",
+        "Goals can be deactivated without being deleted — history stays intact"
+      ]
+    },
+    {
+      title: "Enter Company & Department Actuals",
+      bg: "#f0f7fa", border: "#b8d4e0", numBg: "#185FA5",
+      body: "At month end, enter actual results for company and department goals. These are shared across all employees — enter them once and they'll be available on every scorecard.",
+      bullets: [
+        "Go to Goals & Actuals in the sidebar",
+        "Select the month from the filter at the top",
+        "Use the ⋮ menu on each goal row and choose Enter actual",
+        "Individual goal actuals are entered directly on each employee's scorecard"
+      ]
+    },
+    {
+      title: "Build & Submit Team Scorecards",
+      bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
+      body: "For each employee, open their scorecard card, review goals and weights, enter individual actuals, and submit. Company and department actuals you already entered will pre-fill automatically.",
+      bullets: [
+        "Go to Team Scorecards in the sidebar",
+        "Select the scorecard month at the top",
+        "Expand an employee's card to see their goals",
+        "Enter actuals for individual goals — company and dept actuals are pre-filled",
+        "Use the ⋮ menu on any goal row to adjust its weight",
+        "All weights must total 100% before you can submit",
+        "Click Submit Scorecard to save"
+      ]
+    },
+    {
+      title: "Review Historical Scorecards",
+      bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
+      body: "Search and review all submitted scorecards. Filter by period, employee, department, or location. Export to CSV for payroll or further analysis.",
+      bullets: [
+        "Go to Historical Data in the sidebar",
+        "Select a period and optionally filter by location or department",
+        "Each card shows goal-level detail — achievement, actuals, and bonus contribution",
+        "Click ↓ Export filtered results CSV to download a full spreadsheet"
+      ]
+    },
+    {
+      title: "Manage Users & Permissions",
+      bg: "var(--brick-light)", border: "var(--taupe)", numBg: "var(--brick)",
+      body: "Invite new users, configure their role and department scope, and manage existing accounts from the Users screen.",
+      bullets: [
+        "Go to Users in the sidebar",
+        "Use Invite User to send a signup link — set their role (Admin / Manager / User) and scope",
+        "Managers are scoped to specific departments and locations",
+        "Users should be linked to an employee record so they can see their own scorecard",
+        "Use 👁 View as to see exactly what any user sees in the app"
+      ]
+    }
+  ]
+};
 
-function GuideScreen() {
+const guideTipsByRole: Record<"user" | "manager" | "admin", string[]> = {
+  user: [
+    "Your scorecard is submitted by your manager — you can't edit it directly",
+    "Scorecards are capped at <strong>200%</strong> total weighted achievement",
+    "If a goal's actual doesn't meet the minimum threshold, that goal contributes $0 to your bonus",
+    "Use <strong>What If Scorecard</strong> to understand what actuals you'd need to hit a target bonus"
+  ],
+  manager: [
+    "All goal weights on a scorecard must total exactly <strong>100%</strong> — the builder warns you if they don't",
+    "Scorecards are <strong>capped at 200%</strong> total weighted achievement",
+    "Achievements of <strong>120%+</strong> are flagged for review but not capped",
+    "If a goal's actual doesn't meet the minimum threshold, that goal contributes $0 to the bonus",
+    "Department actuals only need to be entered once — they apply to all scorecards in that department for the month"
+  ],
+  admin: [
+    "Upload Rippling data for the <strong>previous completed month</strong> — e.g. upload May's data in June once payroll is finalized",
+    "All goal weights on a scorecard must total exactly <strong>100%</strong> — the builder warns you if they don't",
+    "Scorecards are <strong>capped at 200%</strong> total weighted achievement",
+    "Achievements of <strong>120%+</strong> are flagged for review but not capped",
+    "If a goal's actual doesn't meet the minimum threshold, that goal contributes $0 to the bonus",
+    "Goals can be <strong>deactivated</strong> in the Goal Bank without deleting them, keeping history intact",
+    "Use <strong>Maintenance Mode</strong> (under Users) to lock out non-admin users while making bulk changes"
+  ]
+};
+
+function GuideScreen({ profile }: { profile: ManagerProfile | null }) {
+  const userRole = profile?.role ?? "user";
+  const canSwitchView = userRole === "admin" || userRole === "manager";
+  const availableTabs: Array<"user" | "manager" | "admin"> =
+    userRole === "admin" ? ["admin", "manager", "user"] :
+    userRole === "manager" ? ["manager", "user"] : ["user"];
+  const [viewAs, setViewAs] = useState<"user" | "manager" | "admin">(
+    userRole === "admin" ? "admin" : userRole === "manager" ? "manager" : "user"
+  );
+
+  const steps = guideStepsByRole[viewAs];
+  const tips = guideTipsByRole[viewAs];
+  const tabLabel: Record<string, string> = { admin: "Admin", manager: "Manager", user: "Employee" };
+
   return (
-    <div className="screen active mx-auto max-w-3xl space-y-4">
-      <div className="space-y-1">
-        <h2 className="text-[15px] font-semibold tracking-tight text-foreground">Monthly workflow</h2>
-        <p className="text-[13px] leading-relaxed text-muted-foreground">
-          Follow these five steps each month to set up goals, enter actuals, and build employee scorecards.
+    <div className="screen active">
+      <section>
+        <div className="section-title">How to use this app</div>
+        <p style={{ fontSize: "13px", color: "var(--text-muted)", lineHeight: 1.7, marginTop: "4px" }}>
+          {viewAs === "user" && "As an employee, you can view your submitted scorecards and use the What If tool to model bonus scenarios."}
+          {viewAs === "manager" && "As a manager, you enter actuals, build and submit scorecards for your team, and review historical data."}
+          {viewAs === "admin" && "As an admin, you manage the full monthly workflow — from uploading payroll data to submitting scorecards and managing users."}
         </p>
-      </div>
-
-      <div className="space-y-3">
-        {guideSteps.map((step, index) => (
-          <Card key={step.title}>
-            <CardHeader className="flex-row items-center gap-3 pb-3">
-              <span className="flex size-7 shrink-0 items-center justify-center rounded-full bg-primary text-[13px] font-semibold tabular-nums text-primary-foreground">
-                {index + 1}
-              </span>
-              <CardTitle className="text-[14px]">{step.title}</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <p className="text-[13px] leading-relaxed text-muted-foreground">{step.body}</p>
-              <ul className="space-y-1.5">
-                {step.bullets.map((b) => (
-                  <li key={b} className="flex gap-2 text-[13px] leading-relaxed text-foreground/85">
-                    <ChevronRight className="mt-[3px] size-3.5 shrink-0 text-primary/60" />
-                    <span>{b}</span>
-                  </li>
-                ))}
-              </ul>
-            </CardContent>
-          </Card>
-        ))}
-      </div>
-
-      <Card className="border-dashed bg-muted/30">
-        <CardHeader className="flex-row items-center gap-2 pb-3">
-          <Sparkles className="size-4 text-primary" />
-          <CardTitle className="text-[14px]">Tips &amp; rules</CardTitle>
-        </CardHeader>
-        <CardContent>
-          <ul className="space-y-2">
-            {guideTips.map((tip, i) => (
-              <li key={i} className="flex gap-2.5 text-[13px] leading-relaxed text-muted-foreground">
-                <span className="mt-[7px] size-1.5 shrink-0 rounded-full bg-primary/50" />
-                <span>{tip}</span>
-              </li>
+        {canSwitchView && (
+          <div style={{ display: "flex", gap: "6px", marginTop: "14px" }}>
+            {availableTabs.map((tab) => (
+              <button
+                key={tab}
+                onClick={() => setViewAs(tab)}
+                style={{
+                  padding: "5px 14px", fontSize: "12px", fontFamily: "var(--sans)", fontWeight: 600,
+                  border: "1.5px solid var(--border)", borderRadius: "99px", cursor: "pointer",
+                  background: viewAs === tab ? "var(--brick)" : "var(--surface2)",
+                  color: viewAs === tab ? "#fff" : "var(--text-muted)",
+                  transition: "background 0.15s, color 0.15s"
+                }}
+              >
+                {tabLabel[tab]}
+              </button>
             ))}
+          </div>
+        )}
+      </section>
+      {steps.map((step, index) => (
+        <section key={step.title} style={{ background: step.bg, borderColor: step.border }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", marginBottom: "14px" }}>
+            <div style={{ width: "28px", height: "28px", borderRadius: "50%", background: step.numBg, color: "#fff", fontSize: "13px", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>{index + 1}</div>
+            <div className="section-title" style={{ margin: 0 }}>{step.title}</div>
+          </div>
+          <p style={{ fontSize: "13px", color: "var(--text)", lineHeight: 1.7, marginBottom: "8px" }}>{step.body}</p>
+          <ul style={{ fontSize: "13px", color: "var(--text-muted)", lineHeight: 1.9, paddingLeft: "18px" }}>
+            {step.bullets.map((b) => <li key={b}>{b}</li>)}
           </ul>
-        </CardContent>
-      </Card>
+        </section>
+      ))}
+      <section style={{ background: "var(--surface2)", borderStyle: "dashed" }}>
+        <div className="section-title">Tips</div>
+        <ul style={{ fontSize: "13px", color: "var(--text-muted)", lineHeight: 1.9, paddingLeft: "18px" }}>
+          {tips.map((t) => <li key={t} dangerouslySetInnerHTML={{ __html: t }} />)}
+        </ul>
+      </section>
     </div>
   );
 }
