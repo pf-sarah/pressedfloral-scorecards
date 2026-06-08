@@ -8,7 +8,7 @@
  *   CRON_SECRET          — random string, also set in Vercel project settings
  *   RESEND_API_KEY       — from resend.com dashboard
  *   FROM_EMAIL           — verified sender, e.g. scorecards@pressedfloral.com
- *   NEXT_PUBLIC_APP_URL  — e.g. https://pressedfloral-scorecards.vercel.app
+ *   NEXT_PUBLIC_APP_URL  — e.g. https://pressedfloralscorecards.com
  */
 
 import { NextRequest, NextResponse } from "next/server";
@@ -262,7 +262,7 @@ export async function GET(request: NextRequest) {
   // ── Config ─────────────────────────────────────────────────────────────────
   const resendKey = process.env.RESEND_API_KEY;
   const fromEmail = process.env.FROM_EMAIL ?? "Scorecards <onboarding@resend.dev>";
-  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://pressedfloral-scorecards.vercel.app";
+  const appUrl = process.env.NEXT_PUBLIC_APP_URL ?? "https://pressedfloralscorecards.com";
 
   if (!resendKey) {
     return NextResponse.json({ error: "RESEND_API_KEY not set" }, { status: 500 });
