@@ -152,5 +152,6 @@ export const fixtureData: AppData = {
     [fixtureMonth]: fixtureEmployees
   },
   scorecards: fixtureScorecards,
-  goalAssignments: []
+  goalAssignments: [],
+  employeeScorecardSettings: []
 };

@@ -29,6 +29,7 @@ import {
   dataMode,
   employeeFromRow,
   employeeToRow,
+  employeeScorecardSettingsFromRow,
   goalAssignmentFromRow,
   goalFromRow,
   goalToRow,
@@ -39,7 +40,7 @@ import {
   scorecardToRow,
   supabaseClient
 } from "../lib/supabase";
-import type { ActualsByKey, AppData, Employee, Goal, GoalAssignment, GoalTier, HistoryFilters, ManagerProfile, ProfileRole, Scorecard } from "../lib/types";
+import type { ActualsByKey, AppData, Employee, EmployeeScorecardSettings, Goal, GoalAssignment, GoalTier, HistoryFilters, ManagerProfile, ProfileRole, Scorecard } from "../lib/types";
 import { AppShell, type NavGroup } from "@/components/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -477,12 +478,13 @@ export default function ScorecardsApp() {
       return;
     }
 
-    const [goalsResult, scorecardsResult, ripplingResult, actualsResult, assignmentsResult] = await Promise.all([
+    const [goalsResult, scorecardsResult, ripplingResult, actualsResult, assignmentsResult, settingsResult] = await Promise.all([
       client.from("goals_bank").select("*").order("goal_tier").order("department").order("name"),
       client.from("scorecards").select("*").order("scorecard_month", { ascending: false }).order("employee_name"),
       client.from("rippling_employees").select("*").order("period", { ascending: false }),
       client.from("actuals").select("*"),
-      client.from("goal_assignments").select("*").order("created_at", { ascending: false })
+      client.from("goal_assignments").select("*").order("created_at", { ascending: false }),
+      client.from("employee_scorecard_settings").select("*")
     ]);
 
     const rippling: Record<string, Employee[]> = {};
@@ -509,7 +511,8 @@ export default function ScorecardsApp() {
     const goals = scopedForProfile((goalsResult.data || []).map(goalFromRow), loadedProfile);
     const scorecards = scopedScorecardsForProfile((scorecardsResult.data || []).map(scorecardFromRow), loadedProfile, allEmployees);
     const goalAssignments: GoalAssignment[] = (assignmentsResult.data || []).map(goalAssignmentFromRow);
-    setAppData((current) => ({ ...current, goals, scorecards, rippling, actuals: { ...current.actuals, ...actuals }, goalAssignments }));
+    const employeeScorecardSettings: EmployeeScorecardSettings[] = (settingsResult.data || []).map(employeeScorecardSettingsFromRow);
+    setAppData((current) => ({ ...current, goals, scorecards, rippling, actuals: { ...current.actuals, ...actuals }, goalAssignments, employeeScorecardSettings }));
   }
 
   async function signIn() {
@@ -1025,6 +1028,55 @@ export default function ScorecardsApp() {
     showToast(`"${goal.name}" added to ${employeeName}'s scorecard from ${formatMonthLabel(month)} forward`);
   }
 
+  async function saveEmployeeScorecardSettings(
+    employeeName: string,
+    periodType: "monthly" | "quarterly",
+    patch: { excludedGoalIds: string[]; addedGoalIds: string[]; weightOverrides: Record<string, number> }
+  ) {
+    const existing = appData.employeeScorecardSettings.find(
+      (s) => s.employeeName === employeeName && s.periodType === periodType
+    );
+    const now = new Date().toISOString();
+    const updated: EmployeeScorecardSettings = {
+      id: existing?.id ?? `esc-${Date.now()}`,
+      employeeName,
+      periodType,
+      ...patch,
+      updatedAt: now,
+      updatedBy: currentUserEmail,
+    };
+
+    if (!isFixture && sb) {
+      const { data, error } = await sb
+        .from("employee_scorecard_settings")
+        .upsert(
+          {
+            employee_name: employeeName,
+            period_type: periodType,
+            excluded_goal_ids: patch.excludedGoalIds,
+            added_goal_ids: patch.addedGoalIds,
+            weight_overrides: patch.weightOverrides,
+            updated_at: now,
+            updated_by: currentUserEmail,
+          },
+          { onConflict: "employee_name,period_type" }
+        )
+        .select("id")
+        .single();
+      if (error) { console.error("Failed to save scorecard settings", error); return; }
+      updated.id = String(data.id);
+    }
+
+    setAppData((current) => ({
+      ...current,
+      employeeScorecardSettings: existing
+        ? current.employeeScorecardSettings.map((s) =>
+            s.employeeName === employeeName && s.periodType === periodType ? updated : s
+          )
+        : [...current.employeeScorecardSettings, updated],
+    }));
+  }
+
   async function toggleGoal(goal: Goal, month: string) {
     if (goalActiveForMonth(goal, month)) {
       // Deactivate from this month forward
@@ -1395,11 +1447,13 @@ export default function ScorecardsApp() {
                 allGoals={appData.goals.filter((g) => g.active)}
                 allActuals={appData.actuals}
                 goalAssignments={appData.goalAssignments}
+                employeeScorecardSettings={appData.employeeScorecardSettings}
                 onMonths={setScorecardMonths}
                 onSubmitScorecard={submitScorecardDirect}
                 onDeleteGoal={setDeleteModal}
                 onApproveScorecard={approveScorecard}
                 onReturnScorecard={returnScorecard}
+                onScorecardSettingsChange={saveEmployeeScorecardSettings}
                 currentUserEmail={currentUserEmail}
                 currentUserProfileId={effectiveProfile?.id}
               />
@@ -3231,11 +3285,13 @@ function ScorecardsScreen(props: {
   allGoals: Goal[];
   allActuals: Record<string, ActualsByKey>;
   goalAssignments: GoalAssignment[];
+  employeeScorecardSettings: EmployeeScorecardSettings[];
   onMonths: (months: string[]) => void;
   onSubmitScorecard: (scorecard: Scorecard) => void;
   onDeleteGoal: (value: { scorecardId: string; goalName: string }) => void;
   onApproveScorecard: (scorecardId: string) => void;
   onReturnScorecard: (scorecardId: string, note: string) => void;
+  onScorecardSettingsChange: (employeeName: string, periodType: "monthly" | "quarterly", patch: { excludedGoalIds: string[]; addedGoalIds: string[]; weightOverrides: Record<string, number> }) => void;
   currentUserEmail: string;
   currentUserProfileId?: string;
 }) {
@@ -3476,6 +3532,8 @@ function ScorecardsScreen(props: {
                   allRippling={props.rippling}
                   submittedScorecard={submitted}
                   globalPeriodType={globalPeriodType}
+                  empSettings={props.employeeScorecardSettings.filter((s) => s.employeeName === emp.name)}
+                  onSettingsChange={(pt, patch) => props.onScorecardSettingsChange(emp.name, pt, patch)}
                   onSubmit={props.onSubmitScorecard}
                   onDeleteGoal={props.onDeleteGoal}
                   onApprove={props.onApproveScorecard}
@@ -3545,6 +3603,8 @@ function ScorecardsScreen(props: {
                         allRippling={props.rippling}
                         submittedScorecard={submitted}
                         globalPeriodType={globalPeriodType}
+                        empSettings={props.employeeScorecardSettings.filter((s) => s.employeeName === emp.name)}
+                        onSettingsChange={(pt, patch) => props.onScorecardSettingsChange(emp.name, pt, patch)}
                         onSubmit={props.onSubmitScorecard}
                         onDeleteGoal={props.onDeleteGoal}
                         onApprove={props.onApproveScorecard}
@@ -3607,7 +3667,7 @@ function GoalRowMenu({ goalName, currentWeight, onApplyWeight, onRemove }: {
 }
 
 function LiveScorecardCard({
-  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, onSubmit, onDeleteGoal, onApprove, onReturn, currentUserEmail, currentUserProfileId
+  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, empSettings, onSettingsChange, onSubmit, onDeleteGoal, onApprove, onReturn, currentUserEmail, currentUserProfileId
 }: {
   employee: Employee;
   isoMonth: string;
@@ -3618,6 +3678,8 @@ function LiveScorecardCard({
   allRippling: Record<string, Employee[]>;
   submittedScorecard: Scorecard | undefined;
   globalPeriodType: "monthly" | "quarterly";
+  empSettings: EmployeeScorecardSettings[];
+  onSettingsChange: (periodType: "monthly" | "quarterly", patch: { excludedGoalIds: string[]; addedGoalIds: string[]; weightOverrides: Record<string, number> }) => void;
   onSubmit: (scorecard: Scorecard) => void;
   onDeleteGoal: (value: { scorecardId: string; goalName: string }) => void;
   onApprove: (scorecardId: string) => void;
@@ -3625,11 +3687,53 @@ function LiveScorecardCard({
   currentUserEmail: string;
   currentUserProfileId?: string;
 }) {
+  // --- helpers for computing goalIds from settings + baseGoals ---
+  function baseIdsForPeriod(pt: "monthly" | "quarterly"): string[] {
+    return baseGoals
+      .filter((g) => (pt === "quarterly" ? g.periodType === "quarterly" : g.periodType !== "quarterly"))
+      .map((g) => g.id);
+  }
+
+  function computeGoalIds(pt: "monthly" | "quarterly", s?: EmployeeScorecardSettings): string[] {
+    const base = baseIdsForPeriod(pt);
+    if (!s) return base;
+    const excluded = new Set(s.excludedGoalIds);
+    const kept = base.filter((id) => !excluded.has(id));
+    // Extra goals the manager manually added that aren't in base (and still exist in allGoals)
+    const extras = s.addedGoalIds.filter((id) => !base.includes(id) && allGoals.some((g) => g.id === id));
+    return [...kept, ...extras];
+  }
+
+  function settingsForPeriod(pt: "monthly" | "quarterly"): EmployeeScorecardSettings | undefined {
+    return empSettings.find((s) => s.periodType === pt);
+  }
+
+  // --- state ---
   const [open, setOpen] = useState(false);
   const [cardPeriodType, setCardPeriodType] = useState<"monthly" | "quarterly">(globalPeriodType);
-  const [goalIds, setGoalIds] = useState<string[]>(() => baseGoals.filter((g) => globalPeriodType === "quarterly" ? g.periodType === "quarterly" : g.periodType !== "quarterly").map((g) => g.id));
+  const initSettings = settingsForPeriod(globalPeriodType);
+  const [goalIds, setGoalIds] = useState<string[]>(() => computeGoalIds(globalPeriodType, initSettings));
   const [indActuals, setIndActuals] = useState<Record<string, string>>({});
-  const [weightOverrides, setWeightOverrides] = useState<Record<string, string>>({});
+  const [weightOverrides, setWeightOverrides] = useState<Record<string, string>>(() =>
+    initSettings ? Object.fromEntries(Object.entries(initSettings.weightOverrides).map(([k, v]) => [k, String(v)])) : {}
+  );
+
+  // Debounced settings persistence — fires 600 ms after the last change
+  const settingsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  function scheduleSettingsSave(newGoalIds: string[], newWeightOverrides: Record<string, string>, pt: "monthly" | "quarterly") {
+    if (settingsDebounceRef.current) clearTimeout(settingsDebounceRef.current);
+    settingsDebounceRef.current = setTimeout(() => {
+      const base = new Set(baseIdsForPeriod(pt));
+      const newSet = new Set(newGoalIds);
+      const excludedGoalIds = Array.from(base).filter((id) => !newSet.has(id));
+      const addedGoalIds = newGoalIds.filter((id) => !base.has(id));
+      const weightOverridesParsed: Record<string, number> = {};
+      for (const [k, v] of Object.entries(newWeightOverrides)) {
+        if (v !== "") weightOverridesParsed[k] = Number(v);
+      }
+      onSettingsChange(pt, { excludedGoalIds, addedGoalIds, weightOverrides: weightOverridesParsed });
+    }, 600);
+  }
 
   // Sync period type when the global toggle changes
   useEffect(() => {
@@ -3675,11 +3779,10 @@ function LiveScorecardCard({
   function handlePeriodTypeChange(newType: "monthly" | "quarterly") {
     setCardPeriodType(newType);
     setIndActuals({});
-    if (newType === "monthly") {
-      setGoalIds(baseGoals.filter((g) => g.periodType !== "quarterly").map((g) => g.id));
-    } else {
-      setGoalIds(baseGoals.filter((g) => g.periodType === "quarterly").map((g) => g.id));
-    }
+    const s = settingsForPeriod(newType);
+    const newGoalIds = computeGoalIds(newType, s);
+    setGoalIds(newGoalIds);
+    setWeightOverrides(s ? Object.fromEntries(Object.entries(s.weightOverrides).map(([k, v]) => [k, String(v)])) : {});
   }
 
   const displayedSubmitted = submittedScorecard || lastSubmitted;
@@ -3832,8 +3935,16 @@ function LiveScorecardCard({
                         <GoalRowMenu
                           goalName={goal.name}
                           currentWeight={weightOverrides[goal.name] ?? goal.scWeight.toFixed(1)}
-                          onApplyWeight={(w) => setWeightOverrides((prev) => ({ ...prev, [goal.name]: w }))}
-                          onRemove={() => setGoalIds((prev) => prev.filter((id) => id !== goal.id))}
+                          onApplyWeight={(w) => {
+                            const next = { ...weightOverrides, [goal.name]: w };
+                            setWeightOverrides(next);
+                            scheduleSettingsSave(goalIds, next, cardPeriodType);
+                          }}
+                          onRemove={() => {
+                            const next = goalIds.filter((id) => id !== goal.id);
+                            setGoalIds(next);
+                            scheduleSettingsSave(next, weightOverrides, cardPeriodType);
+                          }}
                         />
                       </TableCell>
                     </TableRow>
@@ -3856,7 +3967,11 @@ function LiveScorecardCard({
                 {availableToAdd.length === 0 ? (
                   <div className="px-2 py-2 text-[11px] text-muted-foreground">No more goals available</div>
                 ) : availableToAdd.map((g) => (
-                  <DropdownMenuItem key={g.id} onSelect={() => setGoalIds((prev) => [...prev, g.id])} className="text-[12.5px]">
+                  <DropdownMenuItem key={g.id} onSelect={() => {
+                    const next = [...goalIds, g.id];
+                    setGoalIds(next);
+                    scheduleSettingsSave(next, weightOverrides, cardPeriodType);
+                  }} className="text-[12.5px]">
                     <span className="flex items-center gap-1.5">{g.name}<GoalScopeTags location={g.location} department={g.department} /></span>
                   </DropdownMenuItem>
                 ))}

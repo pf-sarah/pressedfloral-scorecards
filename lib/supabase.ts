@@ -1,6 +1,6 @@
 import { createClient } from "@supabase/supabase-js";
 import { isConfiguredProfile, parseProfileRole } from "./adminUsers";
-import type { ActualsByKey, Employee, Goal, GoalAssignment, ManagerProfile, Scorecard } from "./types";
+import type { ActualsByKey, Employee, EmployeeScorecardSettings, Goal, GoalAssignment, ManagerProfile, Scorecard } from "./types";
 
 export const dataMode = process.env.NEXT_PUBLIC_SCORECARDS_DATA_MODE === "fixture" ? "fixture" : "supabase";
 
@@ -176,6 +176,19 @@ export function scorecardToRow(scorecard: Scorecard) {
     reviewed_at: scorecard.reviewedAt || null,
     reviewed_by: scorecard.reviewedBy || null,
     review_note: scorecard.reviewNote || null,
+  };
+}
+
+export function employeeScorecardSettingsFromRow(row: Record<string, any>): EmployeeScorecardSettings {
+  return {
+    id: String(row.id),
+    employeeName: row.employee_name,
+    periodType: row.period_type === "quarterly" ? "quarterly" : "monthly",
+    excludedGoalIds: Array.isArray(row.excluded_goal_ids) ? row.excluded_goal_ids : [],
+    addedGoalIds: Array.isArray(row.added_goal_ids) ? row.added_goal_ids : [],
+    weightOverrides: (row.weight_overrides && typeof row.weight_overrides === "object") ? row.weight_overrides : {},
+    updatedAt: row.updated_at || undefined,
+    updatedBy: row.updated_by || undefined,
   };
 }
 

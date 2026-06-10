@@ -102,6 +102,20 @@ export type Scorecard = {
   reviewNote?: string;
 };
 
+// Persistent per-employee scorecard configuration — which goals are excluded,
+// which extra goals were manually added, and custom weight overrides.
+// Applies from the month of the change going forward; does not affect submitted scorecards.
+export type EmployeeScorecardSettings = {
+  id: string;
+  employeeName: string;
+  periodType: "monthly" | "quarterly";
+  excludedGoalIds: string[];              // IDs of base goals explicitly removed
+  addedGoalIds: string[];                 // IDs of extra goals manually added (not in base)
+  weightOverrides: Record<string, number>; // goalName → weight %
+  updatedAt?: string;
+  updatedBy?: string;
+};
+
 export type GoalAssignment = {
   id: string;
   goalId: string;
@@ -119,6 +133,7 @@ export type AppData = {
   rippling: Record<string, Employee[]>;
   scorecards: Scorecard[];
   goalAssignments: GoalAssignment[];
+  employeeScorecardSettings: EmployeeScorecardSettings[];
 };
 
 export type HistoryFilters = {
