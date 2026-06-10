@@ -2804,7 +2804,7 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
     const finalGoal: Goal = {
       ...draft,
       goalTier: tierVal as GoalTier,
-      location: (isIndividual || locVal === "") ? undefined : locVal,
+      location: locVal === "" || locVal === GOAL_ALL ? undefined : locVal,
       department: deptVal === "" ? undefined : deptVal,
       employeeName: isIndividual && empVal !== "__unset__" ? empVal : undefined,
       role: undefined, // no longer used for new goals
@@ -2853,17 +2853,15 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
             </Select>
           </DrawerField>
 
-          {!isIndividual && (
-            <DrawerField label="Location" required>
-              <Select value={locVal === "__unset__" ? undefined : (locVal === "" ? GOAL_ALL : locVal)} onValueChange={(v) => setLocVal(v === GOAL_ALL ? "" : v)}>
-                <SelectTrigger className="w-full"><SelectValue placeholder="Select location…" /></SelectTrigger>
-                <SelectContent>
-                  {!allowedLocations?.length && <SelectItem value={GOAL_ALL}>All locations</SelectItem>}
-                  {visibleLocations.map((loc) => <SelectItem key={loc} value={loc}>{loc}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </DrawerField>
-          )}
+          <DrawerField label="Location" required>
+            <Select value={locVal === "__unset__" ? undefined : (locVal === "" ? GOAL_ALL : locVal)} onValueChange={(v) => setLocVal(v === GOAL_ALL ? "" : v)}>
+              <SelectTrigger className="w-full"><SelectValue placeholder="Select location…" /></SelectTrigger>
+              <SelectContent>
+                {!allowedLocations?.length && !isIndividual && <SelectItem value={GOAL_ALL}>All locations</SelectItem>}
+                {visibleLocations.map((loc) => <SelectItem key={loc} value={loc}>{loc}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </DrawerField>
 
           <DrawerField label="Department" required>
             <Select value={deptVal === "__unset__" ? undefined : (deptVal === "" ? GOAL_ALL : deptVal)} onValueChange={(v) => { setDeptVal(v === GOAL_ALL ? "" : v); setEmpVal("__unset__"); }}>
