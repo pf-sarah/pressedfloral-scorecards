@@ -2874,7 +2874,7 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, teamEmployees,
           </DrawerField>
 
           {!isNew && (
-            <div style={{ paddingTop: "8px", borderTop: "2px solid red", background: "yellow", display: "flex", flexDirection: "column", gap: "3px" }}>
+            <div style={{ paddingTop: "8px", borderTop: "1px solid #e2ddd8", display: "flex", flexDirection: "column", gap: "3px" }}>
               <p style={{ margin: 0, fontSize: "11px", color: "#6b6560", fontFamily: "monospace" }}>
                 <span style={{ fontWeight: 600 }}>Created by:</span>{" "}
                 {goal.createdBy
