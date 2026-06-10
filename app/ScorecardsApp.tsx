@@ -913,7 +913,7 @@ export default function ScorecardsApp() {
     if (!isFixture && sb) {
       const result = isSupabaseUuid(goal.id)
         ? await sb.from("goals_bank").upsert(goalToRow(goal), { onConflict: "id" }).select().single()
-        : await sb.from("goals_bank").insert(goalToRow(goal, { includeId: false })).select().single();
+        : await sb.from("goals_bank").insert(goalToRow(goal, { includeId: false, createdBy: currentUserEmail || undefined })).select().single();
       if (result.error || !result.data) {
         showSupabaseError(result.error, "Goal could not be saved.");
         return null;
@@ -2872,6 +2872,28 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, teamEmployees,
           <DrawerField label="Weight %" required htmlFor="goal-weight">
             <Input id="goal-weight" type="number" min="0" max="100" step="0.1" value={weightVal} onChange={(e) => setWeightVal(e.target.value)} placeholder="e.g. 25" />
           </DrawerField>
+
+          {!isNew && (
+            <div style={{ paddingTop: "8px", borderTop: "2px solid red", background: "yellow", display: "flex", flexDirection: "column", gap: "3px" }}>
+              <p style={{ margin: 0, fontSize: "11px", color: "#6b6560", fontFamily: "monospace" }}>
+                <span style={{ fontWeight: 600 }}>Created by:</span>{" "}
+                {goal.createdBy
+                  ? <>
+                      {goal.createdBy}
+                      {goal.createdAt && <> &middot; {new Date(goal.createdAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</>}
+                    </>
+                  : <span style={{ color: "#aaa" }}>not recorded</span>
+                }
+              </p>
+              <p style={{ margin: 0, fontSize: "11px", color: "#6b6560", fontFamily: "monospace" }}>
+                <span style={{ fontWeight: 600 }}>Last updated:</span>{" "}
+                {goal.updatedAt
+                  ? new Date(goal.updatedAt).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" })
+                  : <span style={{ color: "#aaa" }}>not recorded</span>
+                }
+              </p>
+            </div>
+          )}
         </div>
       </div>
 

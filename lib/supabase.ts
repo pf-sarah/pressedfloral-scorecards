@@ -33,11 +33,14 @@ export function goalFromRow(row: Record<string, any>): Goal {
     capped: row.capped || "no",
     capPct: Number(row.cap_pct) || 100,
     active: row.active !== false,
-    periodType: (row.period_type === "quarterly" ? "quarterly" : "monthly") as "monthly" | "quarterly"
+    periodType: (row.period_type === "quarterly" ? "quarterly" : "monthly") as "monthly" | "quarterly",
+    createdBy: row.created_by || undefined,
+    createdAt: row.created_at || undefined,
+    updatedAt: row.updated_at || undefined,
   };
 }
 
-export function goalToRow(goal: Goal, options: { includeId?: boolean } = {}) {
+export function goalToRow(goal: Goal, options: { includeId?: boolean; createdBy?: string } = {}) {
   const row: Record<string, unknown> = {
     goal_tier: goal.goalTier,
     location: goal.location || null,
@@ -52,9 +55,15 @@ export function goalToRow(goal: Goal, options: { includeId?: boolean } = {}) {
     capped: goal.capped,
     cap_pct: goal.capPct,
     active: goal.active,
-    period_type: goal.periodType || "monthly"
+    period_type: goal.periodType || "monthly",
+    updated_at: new Date().toISOString(),
   };
   if (options.includeId !== false) row.id = goal.id;
+  // Only set created_by / created_at on initial insert
+  if (options.createdBy) {
+    row.created_by = options.createdBy;
+    row.created_at = new Date().toISOString();
+  }
   return row;
 }
 

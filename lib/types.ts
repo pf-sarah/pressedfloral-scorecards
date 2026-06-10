@@ -27,6 +27,9 @@ export type Goal = {
   capPct: number;
   active: boolean;
   periodType?: "monthly" | "quarterly";
+  createdBy?: string;
+  createdAt?: string;
+  updatedAt?: string;
 };
 
 export type ActualsByKey = Record<string, number | null>;
