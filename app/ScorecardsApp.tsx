@@ -2971,15 +2971,16 @@ function ScorecardsScreen(props: {
         .sort((a, b) => a.name.localeCompare(b.name))
         .map((e) => e.name);
 
-  // Limit month picker to 12 months back through 3 months forward
+  // Limit month picker to 12 months back through last completed month (no current or future months)
   const relevantMonths = (() => {
     const now = new Date();
     const cur = now.getFullYear() * 12 + now.getMonth(); // months since year 0
+    const prev = cur - 1; // last completed month
     return props.months.filter((m) => {
       if (!/^\d{4}-\d{2}$/.test(m)) return false;
       const [y, mo] = m.split("-").map(Number);
       const val = y * 12 + (mo - 1);
-      return val >= cur - 12 && val <= cur + 3;
+      return val >= cur - 12 && val <= prev;
     });
   })();
 
