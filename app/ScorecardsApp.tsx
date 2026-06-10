@@ -799,14 +799,17 @@ export default function ScorecardsApp() {
 
   const missingActuals = useMemo(() => {
     const actuals = appData.actuals[formatMonthLabel(workMonth)] || {};
+    const isAdmin = roleAtLeast(effectiveProfile, "admin");
     return appData.goals.filter((goal) =>
       goal.active &&
       (goal.goalTier === "company" || goal.goalTier === "department") &&
+      (isAdmin || goal.goalTier !== "company") &&
+      scopedForProfile([goal], effectiveProfile).length > 0 &&
       actuals[metaKey("target", goal)] != null &&
       actuals[metaKey("min", goal)] != null &&
       actuals[actualKey(goal)] == null
     );
-  }, [appData.goals, appData.actuals, workMonth]);
+  }, [appData.goals, appData.actuals, workMonth, effectiveProfile]);
 
   const missingScorecards = useMemo(() => {
     const employees = appData.rippling[workMonth] || [];
@@ -819,7 +822,13 @@ export default function ScorecardsApp() {
     const currentLabel = formatMonthLabel(currentMonthVal);
     const currentActuals = appData.actuals[currentLabel] || {};
     const isAdmin = roleAtLeast(effectiveProfile, "admin");
-    return appData.goals.filter((g) => g.active && (isAdmin ? true : g.goalTier !== "company") && (g.goalTier === "company" || g.goalTier === "department") && currentActuals[metaKey("target", g)] == null);
+    return appData.goals.filter((g) =>
+      g.active &&
+      (isAdmin ? true : g.goalTier !== "company") &&
+      (g.goalTier === "company" || g.goalTier === "department") &&
+      scopedForProfile([g], effectiveProfile).length > 0 &&
+      currentActuals[metaKey("target", g)] == null
+    );
   }, [appData.goals, appData.actuals, effectiveProfile]);
 
   const missingNextTargets = useMemo(() => {
@@ -829,7 +838,13 @@ export default function ScorecardsApp() {
     const nextLabel = formatMonthLabel(nextVal);
     const nextActuals = appData.actuals[nextLabel] || {};
     const isAdmin = roleAtLeast(effectiveProfile, "admin");
-    return appData.goals.filter((g) => g.active && (isAdmin ? true : g.goalTier !== "company") && (g.goalTier === "company" || g.goalTier === "department") && nextActuals[metaKey("target", g)] == null);
+    return appData.goals.filter((g) =>
+      g.active &&
+      (isAdmin ? true : g.goalTier !== "company") &&
+      (g.goalTier === "company" || g.goalTier === "department") &&
+      scopedForProfile([g], effectiveProfile).length > 0 &&
+      nextActuals[metaKey("target", g)] == null
+    );
   }, [appData.goals, appData.actuals, effectiveProfile]);
 
   const todos = useMemo(() => {
@@ -1316,7 +1331,7 @@ export default function ScorecardsApp() {
               profile={effectiveProfile}
               hasRippling={!!appData.rippling[workMonth]?.length}
               missingActuals={missingActuals}
-              goals={appData.goals.filter((g) => g.active)}
+              goals={appData.goals.filter((g) => g.active && (roleAtLeast(effectiveProfile, "admin") || g.goalTier !== "company") && scopedForProfile([g], effectiveProfile).length > 0)}
               allActuals={appData.actuals}
               onSaveTarget={saveMonthTarget}
               onSaveCurrentTargetPair={(goal, target, min) => {
