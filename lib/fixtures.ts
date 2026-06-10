@@ -151,5 +151,6 @@ export const fixtureData: AppData = {
   rippling: {
     [fixtureMonth]: fixtureEmployees
   },
-  scorecards: fixtureScorecards
+  scorecards: fixtureScorecards,
+  goalAssignments: []
 };

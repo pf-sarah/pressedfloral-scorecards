@@ -29,6 +29,7 @@ import {
   dataMode,
   employeeFromRow,
   employeeToRow,
+  goalAssignmentFromRow,
   goalFromRow,
   goalToRow,
   isSupabaseUuid,
@@ -38,7 +39,7 @@ import {
   scorecardToRow,
   supabaseClient
 } from "../lib/supabase";
-import type { ActualsByKey, AppData, Employee, Goal, GoalTier, HistoryFilters, ManagerProfile, ProfileRole, Scorecard } from "../lib/types";
+import type { ActualsByKey, AppData, Employee, Goal, GoalAssignment, GoalTier, HistoryFilters, ManagerProfile, ProfileRole, Scorecard } from "../lib/types";
 import { AppShell, type NavGroup } from "@/components/AppShell";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -469,11 +470,12 @@ export default function ScorecardsApp() {
       return;
     }
 
-    const [goalsResult, scorecardsResult, ripplingResult, actualsResult] = await Promise.all([
+    const [goalsResult, scorecardsResult, ripplingResult, actualsResult, assignmentsResult] = await Promise.all([
       client.from("goals_bank").select("*").order("goal_tier").order("department").order("name"),
       client.from("scorecards").select("*").order("scorecard_month", { ascending: false }).order("employee_name"),
       client.from("rippling_employees").select("*").order("period", { ascending: false }),
-      client.from("actuals").select("*")
+      client.from("actuals").select("*"),
+      client.from("goal_assignments").select("*").order("created_at", { ascending: false })
     ]);
 
     const rippling: Record<string, Employee[]> = {};
@@ -499,7 +501,8 @@ export default function ScorecardsApp() {
 
     const goals = scopedForProfile((goalsResult.data || []).map(goalFromRow), loadedProfile);
     const scorecards = scopedScorecardsForProfile((scorecardsResult.data || []).map(scorecardFromRow), loadedProfile, allEmployees);
-    setAppData((current) => ({ ...current, goals, scorecards, rippling, actuals: { ...current.actuals, ...actuals } }));
+    const goalAssignments: GoalAssignment[] = (assignmentsResult.data || []).map(goalAssignmentFromRow);
+    setAppData((current) => ({ ...current, goals, scorecards, rippling, actuals: { ...current.actuals, ...actuals }, goalAssignments }));
   }
 
   async function signIn() {
@@ -977,6 +980,44 @@ export default function ScorecardsApp() {
     showToast(`Goal removed from ${formatMonthLabel(month)} forward`);
   }
 
+  async function createGoalAssignment(goalId: string, employeeName: string, month: string) {
+    const goal = appData.goals.find((g) => g.id === goalId);
+    if (!goal) return;
+    // Check if an active assignment already exists for this employee+goal in this month
+    const existing = appData.goalAssignments.find(
+      (a) => a.goalId === goalId && a.employeeName === employeeName && goalActiveForMonth({ startMonth: a.startMonth, endMonth: a.endMonth } as Goal, month)
+    );
+    if (existing) {
+      showToast(`${employeeName} already has this goal on their scorecard`);
+      return;
+    }
+    const newAssignment: GoalAssignment = {
+      id: `assign-${Date.now()}`,
+      goalId,
+      employeeName,
+      startMonth: month,
+      createdBy: currentUserEmail,
+      createdAt: new Date().toISOString(),
+    };
+    if (!isFixture && sb) {
+      const { data, error } = await sb.from("goal_assignments").insert({
+        goal_id: goalId,
+        employee_name: employeeName,
+        start_month: month,
+        end_month: null,
+        created_by: currentUserEmail,
+        created_at: newAssignment.createdAt,
+      }).select("id").single();
+      if (error) {
+        showToast("Failed to save assignment. Please try again.");
+        return;
+      }
+      newAssignment.id = String(data.id);
+    }
+    setAppData((current) => ({ ...current, goalAssignments: [...current.goalAssignments, newAssignment] }));
+    showToast(`"${goal.name}" added to ${employeeName}'s scorecard from ${formatMonthLabel(month)} forward`);
+  }
+
   async function toggleGoal(goal: Goal, month: string) {
     if (goalActiveForMonth(goal, month)) {
       // Deactivate from this month forward
@@ -1316,6 +1357,7 @@ export default function ScorecardsApp() {
               allActuals={appData.actuals}
               editingGoal={editingGoal}
               teamEmployees={scopedEmployeesForProfile(latestRipplingEmployees, effectiveProfile, allRipplingEmployees)}
+              allGoals={appData.goals}
               onMonth={setBankMonth}
               onFilters={setBankFilters}
               onActual={saveActual}
@@ -1325,6 +1367,7 @@ export default function ScorecardsApp() {
               onDelete={(id) => deleteGoal(id, bankMonth)}
               onToggle={(goal) => toggleGoal(goal, bankMonth)}
               onToggleMonth={toggleGoalForMonth}
+              onAssignGoal={(goalId, employeeName) => createGoalAssignment(goalId, employeeName, bankMonth)}
               isAdmin={effectiveProfile?.role === "admin"}
               allowedDepartments={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.departments || [])}
               allowedLocations={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.locations || [])}
@@ -1341,6 +1384,7 @@ export default function ScorecardsApp() {
               scorecards={scopedScorecardsForProfile(appData.scorecards, effectiveProfile, allRipplingEmployees)}
               allGoals={appData.goals.filter((g) => g.active)}
               allActuals={appData.actuals}
+              goalAssignments={appData.goalAssignments}
               onMonths={setScorecardMonths}
               onSubmitScorecard={submitScorecardDirect}
               onDeleteGoal={setDeleteModal}
@@ -2385,6 +2429,7 @@ function GoalsScreen(props: {
   allActuals: Record<string, ActualsByKey>;
   editingGoal: Goal | null;
   teamEmployees?: Employee[];
+  allGoals?: Goal[];
   readonly?: boolean;
   onMonth: (value: string) => void;
   onFilters: (value: { types: string[]; location: string; departments: string[]; sort: string; showInactive: boolean }) => void;
@@ -2395,12 +2440,31 @@ function GoalsScreen(props: {
   onDelete: (id: string) => void;
   onToggle: (goal: Goal) => void;
   onToggleMonth: (goal: Goal) => void;
+  onAssignGoal?: (goalId: string, employeeName: string) => void;
   isAdmin?: boolean;
   allowedDepartments?: string[];
   allowedLocations?: string[];
 }) {
   const [actualEditId, setActualEditId] = useState<string | null>(null);
   const [periodTab, setPeriodTab] = useState<"monthly" | "quarterly">("monthly");
+  const [assigningGoal, setAssigningGoal] = useState<Goal | null>(null);
+  const [assignEmployeeName, setAssignEmployeeName] = useState("");
+
+  // Employees eligible for the current assignment (period-type validated)
+  const assignEligibleEmployees = useMemo(() => {
+    if (!assigningGoal) return [];
+    const periodType: "monthly" | "quarterly" = assigningGoal.periodType === "quarterly" ? "quarterly" : "monthly";
+    return (props.teamEmployees || []).filter((emp) => {
+      if (!props.allGoals || props.allGoals.length === 0) return true;
+      const empGoals = props.allGoals.filter((g) => {
+        if (g.goalTier === "company") return false;
+        if (g.goalTier === "department") return g.department === emp.department && (!g.location || g.location === emp.location);
+        return (g.employeeName === emp.name || g.role === emp.role) && g.department === emp.department;
+      });
+      if (empGoals.length === 0) return true; // no goals at all — compatible with any period
+      return empGoals.some((g) => g.periodType === periodType);
+    }).sort((a, b) => a.name.localeCompare(b.name));
+  }, [assigningGoal, props.teamEmployees, props.allGoals]);
 
   const now = new Date();
   const currentMonthVal = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
@@ -2518,13 +2582,18 @@ function GoalsScreen(props: {
                 >
                   <MoreHorizontal className="size-4" />
                 </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-52">
+                <DropdownMenuContent align="end" className="w-56">
                   <DropdownMenuItem onClick={() => props.onEdit(goal)}>Edit goal</DropdownMenuItem>
                   {canActual && hasTargets ? (
                     <DropdownMenuItem onClick={() => setActualEditId(goal.id)}>Enter actual</DropdownMenuItem>
                   ) : canActual ? (
                     <DropdownMenuItem disabled>Set target first</DropdownMenuItem>
                   ) : null}
+                  {goal.goalTier === "company" && props.isAdmin && props.onAssignGoal && (
+                    <DropdownMenuItem onClick={() => { setAssigningGoal(goal); setAssignEmployeeName(""); }}>
+                      Add to individual scorecard
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuItem onClick={() => props.onToggle(goal)}>
                     {activeInMonth ? "Deactivate goal" : "Reactivate goal"}
                   </DropdownMenuItem>
@@ -2730,6 +2799,67 @@ function GoalsScreen(props: {
               onSaveTargetPair={handleSaveTargetPair}
             />
           ) : null}
+        </SheetContent>
+      </Sheet>
+
+      {/* Assignment Sheet — Add company goal to an individual's scorecard */}
+      <Sheet open={!!assigningGoal} onOpenChange={(open) => { if (!open) { setAssigningGoal(null); setAssignEmployeeName(""); } }}>
+        <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-sm">
+          <SheetHeader className="border-b px-5 py-4">
+            <SheetTitle>Add to Individual Scorecard</SheetTitle>
+            <SheetDescription>
+              {assigningGoal?.name}
+              {" · "}
+              <span className="capitalize">{assigningGoal?.periodType ?? "monthly"}</span>
+              {" · Starting "}
+              {formatMonthLabel(props.month)}
+            </SheetDescription>
+          </SheetHeader>
+          <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
+            <p className="text-sm text-muted-foreground">
+              This company goal will be added to the selected employee&apos;s scorecard from{" "}
+              <strong>{formatMonthLabel(props.month)}</strong> forward. It will not affect past months.
+            </p>
+            {assignEligibleEmployees.length > 0 ? (
+              <div className="flex flex-col gap-1.5">
+                <Label className="text-xs font-medium text-foreground">Employee</Label>
+                <Select value={assignEmployeeName} onValueChange={setAssignEmployeeName}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select employee…" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {assignEligibleEmployees.map((emp) => (
+                      <SelectItem key={emp.name} value={emp.name}>{emp.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+            ) : (
+              <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
+                No employees have{" "}
+                {assigningGoal?.periodType === "quarterly" ? "quarterly" : "monthly"} goals in the bank.
+                Add {assigningGoal?.periodType === "quarterly" ? "quarterly" : "monthly"} department or individual goals first, or upload Rippling data.
+              </div>
+            )}
+          </div>
+          <SheetFooter className="border-t px-5 py-4 flex gap-2">
+            <SheetClose asChild>
+              <Button variant="outline" className="flex-1">Cancel</Button>
+            </SheetClose>
+            <Button
+              className="flex-1"
+              disabled={!assignEmployeeName}
+              onClick={() => {
+                if (assigningGoal && assignEmployeeName && props.onAssignGoal) {
+                  props.onAssignGoal(assigningGoal.id, assignEmployeeName);
+                  setAssigningGoal(null);
+                  setAssignEmployeeName("");
+                }
+              }}
+            >
+              Assign Goal
+            </Button>
+          </SheetFooter>
         </SheetContent>
       </Sheet>
     </div>
@@ -3054,6 +3184,7 @@ function ScorecardsScreen(props: {
   scorecards: Scorecard[];
   allGoals: Goal[];
   allActuals: Record<string, ActualsByKey>;
+  goalAssignments: GoalAssignment[];
   onMonths: (months: string[]) => void;
   onSubmitScorecard: (scorecard: Scorecard) => void;
   onDeleteGoal: (value: { scorecardId: string; goalName: string }) => void;
@@ -3115,13 +3246,28 @@ function ScorecardsScreen(props: {
   const showDeptFilter = teamDepts.length > 1;
   const showLocationFilter = teamLocations.length > 1;
 
-  function goalsForEmployee(employee: Employee, actuals: Record<string, number | null> = periodActuals): Goal[] {
-    return props.allGoals.filter((goal) => {
+  function goalsForEmployee(employee: Employee, actuals: Record<string, number | null> = periodActuals, month: string = selectedMonth): Goal[] {
+    const regularGoals = props.allGoals.filter((goal) => {
       if (actuals["__monthly_inactive__" + actualKey(goal)]) return false;
       if (goal.goalTier === "company") return false;
       if (goal.goalTier === "department") return goal.department === employee.department && (!goal.location || goal.location === employee.location);
       return goal.role === employee.role && goal.department === employee.department && (!goal.location || goal.location === employee.location);
     });
+
+    // Company goals individually assigned to this employee that are active for this month
+    const assignedCompanyGoals = props.goalAssignments
+      .filter((a) =>
+        a.employeeName === employee.name &&
+        goalActiveForMonth({ startMonth: a.startMonth, endMonth: a.endMonth } as Goal, month)
+      )
+      .map((a) => props.allGoals.find((g) => g.id === a.goalId))
+      .filter((g): g is Goal => !!g && g.goalTier === "company" && goalActiveForMonth(g, month));
+
+    // Deduplicate — avoid adding a goal already present via regular matching (unlikely for company goals but safe)
+    const alreadyIncluded = new Set(regularGoals.map((g) => g.id));
+    const extraGoals = assignedCompanyGoals.filter((g) => !alreadyIncluded.has(g.id));
+
+    return [...regularGoals, ...extraGoals];
   }
 
   const sortedTeam = [...teamEmployees].sort((a, b) => a.name.localeCompare(b.name));
@@ -3347,7 +3493,7 @@ function ScorecardsScreen(props: {
                         employee={empWithEarnings}
                         isoMonth={m}
                         month={mLabel}
-                        baseGoals={goalsForEmployee(emp, mActuals)}
+                        baseGoals={goalsForEmployee(emp, mActuals, m)}
                         allGoals={props.allGoals}
                         periodActuals={mActuals}
                         allRippling={props.rippling}

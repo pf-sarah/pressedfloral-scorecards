@@ -102,12 +102,23 @@ export type Scorecard = {
   reviewNote?: string;
 };
 
+export type GoalAssignment = {
+  id: string;
+  goalId: string;
+  employeeName: string;
+  startMonth: string;   // ISO "YYYY-MM" — assignment starts from this month
+  endMonth?: string;    // ISO "YYYY-MM" — assignment ends from this month forward (optional)
+  createdBy?: string;
+  createdAt?: string;
+};
+
 export type AppData = {
   profile: ManagerProfile;
   goals: Goal[];
   actuals: Record<string, ActualsByKey>;
   rippling: Record<string, Employee[]>;
   scorecards: Scorecard[];
+  goalAssignments: GoalAssignment[];
 };
 
 export type HistoryFilters = {
