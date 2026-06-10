@@ -2438,10 +2438,43 @@ function GoalsScreen(props: {
     );
   };
 
+  // ── Month/quarter navigation helpers ──────────────────────────────────────
+  const curVal = now.getFullYear() * 12 + now.getMonth();
+  const minVal = curVal - 12;
+  const maxVal = curVal + 3;
+
+  const monthVal = (() => {
+    const [y, m] = props.month.split("-").map(Number);
+    return y * 12 + (m - 1);
+  })();
+
+  function shiftMonth(delta: number) {
+    const [y, m] = props.month.split("-").map(Number);
+    const d = new Date(y, m - 1 + delta, 1);
+    props.onMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+
+  function shiftQuarter(delta: number) {
+    const curQ = quarterKeyForMonth(props.month);
+    const iso = quarterToIsoMonth(curQ);
+    const [y, m] = iso.split("-").map(Number);
+    const d = new Date(y, m - 1 + delta * 3, 1);
+    props.onMonth(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+
+  const canGoPrev = periodTab === "monthly" ? monthVal > minVal : true;
+  const canGoNext = periodTab === "monthly" ? monthVal < maxVal : true;
+
+  const displayLabel = periodTab === "quarterly"
+    ? quarterKeyForMonth(props.month)
+    : formatMonthLabel(props.month);
+
   return (
     <div className="screen active" onClick={() => setActualEditId(null)}>
-      <section style={{ padding: 0 }} className="overflow-hidden">
-        <div className="flex flex-wrap items-center gap-2 p-2.5">
+      {/* ── Month navigation hero ── */}
+      <section style={{ padding: 0, borderBottom: "1px solid var(--border)" }}>
+        <div style={{ display: "flex", alignItems: "center", padding: "18px 20px 14px", gap: "12px" }}>
+          {/* Monthly / Quarterly toggle */}
           <Tabs value={periodTab} onValueChange={(v) => setPeriodTab(v as "monthly" | "quarterly")}>
             <TabsList className="h-8">
               <TabsTrigger value="monthly" className="px-3 text-[12px] data-[state=active]:bg-card data-[state=active]:text-foreground">Monthly</TabsTrigger>
@@ -2449,44 +2482,45 @@ function GoalsScreen(props: {
             </TabsList>
           </Tabs>
 
-          {periodTab === "quarterly" ? (() => {
-            const curY = now.getFullYear();
-            const curQ = Math.ceil((now.getMonth() + 1) / 3);
-            const quarters: string[] = [];
-            for (let i = -4; i <= 2; i++) {
-              let q = curQ + i; let y = curY;
-              while (q < 1) { q += 4; y--; }
-              while (q > 4) { q -= 4; y++; }
-              const key = `Q${q} ${y}`;
-              if (!quarters.includes(key)) quarters.push(key);
-            }
-            // Sort chronologically (by ISO month of quarter start) newest first
-            quarters.sort((a, b) => quarterToIsoMonth(b).localeCompare(quarterToIsoMonth(a)));
-            return (
-              <Select value={quarterKeyForMonth(props.month)} onValueChange={(v) => props.onMonth(quarterToIsoMonth(v))}>
-                <SelectTrigger size="sm" className="min-w-[7rem] text-[12px]"><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {quarters.map((q) => <SelectItem key={q} value={q}>{q}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            );
-          })() : (
-            <Select value={props.month} onValueChange={(v) => props.onMonth(v)}>
-              <SelectTrigger size="sm" className="min-w-[8.5rem] text-[12px]"><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {props.months.filter((m) => {
-                  if (!/^\d{4}-\d{2}$/.test(m)) return false;
-                  const cur = now.getFullYear() * 12 + now.getMonth();
-                  const [y, mo] = m.split("-").map(Number);
-                  const val = y * 12 + (mo - 1);
-                  return val >= cur - 12 && val <= cur + 3;
-                }).sort((a, b) => b.localeCompare(a)).map((month) => <SelectItem key={month} value={month}>{formatMonthLabel(month)}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          )}
+          {/* Centered arrow navigator */}
+          <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: "16px" }}>
+            <button
+              onClick={() => periodTab === "monthly" ? shiftMonth(-1) : shiftQuarter(-1)}
+              disabled={!canGoPrev}
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "32px", height: "32px", border: "1px solid var(--border)", borderRadius: "6px", background: "none", cursor: canGoPrev ? "pointer" : "not-allowed", opacity: canGoPrev ? 1 : 0.3, color: "var(--text-primary)", transition: "background 0.15s" }}
+              onMouseEnter={(e) => { if (canGoPrev) (e.currentTarget as HTMLElement).style.background = "var(--hover)"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "none"; }}
+            >
+              <ChevronLeft className="size-4" />
+            </button>
 
-          <Separator orientation="vertical" className="mx-0.5 hidden h-5 sm:block" />
+            <span style={{ fontSize: "22px", fontWeight: 700, minWidth: "180px", textAlign: "center", letterSpacing: "-0.4px", fontFamily: "var(--sans)" }}>
+              {displayLabel}
+            </span>
 
+            <button
+              onClick={() => periodTab === "monthly" ? shiftMonth(1) : shiftQuarter(1)}
+              disabled={!canGoNext}
+              style={{ display: "flex", alignItems: "center", justifyContent: "center", width: "32px", height: "32px", border: "1px solid var(--border)", borderRadius: "6px", background: "none", cursor: canGoNext ? "pointer" : "not-allowed", opacity: canGoNext ? 1 : 0.3, color: "var(--text-primary)", transition: "background 0.15s" }}
+              onMouseEnter={(e) => { if (canGoNext) (e.currentTarget as HTMLElement).style.background = "var(--hover)"; }}
+              onMouseLeave={(e) => { (e.currentTarget as HTMLElement).style.background = "none"; }}
+            >
+              <ChevronRight className="size-4" />
+            </button>
+          </div>
+
+          {/* Right spacer to balance tabs */}
+          <div style={{ width: "120px" }} />
+        </div>
+
+        {monthStatus && periodTab === "monthly" && (
+          <div className="border-t border-border bg-muted/30 px-5 py-1.5 text-[11.5px] text-muted-foreground">{monthStatus}</div>
+        )}
+      </section>
+
+      {/* ── Filter bar ── */}
+      <section style={{ padding: 0, borderBottom: "1px solid var(--border)" }}>
+        <div className="flex flex-wrap items-center gap-2 px-4 py-2">
           <MultiSelectDropdown
             label="All types"
             triggerClassName="w-auto min-w-[7rem]"
@@ -2523,7 +2557,6 @@ function GoalsScreen(props: {
               <SelectItem value="name">Sort: Name</SelectItem>
             </SelectContent>
           </Select>
-
           <div className="ml-auto flex items-center gap-3 pl-1">
             <div className="flex items-center gap-2 whitespace-nowrap">
               <Checkbox id="goal-show-inactive" checked={props.filters.showInactive} onCheckedChange={(c) => props.onFilters({ ...props.filters, showInactive: c === true })} />
@@ -2532,9 +2565,6 @@ function GoalsScreen(props: {
             <Button variant="ghost" size="sm" className="text-[12px] font-normal text-muted-foreground" onClick={() => props.onFilters({ types: props.isAdmin ? ["company", "department", "individual"] : ["department", "individual"], location: "", departments: [...departments], sort: "goalTier", showInactive: false })}>Reset</Button>
           </div>
         </div>
-        {monthStatus && periodTab === "monthly" && (
-          <div className="border-t border-border bg-muted/30 px-3 py-1.5 text-[11.5px] text-muted-foreground">{monthStatus}</div>
-        )}
       </section>
       <section style={{ padding: 0 }} className="overflow-hidden">
         <Table className="table-fixed text-[12.5px]">
