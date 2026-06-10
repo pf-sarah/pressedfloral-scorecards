@@ -1367,7 +1367,7 @@ export default function ScorecardsApp() {
               onDelete={(id) => deleteGoal(id, bankMonth)}
               onToggle={(goal) => toggleGoal(goal, bankMonth)}
               onToggleMonth={toggleGoalForMonth}
-              onAssignGoal={(goalId, employeeName) => createGoalAssignment(goalId, employeeName, bankMonth)}
+              onAssignGoal={(goalId, employeeNames) => employeeNames.forEach((name) => createGoalAssignment(goalId, name, bankMonth))}
               isAdmin={effectiveProfile?.role === "admin"}
               allowedDepartments={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.departments || [])}
               allowedLocations={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.locations || [])}
@@ -2440,7 +2440,7 @@ function GoalsScreen(props: {
   onDelete: (id: string) => void;
   onToggle: (goal: Goal) => void;
   onToggleMonth: (goal: Goal) => void;
-  onAssignGoal?: (goalId: string, employeeName: string) => void;
+  onAssignGoal?: (goalId: string, employeeNames: string[]) => void;
   isAdmin?: boolean;
   allowedDepartments?: string[];
   allowedLocations?: string[];
@@ -2448,7 +2448,7 @@ function GoalsScreen(props: {
   const [actualEditId, setActualEditId] = useState<string | null>(null);
   const [periodTab, setPeriodTab] = useState<"monthly" | "quarterly">("monthly");
   const [assigningGoal, setAssigningGoal] = useState<Goal | null>(null);
-  const [assignEmployeeName, setAssignEmployeeName] = useState("");
+  const [assignEmployeeNames, setAssignEmployeeNames] = useState<string[]>([]);
 
   // Employees eligible for the current assignment (period-type validated)
   const assignEligibleEmployees = useMemo(() => {
@@ -2590,7 +2590,7 @@ function GoalsScreen(props: {
                     <DropdownMenuItem disabled>Set target first</DropdownMenuItem>
                   ) : null}
                   {goal.goalTier === "company" && props.isAdmin && props.onAssignGoal && (
-                    <DropdownMenuItem onClick={() => { setAssigningGoal(goal); setAssignEmployeeName(""); }}>
+                    <DropdownMenuItem onClick={() => { setAssigningGoal(goal); setAssignEmployeeNames([]); }}>
                       Add to individual scorecard
                     </DropdownMenuItem>
                   )}
@@ -2802,11 +2802,11 @@ function GoalsScreen(props: {
         </SheetContent>
       </Sheet>
 
-      {/* Assignment Sheet — Add company goal to an individual's scorecard */}
-      <Sheet open={!!assigningGoal} onOpenChange={(open) => { if (!open) { setAssigningGoal(null); setAssignEmployeeName(""); } }}>
+      {/* Assignment Sheet — Add company goal to one or more individual scorecards */}
+      <Sheet open={!!assigningGoal} onOpenChange={(open) => { if (!open) { setAssigningGoal(null); setAssignEmployeeNames([]); } }}>
         <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-sm">
           <SheetHeader className="border-b px-5 py-4">
-            <SheetTitle>Add to Individual Scorecard</SheetTitle>
+            <SheetTitle>Add to Individual Scorecards</SheetTitle>
             <SheetDescription>
               {assigningGoal?.name}
               {" · "}
@@ -2817,22 +2817,55 @@ function GoalsScreen(props: {
           </SheetHeader>
           <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
             <p className="text-sm text-muted-foreground">
-              This company goal will be added to the selected employee&apos;s scorecard from{" "}
-              <strong>{formatMonthLabel(props.month)}</strong> forward. It will not affect past months.
+              Select one or more employees. This goal will appear on their scorecards from{" "}
+              <strong>{formatMonthLabel(props.month)}</strong> forward and will not affect past months.
             </p>
             {assignEligibleEmployees.length > 0 ? (
-              <div className="flex flex-col gap-1.5">
-                <Label className="text-xs font-medium text-foreground">Employee</Label>
-                <Select value={assignEmployeeName} onValueChange={setAssignEmployeeName}>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select employee…" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {assignEligibleEmployees.map((emp) => (
-                      <SelectItem key={emp.name} value={emp.name}>{emp.name}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center justify-between">
+                  <Label className="text-xs font-medium text-foreground">
+                    Employees
+                    {assignEmployeeNames.length > 0 && (
+                      <span className="ml-1.5 font-normal text-muted-foreground">
+                        ({assignEmployeeNames.length} selected)
+                      </span>
+                    )}
+                  </Label>
+                  <button
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                    onClick={() => {
+                      if (assignEmployeeNames.length === assignEligibleEmployees.length) {
+                        setAssignEmployeeNames([]);
+                      } else {
+                        setAssignEmployeeNames(assignEligibleEmployees.map((e) => e.name));
+                      }
+                    }}
+                  >
+                    {assignEmployeeNames.length === assignEligibleEmployees.length ? "Deselect all" : "Select all"}
+                  </button>
+                </div>
+                <div className="rounded-md border divide-y overflow-y-auto max-h-80">
+                  {assignEligibleEmployees.map((emp) => {
+                    const checked = assignEmployeeNames.includes(emp.name);
+                    return (
+                      <label
+                        key={emp.name}
+                        className="flex items-center gap-3 px-3 py-2.5 cursor-pointer hover:bg-accent/50 transition-colors"
+                      >
+                        <Checkbox
+                          checked={checked}
+                          onCheckedChange={(v) => {
+                            setAssignEmployeeNames(v
+                              ? [...assignEmployeeNames, emp.name]
+                              : assignEmployeeNames.filter((n) => n !== emp.name)
+                            );
+                          }}
+                        />
+                        <span className="text-sm select-none">{emp.name}</span>
+                      </label>
+                    );
+                  })}
+                </div>
               </div>
             ) : (
               <div className="rounded-md border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-800">
@@ -2848,16 +2881,18 @@ function GoalsScreen(props: {
             </SheetClose>
             <Button
               className="flex-1"
-              disabled={!assignEmployeeName}
+              disabled={assignEmployeeNames.length === 0}
               onClick={() => {
-                if (assigningGoal && assignEmployeeName && props.onAssignGoal) {
-                  props.onAssignGoal(assigningGoal.id, assignEmployeeName);
+                if (assigningGoal && assignEmployeeNames.length > 0 && props.onAssignGoal) {
+                  props.onAssignGoal(assigningGoal.id, assignEmployeeNames);
                   setAssigningGoal(null);
-                  setAssignEmployeeName("");
+                  setAssignEmployeeNames([]);
                 }
               }}
             >
-              Assign Goal
+              {assignEmployeeNames.length > 0
+                ? `Assign to ${assignEmployeeNames.length} employee${assignEmployeeNames.length > 1 ? "s" : ""}`
+                : "Assign Goal"}
             </Button>
           </SheetFooter>
         </SheetContent>
