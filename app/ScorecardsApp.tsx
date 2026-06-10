@@ -1250,6 +1250,7 @@ export default function ScorecardsApp() {
               onToggleMonth={toggleGoalForMonth}
               isAdmin={effectiveProfile?.role === "admin"}
               allowedDepartments={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.departments || [])}
+              allowedLocations={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.locations || [])}
             />
           )}
 
@@ -2298,6 +2299,7 @@ function GoalsScreen(props: {
   onToggleMonth: (goal: Goal) => void;
   isAdmin?: boolean;
   allowedDepartments?: string[];
+  allowedLocations?: string[];
 }) {
   const [actualEditId, setActualEditId] = useState<string | null>(null);
   const [periodTab, setPeriodTab] = useState<"monthly" | "quarterly">("monthly");
@@ -2617,6 +2619,7 @@ function GoalsScreen(props: {
               actuals={mergedActuals}
               isAdmin={props.isAdmin}
               allowedDepartments={props.allowedDepartments}
+              allowedLocations={props.allowedLocations}
               teamEmployees={props.teamEmployees}
               onCancel={() => props.onEdit(null)}
               onSave={props.onSave}
@@ -2722,7 +2725,7 @@ function DrawerField({ label, required, htmlFor, className, children }: {
   );
 }
 
-function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, teamEmployees, onSave, onSaveTargetPair, onCancel }: { goal: Goal; actuals: ActualsByKey; isAdmin?: boolean; allowedDepartments?: string[]; teamEmployees?: Employee[]; onSave: (goal: Goal) => Goal | null | void | Promise<Goal | null | void>; onSaveTargetPair: (goal: Goal, target: string, min: string) => void | Promise<void>; onCancel: () => void }) {
+function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocations, teamEmployees, onSave, onSaveTargetPair, onCancel }: { goal: Goal; actuals: ActualsByKey; isAdmin?: boolean; allowedDepartments?: string[]; allowedLocations?: string[]; teamEmployees?: Employee[]; onSave: (goal: Goal) => Goal | null | void | Promise<Goal | null | void>; onSaveTargetPair: (goal: Goal, target: string, min: string) => void | Promise<void>; onCancel: () => void }) {
   const isNew = goal.name === "";
   const [draft, setDraft] = useState(goal);
   const [target, setTarget] = useState(actuals[metaKey("target", goal)] != null ? String(actuals[metaKey("target", goal)]) : String(goal.goalValue || ""));
@@ -2739,6 +2742,8 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, teamEmployees,
   const [periodVal, setPeriodVal] = useState<string>(isNew ? "" : (goal.periodType || "monthly"));
 
   const visibleDepartments = allowedDepartments?.length ? allowedDepartments : departments;
+  const allLocations = ["Utah", "Georgia", "Remote"];
+  const visibleLocations = allowedLocations?.length ? allowedLocations : allLocations;
 
   const isIndividual = tierVal === "individual";
   const isDepartment = tierVal === "department";
@@ -2821,10 +2826,8 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, teamEmployees,
               <Select value={locVal === "__unset__" ? undefined : (locVal === "" ? GOAL_ALL : locVal)} onValueChange={(v) => setLocVal(v === GOAL_ALL ? "" : v)}>
                 <SelectTrigger className="w-full"><SelectValue placeholder="Select location…" /></SelectTrigger>
                 <SelectContent>
-                  <SelectItem value={GOAL_ALL}>All locations</SelectItem>
-                  <SelectItem value="Utah">Utah</SelectItem>
-                  <SelectItem value="Georgia">Georgia</SelectItem>
-                  <SelectItem value="Remote">Remote</SelectItem>
+                  {!allowedLocations?.length && <SelectItem value={GOAL_ALL}>All locations</SelectItem>}
+                  {visibleLocations.map((loc) => <SelectItem key={loc} value={loc}>{loc}</SelectItem>)}
                 </SelectContent>
               </Select>
             </DrawerField>
