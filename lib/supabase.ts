@@ -34,6 +34,8 @@ export function goalFromRow(row: Record<string, any>): Goal {
     capPct: Number(row.cap_pct) || 100,
     active: row.active !== false,
     periodType: (row.period_type === "quarterly" ? "quarterly" : "monthly") as "monthly" | "quarterly",
+    startMonth: row.start_month || undefined,
+    endMonth: row.end_month || undefined,
     createdBy: row.created_by || undefined,
     createdAt: row.created_at || undefined,
     updatedAt: row.updated_at || undefined,
@@ -56,6 +58,8 @@ export function goalToRow(goal: Goal, options: { includeId?: boolean; createdBy?
     cap_pct: goal.capPct,
     active: goal.active,
     period_type: goal.periodType || "monthly",
+    start_month: goal.startMonth || null,
+    end_month: goal.endMonth || null,
     updated_at: new Date().toISOString(),
   };
   if (options.includeId !== false) row.id = goal.id;

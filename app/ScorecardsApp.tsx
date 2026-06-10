@@ -110,6 +110,13 @@ const rolesByDepartment: Record<string, string[]> = {
   Resin: ["Resin Design Specialist", "Resin Team Manager", "Senior Resin Design Specialist"]
 };
 
+/** Is this goal visible and active for a given ISO month (YYYY-MM)? */
+function goalActiveForMonth(goal: Goal, month: string): boolean {
+  if (goal.startMonth && goal.startMonth > month) return false;
+  if (goal.endMonth && goal.endMonth <= month) return false;
+  return true;
+}
+
 const emptyGoal: Omit<Goal, "id"> = {
   goalTier: "individual",
   periodType: "monthly",
@@ -698,9 +705,20 @@ export default function ScorecardsApp() {
     } else if (effectiveProfile && effectiveProfile.role === "admin") {
       // admins see everything
     }
-    if (!bankFilters.showInactive) {
-      goals = goals.filter((goal) => goal.active && !periodActualsForBank["__monthly_inactive__" + actualKey(goal)]);
-    }
+    goals = goals.filter((goal) => {
+      const activeThisMonth = goalActiveForMonth(goal, bankMonth);
+      if (!activeThisMonth) {
+        // endMonth has passed — show as inactive only when showInactive is on
+        return bankFilters.showInactive;
+      }
+      // Legacy global-inactive goals
+      if (!goal.active) return bankFilters.showInactive;
+      // Active this month — respect the single-month inactive flag
+      if (!bankFilters.showInactive) {
+        return !periodActualsForBank["__monthly_inactive__" + actualKey(goal)];
+      }
+      return true;
+    });
     if (bankFilters.types.length > 0 && bankFilters.types.length < 3) goals = goals.filter((goal) => bankFilters.types.includes(goal.goalTier));
     if (bankFilters.location) goals = goals.filter((goal) => !goal.location || goal.location === bankFilters.location);
     if (bankFilters.departments.length < departments.length) goals = goals.filter((goal) => !goal.department || bankFilters.departments.includes(goal.department));
@@ -801,7 +819,7 @@ export default function ScorecardsApp() {
     const actuals = appData.actuals[formatMonthLabel(workMonth)] || {};
     const isAdmin = roleAtLeast(effectiveProfile, "admin");
     return appData.goals.filter((goal) =>
-      goal.active &&
+      goalActiveForMonth(goal, workMonth) &&
       (goal.goalTier === "company" || goal.goalTier === "department") &&
       (isAdmin || goal.goalTier !== "company") &&
       scopedForProfile([goal], effectiveProfile).length > 0 &&
@@ -823,7 +841,7 @@ export default function ScorecardsApp() {
     const currentActuals = appData.actuals[currentLabel] || {};
     const isAdmin = roleAtLeast(effectiveProfile, "admin");
     return appData.goals.filter((g) =>
-      g.active &&
+      goalActiveForMonth(g, currentMonthVal) &&
       (isAdmin ? true : g.goalTier !== "company") &&
       (g.goalTier === "company" || g.goalTier === "department") &&
       scopedForProfile([g], effectiveProfile).length > 0 &&
@@ -839,7 +857,7 @@ export default function ScorecardsApp() {
     const nextActuals = appData.actuals[nextLabel] || {};
     const isAdmin = roleAtLeast(effectiveProfile, "admin");
     return appData.goals.filter((g) =>
-      g.active &&
+      goalActiveForMonth(g, nextVal) &&
       (isAdmin ? true : g.goalTier !== "company") &&
       (g.goalTier === "company" || g.goalTier === "department") &&
       scopedForProfile([g], effectiveProfile).length > 0 &&
@@ -931,24 +949,32 @@ export default function ScorecardsApp() {
     return savedGoal;
   }
 
-  async function deleteGoal(id: string) {
+  async function deleteGoal(id: string, month: string) {
+    const goal = appData.goals.find((g) => g.id === id);
+    if (!goal) return;
+    // Soft-delete: hide from this month forward while preserving past-month history
+    const deleted = { ...goal, endMonth: month };
     if (!isFixture && sb) {
-      const result = await sb.from("goals_bank").delete().eq("id", id);
+      const result = await sb.from("goals_bank").update({ end_month: month, updated_at: new Date().toISOString() }).eq("id", id);
       if (result.error) {
         showSupabaseError(result.error, "Goal could not be deleted.");
         return;
       }
     }
-    const nextGoals = appData.goals.filter((goal) => goal.id !== id);
+    const nextGoals = appData.goals.map((g) => g.id === id ? deleted : g);
     setAppData((current) => ({ ...current, goals: nextGoals }));
     persistGoals(nextGoals);
-    showToast("Goal deleted");
+    showToast(`Goal removed from ${formatMonthLabel(month)} forward`);
   }
 
-  async function toggleGoal(id: string) {
-    const goal = appData.goals.find((item) => item.id === id);
-    if (!goal) return;
-    await saveGoal({ ...goal, active: !goal.active });
+  async function toggleGoal(goal: Goal, month: string) {
+    if (goalActiveForMonth(goal, month)) {
+      // Deactivate from this month forward
+      await saveGoal({ ...goal, endMonth: month });
+    } else {
+      // Reactivate — clear endMonth
+      await saveGoal({ ...goal, endMonth: undefined });
+    }
   }
 
   async function toggleGoalForMonth(goal: Goal) {
@@ -1245,8 +1271,8 @@ export default function ScorecardsApp() {
               onEdit={setEditingGoal}
               onSave={saveGoal}
               onSaveTargetPair={(goal, target, min, period) => saveMonthTargetPair(goal, period ?? formatMonthLabel(bankMonth), target, min)}
-              onDelete={deleteGoal}
-              onToggle={toggleGoal}
+              onDelete={(id) => deleteGoal(id, bankMonth)}
+              onToggle={(goal) => toggleGoal(goal, bankMonth)}
               onToggleMonth={toggleGoalForMonth}
               isAdmin={effectiveProfile?.role === "admin"}
               allowedDepartments={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.departments || [])}
@@ -2295,7 +2321,7 @@ function GoalsScreen(props: {
   onSave: (goal: Goal) => Goal | null | void | Promise<Goal | null | void>;
   onSaveTargetPair: (goal: Goal, target: string, min: string, period?: string) => void;
   onDelete: (id: string) => void;
-  onToggle: (id: string) => void;
+  onToggle: (goal: Goal) => void;
   onToggleMonth: (goal: Goal) => void;
   isAdmin?: boolean;
   allowedDepartments?: string[];
@@ -2363,8 +2389,9 @@ function GoalsScreen(props: {
   const renderGoalRow = (goal: Goal) => {
     const a = goal.periodType === "quarterly" ? quarterActuals : props.actuals;
     const isQuarterly = goal.periodType === "quarterly";
-    const on = goal.active && !isMonthlyInactive(goal);
-    const dimmed = !goal.active || isMonthlyInactive(goal);
+    const activeInMonth = goalActiveForMonth(goal, props.month);
+    const on = goal.active && activeInMonth && !isMonthlyInactive(goal);
+    const dimmed = !goal.active || !activeInMonth || isMonthlyInactive(goal);
     const canEdit = !effectiveReadonly && (props.isAdmin || goal.goalTier !== "company");
     const canActual = !actualsReadonly && (props.isAdmin || goal.goalTier !== "company");
     const hasTargets = goalHasTargets(goal);
@@ -2426,11 +2453,16 @@ function GoalsScreen(props: {
                   ) : canActual ? (
                     <DropdownMenuItem disabled>Set target first</DropdownMenuItem>
                   ) : null}
-                  <DropdownMenuItem onClick={() => props.onToggleMonth(goal)}>
-                    {isMonthlyInactive(goal) ? "Activate for this month" : "Deactivate for this month"}
+                  <DropdownMenuItem onClick={() => props.onToggle(goal)}>
+                    {activeInMonth ? "Deactivate goal" : "Reactivate goal"}
                   </DropdownMenuItem>
+                  {activeInMonth && (
+                    <DropdownMenuItem onClick={() => props.onToggleMonth(goal)}>
+                      {isMonthlyInactive(goal) ? "Include this month" : "Skip this month only"}
+                    </DropdownMenuItem>
+                  )}
                   <DropdownMenuSeparator />
-                  <DropdownMenuItem variant="destructive" onClick={() => props.onDelete(goal.id)}>Delete goal</DropdownMenuItem>
+                  <DropdownMenuItem variant="destructive" onClick={() => props.onDelete(goal.id)}>Delete from this month forward</DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
             ) : null}
@@ -2603,9 +2635,9 @@ function GoalsScreen(props: {
           </TableBody>
         </Table>
         {(periodTab === "monthly" ? monthlyGoals : quarterlyGoals).length === 0 && <div className="no-goals-msg" style={{ display: "block" }}>No {periodTab} goals match the current filter</div>}
-        {!effectiveReadonly && (
+        {!effectiveReadonly && props.month >= currentMonthVal && (
           <div style={{ padding: "12px 16px" }}>
-            <button className="add-goal-btn" onClick={() => props.onEdit({ ...emptyGoal, id: `goal-${Date.now()}`, periodType: periodTab })}>+ Add {periodTab === "quarterly" ? "Quarterly" : "Monthly"} Goal to Bank</button>
+            <button className="add-goal-btn" onClick={() => props.onEdit({ ...emptyGoal, id: `goal-${Date.now()}`, periodType: periodTab, startMonth: props.month })}>+ Add {periodTab === "quarterly" ? "Quarterly" : "Monthly"} Goal to Bank</button>
           </div>
         )}
       </section>

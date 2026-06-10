@@ -27,6 +27,8 @@ export type Goal = {
   capPct: number;
   active: boolean;
   periodType?: "monthly" | "quarterly";
+  startMonth?: string;  // ISO "YYYY-MM" — goal is hidden in months before this
+  endMonth?: string;    // ISO "YYYY-MM" — goal is inactive/hidden from this month forward
   createdBy?: string;
   createdAt?: string;
   updatedAt?: string;
