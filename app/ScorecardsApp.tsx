@@ -267,6 +267,13 @@ function scopedEmployeesForProfile(employees: Employee[], profile: ManagerProfil
 
 export default function ScorecardsApp() {
   const [mode, setMode] = useState<Screen>("landing");
+  // Tracks which screens have been visited at least once so we can keep them mounted
+  // after first visit (preserves local component state like live scorecard drafts).
+  const [mountedScreens, setMountedScreens] = useState<Set<Screen>>(() => new Set(["landing"] as Screen[]));
+  const mountScreen = (screen: Screen) => {
+    setMode(screen);
+    setMountedScreens((prev) => (prev.has(screen) ? prev : new Set([...prev, screen])));
+  };
   const [profile, setProfile] = useState<ManagerProfile | null>(null);
   const [currentUserEmail, setCurrentUserEmail] = useState("");
   const [authenticated, setAuthenticated] = useState(false);
@@ -1325,14 +1332,14 @@ export default function ScorecardsApp() {
         brand={{ title: "Pressed Floral", subtitle: "Scorecards" }}
         groups={navGroups}
         activeKey={mode}
-        onNavigate={setMode}
+        onNavigate={mountScreen}
         user={{ primary: currentUserEmail || "Not signed in", secondary: userSecondary }}
         onSignOut={signOut}
         pageTitle={pageLabel(mode)}
         banner={viewAsBanner}
       >
         <main>
-          {mode === "landing" && <DashboardScreen data={dashboard} profile={effectiveProfile} onMode={setMode} />}
+          {mode === "landing" && <DashboardScreen data={dashboard} profile={effectiveProfile} onMode={mountScreen} />}
           {mode === "personal" && (
             <div className="screen active">
               <div style={{ maxWidth: "680px", margin: "0 auto", padding: "16px" }}>
@@ -1374,25 +1381,29 @@ export default function ScorecardsApp() {
             />
           )}
 
-          {mode === "scorecard" && (
-            <ScorecardsScreen
-              selectedMonths={scorecardMonths}
-              months={months}
-              profile={effectiveProfile}
-              rippling={appData.rippling}
-              allEmployees={allRipplingEmployees}
-              scorecards={scopedScorecardsForProfile(appData.scorecards, effectiveProfile, allRipplingEmployees)}
-              allGoals={appData.goals.filter((g) => g.active)}
-              allActuals={appData.actuals}
-              goalAssignments={appData.goalAssignments}
-              onMonths={setScorecardMonths}
-              onSubmitScorecard={submitScorecardDirect}
-              onDeleteGoal={setDeleteModal}
-              onApproveScorecard={approveScorecard}
-              onReturnScorecard={returnScorecard}
-              currentUserEmail={currentUserEmail}
-              currentUserProfileId={effectiveProfile?.id}
-            />
+          {/* ScorecardsScreen stays mounted after first visit so live-draft card state
+              (goalIds, weight overrides, individual actuals) is preserved across tab switches. */}
+          {mountedScreens.has("scorecard") && (
+            <div style={{ display: mode === "scorecard" ? undefined : "none" }}>
+              <ScorecardsScreen
+                selectedMonths={scorecardMonths}
+                months={months}
+                profile={effectiveProfile}
+                rippling={appData.rippling}
+                allEmployees={allRipplingEmployees}
+                scorecards={scopedScorecardsForProfile(appData.scorecards, effectiveProfile, allRipplingEmployees)}
+                allGoals={appData.goals.filter((g) => g.active)}
+                allActuals={appData.actuals}
+                goalAssignments={appData.goalAssignments}
+                onMonths={setScorecardMonths}
+                onSubmitScorecard={submitScorecardDirect}
+                onDeleteGoal={setDeleteModal}
+                onApproveScorecard={approveScorecard}
+                onReturnScorecard={returnScorecard}
+                currentUserEmail={currentUserEmail}
+                currentUserProfileId={effectiveProfile?.id}
+              />
+            </div>
           )}
           {mode === "history" && (
             <HistoryScreen
