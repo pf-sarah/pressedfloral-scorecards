@@ -25,6 +25,7 @@ export type AdminManagedUser = {
   departments: string[];
   locations: string[];
   linkedEmployeeName?: string;
+  supervisorId?: string;
   hasProfile: boolean;
   status: "active" | "invited" | "unconfirmed";
   invitedAt?: string;
@@ -40,6 +41,7 @@ export type AdminUserPayload = {
   departments: string[];
   locations: string[];
   linkedEmployeeName?: string;
+  supervisorId?: string;
   allDepartments?: boolean;
   allLocations?: boolean;
 };
@@ -84,6 +86,7 @@ export function normalizeAdminUserPayload(input: unknown, options: NormalizeOpti
   const departments = uniqueAllowedStrings(source.departments, allowedDepartments);
   const locations = uniqueAllowedStrings(source.locations, allowedLocations);
   const linkedEmployeeName = normalizeOptionalString(source.linkedEmployeeName);
+  const supervisorId = normalizeOptionalString(source.supervisorId);
 
   if (role === "admin") {
     return {
@@ -116,6 +119,7 @@ export function normalizeAdminUserPayload(input: unknown, options: NormalizeOpti
       departments: allDepartments ? [] : departments,
       locations: allLocations ? [] : locations,
       linkedEmployeeName,
+      supervisorId: supervisorId || undefined,
       allDepartments,
       allLocations
     }
@@ -128,7 +132,8 @@ export function adminProfileToRow(userId: string, payload: AdminUserPayload) {
     role: payload.role,
     departments: payload.departments,
     locations: payload.locations,
-    linked_employee_name: payload.linkedEmployeeName || null
+    linked_employee_name: payload.linkedEmployeeName || null,
+    supervisor_id: payload.supervisorId || null
   };
 }
 

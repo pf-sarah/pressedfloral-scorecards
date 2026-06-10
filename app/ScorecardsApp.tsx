@@ -913,6 +913,16 @@ export default function ScorecardsApp() {
     if (isManagerRole && expected > 0 && missingScorecardsScoped.length)
       actions.push({ key: "scorecards", label: "Submit team scorecards", detail: `${missingScorecardsScoped.length} of ${expected} not submitted for ${workMonthLabel}`, action: "scorecard", count: missingScorecardsScoped.length });
 
+    // Review actions — scorecards waiting for this user's approval
+    const pendingReviews = appData.scorecards.filter((sc) => sc.reviewStatus === "pending_review" && sc.reviewerId === effectiveProfile?.id);
+    if (pendingReviews.length)
+      actions.push({ key: "pending_reviews", label: "Review submitted scorecards", detail: `${pendingReviews.length} scorecard${pendingReviews.length > 1 ? "s" : ""} waiting for your approval`, action: "scorecard", count: pendingReviews.length });
+
+    // Returned scorecards — scorecards this manager submitted that were returned
+    const returnedScorecards = appData.scorecards.filter((sc) => sc.reviewStatus === "returned" && sc.submittedBy === currentUserEmail);
+    if (returnedScorecards.length)
+      actions.push({ key: "returned", label: "Revise returned scorecards", detail: `${returnedScorecards.length} scorecard${returnedScorecards.length > 1 ? "s" : ""} returned for revision`, action: "scorecard", count: returnedScorecards.length });
+
     // Personal view (user)
     const myLatest = myOwnScorecards.length ? myOwnScorecards[myOwnScorecards.length - 1] : null;
     const myPrev = myOwnScorecards.length > 1 ? myOwnScorecards[myOwnScorecards.length - 2] : null;
@@ -1113,11 +1123,18 @@ export default function ScorecardsApp() {
   }
 
   async function submitScorecardDirect(scorecard: Scorecard) {
-    let savedScorecard = scorecard;
+    // Look up the submitting manager's supervisor to determine review routing
+    const submittingProfile = profile; // the currently logged-in manager
+    const supervisorId = submittingProfile?.supervisorId;
+    const withReview: Scorecard = supervisorId
+      ? { ...scorecard, reviewStatus: "pending_review", reviewerId: supervisorId }
+      : scorecard;
+
+    let savedScorecard = withReview;
     if (!isFixture && sb) {
       const result = await sb
         .from("scorecards")
-        .upsert(scorecardToRow(scorecard), { onConflict: "employee_name,scorecard_month" })
+        .upsert(scorecardToRow(withReview), { onConflict: "employee_name,scorecard_month" })
         .select()
         .single();
       if (result.error || !result.data) {
@@ -1134,7 +1151,41 @@ export default function ScorecardsApp() {
       ]
     }));
     persistScorecard(savedScorecard);
-    showToast("Scorecard submitted");
+    showToast(supervisorId ? "Scorecard submitted — sent to supervisor for review" : "Scorecard submitted");
+  }
+
+  async function approveScorecard(scorecardId: string) {
+    const now = new Date().toISOString();
+    if (!isFixture && sb) {
+      const result = await sb.from("scorecards")
+        .update({ review_status: "approved", reviewed_at: now, reviewed_by: currentUserEmail })
+        .eq("id", scorecardId);
+      if (result.error) { showSupabaseError(result.error, "Could not approve scorecard."); return; }
+    }
+    setAppData((current) => ({
+      ...current,
+      scorecards: current.scorecards.map((sc) =>
+        sc.id === scorecardId ? { ...sc, reviewStatus: "approved", reviewedAt: now, reviewedBy: currentUserEmail } : sc
+      )
+    }));
+    showToast("Scorecard approved");
+  }
+
+  async function returnScorecard(scorecardId: string, note: string) {
+    const now = new Date().toISOString();
+    if (!isFixture && sb) {
+      const result = await sb.from("scorecards")
+        .update({ review_status: "returned", reviewed_at: now, reviewed_by: currentUserEmail, review_note: note || null })
+        .eq("id", scorecardId);
+      if (result.error) { showSupabaseError(result.error, "Could not return scorecard."); return; }
+    }
+    setAppData((current) => ({
+      ...current,
+      scorecards: current.scorecards.map((sc) =>
+        sc.id === scorecardId ? { ...sc, reviewStatus: "returned", reviewedAt: now, reviewedBy: currentUserEmail, reviewNote: note || undefined } : sc
+      )
+    }));
+    showToast("Scorecard returned for revision");
   }
 
   function removeGoalFromScorecard(allEmployees: boolean) {
@@ -1293,7 +1344,10 @@ export default function ScorecardsApp() {
               onMonths={setScorecardMonths}
               onSubmitScorecard={submitScorecardDirect}
               onDeleteGoal={setDeleteModal}
+              onApproveScorecard={approveScorecard}
+              onReturnScorecard={returnScorecard}
               currentUserEmail={currentUserEmail}
+              currentUserProfileId={effectiveProfile?.id}
             />
           )}
           {mode === "history" && (
@@ -2128,6 +2182,7 @@ function UsersScreen(props: {
                 mode="edit"
                 user={editingUser}
                 employees={props.employees}
+                allUsers={props.users}
                 submitLabel="Save changes"
                 onCancel={() => setEditingId(null)}
                 onSubmit={async (payload) => {
@@ -2148,6 +2203,7 @@ function UserPermissionForm(props: {
   mode: "invite" | "edit";
   user?: AdminManagedUser;
   employees: Employee[];
+  allUsers?: AdminManagedUser[];
   submitLabel: string;
   onSubmit: (payload: AdminUserPayload) => Promise<boolean>;
   onCancel?: () => void;
@@ -2186,6 +2242,7 @@ function UserPermissionForm(props: {
       departments: isManager ? (allDepts ? [] : draft.departments) : [],
       locations: isManager ? (allLocs ? [] : draft.locations) : [],
       linkedEmployeeName: draft.linkedEmployeeName || undefined,
+      supervisorId: (draft as AdminUserPayload & { supervisorId?: string }).supervisorId || undefined,
       allDepartments: !isManager || allDepts,
       allLocations: !isManager || allLocs
     });
@@ -2226,6 +2283,20 @@ function UserPermissionForm(props: {
               <SelectContent>
                 <SelectItem value={ALL_LOCATIONS}>No linked employee</SelectItem>
                 {employeeNames.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </DrawerField>
+          <DrawerField label="Supervisor" className="min-w-[12rem] flex-1">
+            <Select
+              value={(draft as AdminUserPayload & { supervisorId?: string }).supervisorId || "__none__"}
+              onValueChange={(v) => setDraft({ ...draft, supervisorId: v === "__none__" ? "" : v } as typeof draft)}
+            >
+              <SelectTrigger className="w-full" aria-label="Supervisor"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">No supervisor</SelectItem>
+                {(props.allUsers || []).filter((u) => u.id !== draft.id && (u.role === "manager" || u.role === "admin")).map((u) => (
+                  <SelectItem key={u.id} value={u.id}>{u.email}</SelectItem>
+                ))}
               </SelectContent>
             </Select>
           </DrawerField>
@@ -2276,6 +2347,7 @@ function userDraftFromUser(user?: AdminManagedUser): AdminUserPayload & { email:
     departments: isManager ? (allDepts ? [...departments] : user.departments) : [],
     locations: isManager ? (allLocs ? [...locations] : user.locations) : [],
     linkedEmployeeName: user.linkedEmployeeName || "",
+    supervisorId: user.supervisorId || "",
     allDepartments: allDepts,
     allLocations: allLocs
   };
@@ -2985,7 +3057,10 @@ function ScorecardsScreen(props: {
   onMonths: (months: string[]) => void;
   onSubmitScorecard: (scorecard: Scorecard) => void;
   onDeleteGoal: (value: { scorecardId: string; goalName: string }) => void;
+  onApproveScorecard: (scorecardId: string) => void;
+  onReturnScorecard: (scorecardId: string, note: string) => void;
   currentUserEmail: string;
+  currentUserProfileId?: string;
 }) {
   const [filterEmployees, setFilterEmployees] = useState<string[]>([]);
   const [filterDepts, setFilterDepts] = useState<string[]>([]);
@@ -3211,7 +3286,10 @@ function ScorecardsScreen(props: {
                   globalPeriodType={globalPeriodType}
                   onSubmit={props.onSubmitScorecard}
                   onDeleteGoal={props.onDeleteGoal}
+                  onApprove={props.onApproveScorecard}
+                  onReturn={props.onReturnScorecard}
                   currentUserEmail={props.currentUserEmail}
+                  currentUserProfileId={props.currentUserProfileId}
                 />
               );
             })}
@@ -3277,7 +3355,10 @@ function ScorecardsScreen(props: {
                         globalPeriodType={globalPeriodType}
                         onSubmit={props.onSubmitScorecard}
                         onDeleteGoal={props.onDeleteGoal}
+                        onApprove={props.onApproveScorecard}
+                        onReturn={props.onReturnScorecard}
                         currentUserEmail={props.currentUserEmail}
+                        currentUserProfileId={props.currentUserProfileId}
                       />
                     );
                   })}
@@ -3334,7 +3415,7 @@ function GoalRowMenu({ goalName, currentWeight, onApplyWeight, onRemove }: {
 }
 
 function LiveScorecardCard({
-  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, onSubmit, onDeleteGoal, currentUserEmail
+  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, onSubmit, onDeleteGoal, onApprove, onReturn, currentUserEmail, currentUserProfileId
 }: {
   employee: Employee;
   isoMonth: string;
@@ -3347,7 +3428,10 @@ function LiveScorecardCard({
   globalPeriodType: "monthly" | "quarterly";
   onSubmit: (scorecard: Scorecard) => void;
   onDeleteGoal: (value: { scorecardId: string; goalName: string }) => void;
+  onApprove: (scorecardId: string) => void;
+  onReturn: (scorecardId: string, note: string) => void;
   currentUserEmail: string;
+  currentUserProfileId?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [cardPeriodType, setCardPeriodType] = useState<"monthly" | "quarterly">(globalPeriodType);
@@ -3408,7 +3492,7 @@ function LiveScorecardCard({
 
   const displayedSubmitted = submittedScorecard || lastSubmitted;
   if (displayedSubmitted) {
-    return <ScorecardCard scorecard={displayedSubmitted} onDeleteGoal={onDeleteGoal} />;
+    return <ScorecardCard scorecard={displayedSubmitted} onDeleteGoal={onDeleteGoal} onApprove={onApprove} onReturn={onReturn} currentUserProfileId={currentUserProfileId} />;
   }
 
   const activeEmployee = cardPeriodType === "quarterly" ? quarterlyEmployee : employee;
@@ -3628,8 +3712,16 @@ function Metric({ label, value, highlight }: { label: string; value: string; hig
   return <div className="metric-card"><div className="mlabel">{label}</div><div className={`mval ${highlight ? "highlight" : ""}`}>{value}</div></div>;
 }
 
-function ScorecardCard({ scorecard, onDeleteGoal }: { scorecard: Scorecard; onDeleteGoal: (value: { scorecardId: string; goalName: string }) => void }) {
+function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, currentUserProfileId }: {
+  scorecard: Scorecard;
+  onDeleteGoal: (value: { scorecardId: string; goalName: string }) => void;
+  onApprove: (scorecardId: string) => void;
+  onReturn: (scorecardId: string, note: string) => void;
+  currentUserProfileId?: string;
+}) {
   const [open, setOpen] = useState(false);
+  const [returning, setReturning] = useState(false);
+  const [returnNote, setReturnNote] = useState("");
   const achColor = scorecard.weightedAchievement >= 100 ? "#2D6B1A" : "var(--brick)";
   const effectiveHourly = scorecard.hours && scorecard.hours > 0
     ? ((scorecard.baseEarnings + scorecard.bonusAmount) / scorecard.hours).toFixed(2)
@@ -3659,8 +3751,67 @@ function ScorecardCard({ scorecard, onDeleteGoal }: { scorecard: Scorecard; onDe
           <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">Bonus</span>
           <span className="block text-[15px] font-semibold tabular-nums text-primary">{formatCurrency(scorecard.bonusAmount)}</span>
         </span>
-        <Badge variant="success" className="shrink-0 font-medium">Submitted</Badge>
+        {scorecard.reviewStatus === "pending_review" ? (
+          <Badge variant="secondary" className="shrink-0 font-medium" style={{ background: "#FEF3C7", color: "#92400E", borderColor: "#FDE68A" }}>Pending Review</Badge>
+        ) : scorecard.reviewStatus === "approved" ? (
+          <Badge variant="success" className="shrink-0 font-medium">Approved</Badge>
+        ) : scorecard.reviewStatus === "returned" ? (
+          <Badge variant="secondary" className="shrink-0 font-medium" style={{ background: "#FEE2E2", color: "#991B1B", borderColor: "#FECACA" }}>Returned</Badge>
+        ) : (
+          <Badge variant="success" className="shrink-0 font-medium">Submitted</Badge>
+        )}
       </button>
+
+      {/* Reviewer actions — only shown to the assigned reviewer */}
+      {scorecard.reviewStatus === "pending_review" && currentUserProfileId && scorecard.reviewerId === currentUserProfileId && (
+        <div style={{ borderTop: "1px solid var(--border)", background: "var(--muted)", padding: "10px 16px", display: "flex", flexDirection: "column", gap: "8px" }}>
+          {!returning ? (
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <span style={{ fontSize: "12px", color: "var(--text-muted)", flex: 1 }}>
+                Submitted by {scorecard.submittedBy} · awaiting your review
+              </span>
+              <button
+                onClick={() => onApprove(scorecard.id)}
+                style={{ padding: "5px 14px", fontSize: "12px", fontWeight: 600, background: "#166534", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer", fontFamily: "var(--sans)" }}
+              >Approve</button>
+              <button
+                onClick={() => setReturning(true)}
+                style={{ padding: "5px 14px", fontSize: "12px", fontWeight: 600, background: "none", color: "var(--brick)", border: "1.5px solid var(--brick)", borderRadius: "6px", cursor: "pointer", fontFamily: "var(--sans)" }}
+              >Return</button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <textarea
+                autoFocus
+                placeholder="Note for the manager (optional)…"
+                value={returnNote}
+                onChange={(e) => setReturnNote(e.target.value)}
+                style={{ width: "100%", fontSize: "12px", padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "6px", fontFamily: "var(--sans)", resize: "vertical", minHeight: "60px" }}
+              />
+              <div style={{ display: "flex", gap: "6px" }}>
+                <button
+                  onClick={() => { onReturn(scorecard.id, returnNote); setReturning(false); setReturnNote(""); }}
+                  style={{ padding: "5px 14px", fontSize: "12px", fontWeight: 600, background: "var(--brick)", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer", fontFamily: "var(--sans)" }}
+                >Confirm Return</button>
+                <button
+                  onClick={() => { setReturning(false); setReturnNote(""); }}
+                  style={{ padding: "5px 14px", fontSize: "12px", fontWeight: 600, background: "none", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", cursor: "pointer", fontFamily: "var(--sans)" }}
+                >Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Return note — shown to the submitting manager */}
+      {scorecard.reviewStatus === "returned" && scorecard.reviewNote && (
+        <div style={{ borderTop: "1px solid #FECACA", background: "#FEF2F2", padding: "8px 16px" }}>
+          <span style={{ fontSize: "11.5px", fontWeight: 600, color: "#991B1B" }}>Returned</span>
+          {scorecard.reviewedBy && <span style={{ fontSize: "11.5px", color: "#991B1B" }}> by {scorecard.reviewedBy}</span>}
+          <span style={{ fontSize: "11.5px", color: "#7F1D1D" }}>: {scorecard.reviewNote}</span>
+        </div>
+      )}
+
       {open && (
         <>
           <div className="flex flex-wrap gap-6 border-t border-border bg-muted/30 px-4 py-2.5">
@@ -4027,7 +4178,7 @@ function HistoryScreen(props: {
             </section>
           )}
           <section style={{ background: "transparent", border: "none", boxShadow: "none", padding: 0 }}>
-            <div className="scorecard-list" style={{ padding: 0 }}>{props.scorecards.map((sc) => <ScorecardCard key={sc.id} scorecard={sc} onDeleteGoal={() => {}} />)}</div>
+            <div className="scorecard-list" style={{ padding: 0 }}>{props.scorecards.map((sc) => <ScorecardCard key={sc.id} scorecard={sc} onDeleteGoal={() => {}} onApprove={() => {}} onReturn={() => {}} />)}</div>
             {!props.scorecards.length && <div className="px-4 py-6 text-center text-[13px] text-muted-foreground">No scorecards match the current filters.</div>}
           </section>
         </>

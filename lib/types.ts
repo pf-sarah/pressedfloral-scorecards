@@ -9,6 +9,7 @@ export type ManagerProfile = {
   departments: string[];
   locations: string[];
   linkedEmployeeName?: string;
+  supervisorId?: string;   // profile id of this manager's supervisor
 };
 
 export type Goal = {
@@ -94,6 +95,11 @@ export type Scorecard = {
   goals: ScorecardGoal[];
   submittedAt?: string;
   submittedBy?: string;
+  reviewStatus?: "pending_review" | "approved" | "returned";
+  reviewerId?: string;   // supervisor's profile id at submission time
+  reviewedAt?: string;
+  reviewedBy?: string;
+  reviewNote?: string;
 };
 
 export type AppData = {

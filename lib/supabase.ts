@@ -126,7 +126,8 @@ export function profileFromRow(email: string, row: Record<string, any>): Manager
     role,
     departments: Array.isArray(row.departments) ? row.departments : [],
     locations: Array.isArray(row.locations) ? row.locations : [],
-    linkedEmployeeName: typeof row.linked_employee_name === "string" && row.linked_employee_name.trim() ? row.linked_employee_name.trim() : undefined
+    linkedEmployeeName: typeof row.linked_employee_name === "string" && row.linked_employee_name.trim() ? row.linked_employee_name.trim() : undefined,
+  supervisorId: row.supervisor_id || undefined
   };
 }
 
@@ -169,7 +170,12 @@ export function scorecardToRow(scorecard: Scorecard) {
     scorecard_capped: scorecard.scorecardCapped,
     flag_120: scorecard.flag120,
     goals: scorecard.goals,
-    submitted_by: scorecard.submittedBy || null
+    submitted_by: scorecard.submittedBy || null,
+    review_status: scorecard.reviewStatus || null,
+    reviewer_id: scorecard.reviewerId || null,
+    reviewed_at: scorecard.reviewedAt || null,
+    reviewed_by: scorecard.reviewedBy || null,
+    review_note: scorecard.reviewNote || null,
   };
 }
 
@@ -195,6 +201,11 @@ export function scorecardFromRow(row: Record<string, any>): Scorecard {
     flag120: row.flag_120,
     goals: row.goals || [],
     submittedAt: row.submitted_at,
-    submittedBy: row.submitted_by
+    submittedBy: row.submitted_by,
+    reviewStatus: row.review_status || undefined,
+    reviewerId: row.reviewer_id || undefined,
+    reviewedAt: row.reviewed_at || undefined,
+    reviewedBy: row.reviewed_by || undefined,
+    reviewNote: row.review_note || undefined,
   };
 }
