@@ -3810,9 +3810,14 @@ function LiveScorecardCard({
       .map((id) => allGoals.find((g) => g.id === id))
       .filter((g): g is Goal => !!g);
     const n = goals.length;
+    // Prefer weights stored in the Goals Bank. Only fall back to equal distribution
+    // when none of the goals have a weight assigned.
+    const allHaveWeight = goals.every((g) => g.weight != null && g.weight > 0);
     return goals.map((g, i) => {
       const equalWeight = n > 0 ? Number((100 / n).toFixed(2)) : 0;
-      const defaultWeight = i === n - 1 ? Number((100 - equalWeight * (n - 1)).toFixed(2)) : equalWeight;
+      const defaultWeight = allHaveWeight
+        ? g.weight!
+        : (i === n - 1 ? Number((100 - equalWeight * (n - 1)).toFixed(2)) : equalWeight);
       const scWeight = weightOverrides[g.name] !== undefined
         ? (weightOverrides[g.name] === "" ? 0 : Number(weightOverrides[g.name]))
         : defaultWeight;
