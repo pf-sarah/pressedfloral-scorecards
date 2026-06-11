@@ -1401,6 +1401,8 @@ export default function ScorecardsApp() {
                   allGoals={appData.goals.filter((g) => g.active)}
                   allActuals={appData.actuals}
                   rippling={appData.rippling}
+                  goalAssignments={appData.goalAssignments}
+                  empSettings={appData.employeeScorecardSettings.filter((s) => s.employeeName === (effectiveProfile?.linkedEmployeeName || ""))}
                 />
               </div>
             </div>
@@ -1626,7 +1628,7 @@ function AuthScreen(props: {
 }
 
 function PersonalScorecardPanel({
-  scorecards, employeeName, myEmployee, allGoals, allActuals, rippling
+  scorecards, employeeName, myEmployee, allGoals, allActuals, rippling, goalAssignments, empSettings
 }: {
   scorecards: Scorecard[];
   employeeName: string;
@@ -1634,6 +1636,8 @@ function PersonalScorecardPanel({
   allGoals: Goal[];
   allActuals: Record<string, ActualsByKey>;
   rippling: Record<string, Employee[]>;
+  goalAssignments: GoalAssignment[];
+  empSettings: EmployeeScorecardSettings[];
 }) {
   function periodSortKey(period: string): string {
     const qm = period.match(/^Q(\d) (\d{4})$/);
@@ -1695,31 +1699,60 @@ function PersonalScorecardPanel({
     return [emp, !!src];
   }, [myEmployee, periodISO, rippling]);
 
-  // Goals applicable to this employee for this period type
+  // Goals for this employee — mirrors the exact state the manager sees in Team Scorecards.
+  // Applies the same settings (excluded/added goals, weight overrides) and goal-assignment logic.
   const liveGoals: EditableGoal[] = useMemo(() => {
     if (!myEmployee) return [];
-    const applicable = allGoals.filter((g) => {
+    const periodType: "monthly" | "quarterly" = isQuarterly ? "quarterly" : "monthly";
+    const settings = empSettings.find((s) => s.periodType === periodType);
+    const month = periodISO;
+
+    // 1. Compute base goals (same filter as goalsForEmployee in ScorecardsScreen)
+    const baseGoals = allGoals.filter((g) => {
       if (!g.active) return false;
-      if (isQuarterly ? g.periodType !== "quarterly" : g.periodType === "quarterly") return false;
       if (periodActuals["__monthly_inactive__" + actualKey(g)]) return false;
       if (g.goalTier === "company") return false;
+      if (isQuarterly ? g.periodType !== "quarterly" : g.periodType === "quarterly") return false;
+      if (month && !goalActiveForMonth(g, month)) return false;
       const deptMatch = g.department === myEmployee.department && (!g.location || g.location === myEmployee.location);
       if (g.goalTier === "department") return deptMatch;
-      // Individual goals: match by employeeName if set (new), else fall back to role match (legacy)
       if (g.employeeName) return g.employeeName === myEmployee.name;
       return deptMatch && (!g.role || !myEmployee.role || g.role === myEmployee.role);
     });
-    return applicable.map((g) => {
-      return {
-        ...g,
-        scTarget: periodActuals[metaKey("target", g)] != null ? Number(periodActuals[metaKey("target", g)]) : g.goalValue,
-        scMin: periodActuals[metaKey("min", g)] != null ? Number(periodActuals[metaKey("min", g)]) : g.minValue,
-        scActual: g.goalTier === "individual" ? null : (periodActuals[actualKey(g)] != null ? Number(periodActuals[actualKey(g)]) : null),
-        // Weight comes from Goals Bank; no auto-distribution fallback.
-        scWeight: g.weight ?? 0,
-      };
-    });
-  }, [myEmployee, allGoals, periodActuals, isQuarterly]);
+
+    // 2. Add company goals individually assigned to this employee for this month
+    const assignedCompanyGoals = month
+      ? goalAssignments
+          .filter((a) => a.employeeName === myEmployee.name && goalActiveForMonth({ startMonth: a.startMonth, endMonth: a.endMonth } as Goal, month))
+          .map((a) => allGoals.find((g) => g.id === a.goalId))
+          .filter((g): g is Goal => !!g && g.goalTier === "company" && goalActiveForMonth(g, month))
+      : [];
+    const baseIds = new Set(baseGoals.map((g) => g.id));
+    const allBase = [...baseGoals, ...assignedCompanyGoals.filter((g) => !baseIds.has(g.id))];
+
+    // 3. Apply manager's per-employee settings: excluded goals and manually-added extras
+    let goalList: Goal[] = allBase;
+    if (settings) {
+      const excludedSet = new Set(settings.excludedGoalIds);
+      const allBaseIds = new Set(allBase.map((g) => g.id));
+      const kept = allBase.filter((g) => !excludedSet.has(g.id));
+      const extras = settings.addedGoalIds
+        .filter((id) => !allBaseIds.has(id))
+        .map((id) => allGoals.find((g) => g.id === id))
+        .filter((g): g is Goal => !!g);
+      goalList = [...kept, ...extras];
+    }
+
+    // 4. Map to EditableGoal — manager weight overrides take precedence over stored weights
+    const weightOverrides: Record<string, number> = settings?.weightOverrides ?? {};
+    return goalList.map((g) => ({
+      ...g,
+      scTarget: periodActuals[metaKey("target", g)] != null ? Number(periodActuals[metaKey("target", g)]) : g.goalValue,
+      scMin: periodActuals[metaKey("min", g)] != null ? Number(periodActuals[metaKey("min", g)]) : g.minValue,
+      scActual: g.goalTier === "individual" ? null : (periodActuals[actualKey(g)] != null ? Number(periodActuals[actualKey(g)]) : null),
+      scWeight: weightOverrides[g.name] != null ? weightOverrides[g.name] : (g.weight ?? 0),
+    }));
+  }, [myEmployee, allGoals, periodActuals, isQuarterly, periodISO, empSettings, goalAssignments]);
 
   const liveComputed = useMemo(() =>
     empWithEarnings && liveGoals.length > 0
