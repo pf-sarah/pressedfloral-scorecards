@@ -3099,7 +3099,7 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
   const [tierVal, setTierVal] = useState<string>(isNew ? "" : goal.goalTier);
   const [locVal, setLocVal] = useState<string>(isNew ? "__unset__" : (goal.location ?? ""));
   const [deptVal, setDeptVal] = useState<string>(isNew ? "__unset__" : (goal.department ?? ""));
-  const [empVal, setEmpVal] = useState<string>(isNew ? "__unset__" : (goal.employeeName ?? "__unset__"));
+  const [roleVal, setRoleVal] = useState<string>(isNew ? "__unset__" : (goal.role ?? "__unset__"));
   const [lowerVal, setLowerVal] = useState<string>(isNew ? "" : String(goal.lowerBetter));
   const [cappedVal, setCappedVal] = useState<string>(isNew ? "" : goal.capped);
   const [periodVal, setPeriodVal] = useState<string>(isNew ? "" : (goal.periodType || "monthly"));
@@ -3111,19 +3111,20 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
   const isIndividual = tierVal === "individual";
   const isDepartment = tierVal === "department";
 
-  // For individual goals: filter team employees by selected dept/location when available
+  // For individual goals: derive unique roles from team employees filtered by dept/location
   const filteredEmployees = (teamEmployees || []).filter((e) => {
     if (deptVal && deptVal !== "__unset__" && deptVal !== "" && e.department !== deptVal) return false;
     if (locVal && locVal !== "__unset__" && locVal !== "" && e.location !== locVal) return false;
     return true;
   }).sort((a, b) => a.name.localeCompare(b.name));
+  const filteredRoles = [...new Set(filteredEmployees.map((e) => e.role).filter(Boolean))].sort();
 
   const missing: string[] = [];
   if (!draft.name.trim()) missing.push("Goal Name");
   if (!tierVal) missing.push("Type");
   if (!isDepartment && locVal === "__unset__") missing.push("Location");
   if (deptVal === "__unset__") missing.push("Department");
-  if (isIndividual && empVal === "__unset__") missing.push("Employee");
+  if (isIndividual && roleVal === "__unset__") missing.push("Position");
   if (!lowerVal) missing.push("Lower is Better");
   if (!cappedVal) missing.push("Capped");
   if (!periodVal) missing.push("Period Type");
@@ -3137,8 +3138,8 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
       goalTier: tierVal as GoalTier,
       location: locVal === "" || locVal === GOAL_ALL ? undefined : locVal,
       department: deptVal === "" ? undefined : deptVal,
-      employeeName: isIndividual && empVal !== "__unset__" ? empVal : undefined,
-      role: undefined, // no longer used for new goals
+      employeeName: undefined,
+      role: isIndividual && roleVal !== "__unset__" ? roleVal : undefined,
       lowerBetter: lowerVal === "true",
       capped: cappedVal as "yes" | "no",
       periodType: periodVal as "monthly" | "quarterly",
@@ -3174,7 +3175,7 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
           </DrawerField>
 
           <DrawerField label="Type" required>
-            <Select value={tierVal || undefined} onValueChange={(v) => { setTierVal(v); setEmpVal("__unset__"); }}>
+            <Select value={tierVal || undefined} onValueChange={(v) => { setTierVal(v); setRoleVal("__unset__"); }}>
               <SelectTrigger className="w-full"><SelectValue placeholder="Select type…" /></SelectTrigger>
               <SelectContent>
                 {isAdmin && <SelectItem value="company">Company</SelectItem>}
@@ -3195,7 +3196,7 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
           </DrawerField>
 
           <DrawerField label="Department" required>
-            <Select value={deptVal === "__unset__" ? undefined : (deptVal === "" ? GOAL_ALL : deptVal)} onValueChange={(v) => { setDeptVal(v === GOAL_ALL ? "" : v); setEmpVal("__unset__"); }}>
+            <Select value={deptVal === "__unset__" ? undefined : (deptVal === "" ? GOAL_ALL : deptVal)} onValueChange={(v) => { setDeptVal(v === GOAL_ALL ? "" : v); setRoleVal("__unset__"); }}>
               <SelectTrigger className="w-full"><SelectValue placeholder="Select department…" /></SelectTrigger>
               <SelectContent>
                 {isAdmin && !isIndividual && <SelectItem value={GOAL_ALL}>All departments</SelectItem>}
@@ -3205,12 +3206,12 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
           </DrawerField>
 
           {isIndividual && (
-            <DrawerField label="Employee" required>
-              <Select value={empVal === "__unset__" ? undefined : empVal} onValueChange={(v) => setEmpVal(v)}>
-                <SelectTrigger className="w-full"><SelectValue placeholder="Select employee…" /></SelectTrigger>
+            <DrawerField label="Position" required>
+              <Select value={roleVal === "__unset__" ? undefined : roleVal} onValueChange={(v) => setRoleVal(v)}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Select position…" /></SelectTrigger>
                 <SelectContent>
-                  {(filteredEmployees.length > 0 ? filteredEmployees : (teamEmployees || []).slice().sort((a, b) => a.name.localeCompare(b.name))).map((e) => (
-                    <SelectItem key={e.name} value={e.name}>{e.name}</SelectItem>
+                  {(filteredRoles.length > 0 ? filteredRoles : [...new Set((teamEmployees || []).map((e) => e.role).filter(Boolean))].sort()).map((r) => (
+                    <SelectItem key={r} value={r}>{r}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
