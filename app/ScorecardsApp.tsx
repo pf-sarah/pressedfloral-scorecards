@@ -1709,20 +1709,14 @@ function PersonalScorecardPanel({
       if (g.employeeName) return g.employeeName === myEmployee.name;
       return deptMatch && (!g.role || !myEmployee.role || g.role === myEmployee.role);
     });
-    const n = applicable.length;
-    // If all goals have a stored default weight, use those; otherwise equal-distribute
-    const allHaveWeight = applicable.every((g) => g.weight != null && g.weight > 0);
-    const eq = n > 0 ? Number((100 / n).toFixed(2)) : 0;
-    return applicable.map((g, i) => {
-      const defaultWeight = allHaveWeight
-        ? g.weight!
-        : (i === n - 1 ? Number((100 - eq * (n - 1)).toFixed(2)) : eq);
+    return applicable.map((g) => {
       return {
         ...g,
         scTarget: periodActuals[metaKey("target", g)] != null ? Number(periodActuals[metaKey("target", g)]) : g.goalValue,
         scMin: periodActuals[metaKey("min", g)] != null ? Number(periodActuals[metaKey("min", g)]) : g.minValue,
         scActual: g.goalTier === "individual" ? null : (periodActuals[actualKey(g)] != null ? Number(periodActuals[actualKey(g)]) : null),
-        scWeight: defaultWeight,
+        // Weight comes from Goals Bank; no auto-distribution fallback.
+        scWeight: g.weight ?? 0,
       };
     });
   }, [myEmployee, allGoals, periodActuals, isQuarterly]);
@@ -3810,14 +3804,11 @@ function LiveScorecardCard({
       .map((id) => allGoals.find((g) => g.id === id))
       .filter((g): g is Goal => !!g);
     const n = goals.length;
-    // Prefer weights stored in the Goals Bank. Only fall back to equal distribution
-    // when none of the goals have a weight assigned.
-    const allHaveWeight = goals.every((g) => g.weight != null && g.weight > 0);
-    return goals.map((g, i) => {
-      const equalWeight = n > 0 ? Number((100 / n).toFixed(2)) : 0;
-      const defaultWeight = allHaveWeight
-        ? g.weight!
-        : (i === n - 1 ? Number((100 - equalWeight * (n - 1)).toFixed(2)) : equalWeight);
+    return goals.map((g) => {
+      // Weight comes from Goals Bank. Manager overrides take precedence.
+      // Never auto-distribute — if no weight is set the goal shows blank and
+      // blocks submission until weights are configured in Goals & Actuals.
+      const defaultWeight = g.weight ?? 0;
       const scWeight = weightOverrides[g.name] !== undefined
         ? (weightOverrides[g.name] === "" ? 0 : Number(weightOverrides[g.name]))
         : defaultWeight;
@@ -3843,8 +3834,12 @@ function LiveScorecardCard({
   const liveScorecard = buildScorecard({ employee: activeEmployee, month: activeMonth, periodType: cardPeriodType, goals: currentGoals, submittedBy: currentUserEmail, payrollAvailable: activePayrollAvailable });
 
   const hasNoTarget = currentGoals.some((g) => periodActuals[metaKey("target", g)] == null || periodActuals[metaKey("min", g)] == null);
+  // A goal has an unset weight when it has no stored weight in Goals Bank and no manager override.
+  const hasUnsetWeights = currentGoals.some((g) =>
+    (g.weight == null || g.weight === 0) && weightOverrides[g.name] === undefined
+  );
   const totalWeight = Number(currentGoals.reduce((sum, g) => sum + g.scWeight, 0).toFixed(1));
-  const weightsValid = currentGoals.length === 0 || totalWeight === 100;
+  const weightsValid = currentGoals.length === 0 || (!hasUnsetWeights && totalWeight === 100);
   const availableToAdd = allGoals.filter((g) => {
     if (goalIds.includes(g.id)) return false;
     if (!isGoalApplicable(g)) return false;
@@ -3946,7 +3941,13 @@ function LiveScorecardCard({
                           <span className={goal.scActual == null ? "text-[var(--text-faint)]" : undefined}>{goal.scActual != null ? formatNumber(goal.scActual) : "—"}</span>
                         )}
                       </TableCell>
-                      <TableCell className="text-center tabular-nums">{(weightOverrides[goal.name] != null ? Number(weightOverrides[goal.name]) : goal.scWeight).toFixed(1)}%</TableCell>
+                      <TableCell className="text-center tabular-nums">
+                        {weightOverrides[goal.name] != null
+                          ? `${Number(weightOverrides[goal.name]).toFixed(1)}%`
+                          : goal.weight != null && goal.weight > 0
+                            ? `${goal.weight.toFixed(1)}%`
+                            : <span className="text-[var(--text-faint)]">—</span>}
+                      </TableCell>
                       <TableCell className="text-center font-semibold tabular-nums">
                         {sc?.actual != null
                           ? (sc.metMin
@@ -4006,14 +4007,16 @@ function LiveScorecardCard({
             )}
             {currentGoals.length > 0 && (
               <span className={`text-[11.5px] tabular-nums ${weightsValid ? "text-muted-foreground" : "font-semibold text-primary"}`}>
-                Weights: {totalWeight.toFixed(1)}%{!weightsValid ? " — must equal 100" : ""}
+                {hasUnsetWeights
+                  ? "Weights not set — assign weights in Goals & Actuals"
+                  : `Weights: ${totalWeight.toFixed(1)}%${!weightsValid ? " — must equal 100" : ""}`}
               </span>
             )}
             <Button
               size="sm"
               className="ml-auto"
               disabled={isCurrentMonth || hasNoTarget || currentGoals.length === 0 || !weightsValid}
-              title={isCurrentMonth ? "Scorecards can only be submitted for past months" : hasNoTarget ? "Set targets and minimums first" : !weightsValid ? "Weights must add up to 100%" : undefined}
+              title={isCurrentMonth ? "Scorecards can only be submitted for past months" : hasNoTarget ? "Set targets and minimums first" : hasUnsetWeights ? "Assign goal weights in Goals & Actuals first" : !weightsValid ? "Weights must add up to 100%" : undefined}
               onClick={() => { onSubmit(liveScorecard); setLastSubmitted(liveScorecard); }}
             >
               Submit scorecard
@@ -5493,21 +5496,18 @@ function WhatIfScreen(props: {
       }
       return false;
     });
-    const n = applicable.length;
-    const allHaveWeight = applicable.every((g) => g.weight != null && g.weight > 0);
-    const eq = n > 0 ? Number((100 / n).toFixed(2)) : 0;
-    setPlayGoals(applicable.map((g, i) => {
+    setPlayGoals(applicable.map((g) => {
       const tVal = props.periodActuals[metaKey("target", g)];
       const mVal = props.periodActuals[metaKey("min", g)];
       const aVal = g.goalTier !== "individual" ? props.periodActuals[actualKey(g)] : null;
-      const defaultWeight = allHaveWeight ? g.weight! : (i === n - 1 ? Number((100 - eq * (n - 1)).toFixed(2)) : eq);
       return {
         id: g.id, name: g.name, goalTier: g.goalTier, location: g.location, department: g.department,
         role: g.role, lowerBetter: g.lowerBetter, capped: g.capped, capPct: g.capPct,
         target: tVal != null ? String(tVal) : String(g.goalValue || ""),
         min: mVal != null ? String(mVal) : String(g.minValue || ""),
         actual: aVal != null ? String(aVal) : "",
-        weight: String(defaultWeight)
+        // Weight comes from Goals Bank; no auto-distribution fallback.
+        weight: g.weight != null && g.weight > 0 ? String(g.weight) : ""
       };
     }));
   }
