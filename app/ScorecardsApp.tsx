@@ -168,10 +168,9 @@ function actualKey(goal: Pick<Goal, "goalTier" | "location" | "department" | "na
 }
 
 function metaKey(type: "target" | "min", goal: Pick<Goal, "goalTier" | "location" | "department" | "name">) {
-  // Department goal targets are shared across all locations within a department —
-  // strip location so that setting a target once covers all employees in that dept.
-  const loc = goal.goalTier === "department" ? "" : (goal.location || "");
-  return `__${type}__${[goal.goalTier, loc, goal.department || "", goal.name].join("|")}`;
+  // Location is always included so that same-named goals in different locations
+  // (e.g. Design-Utah vs Design-Georgia) have independent targets and minimums.
+  return `__${type}__${[goal.goalTier, goal.location || "", goal.department || "", goal.name].join("|")}`;
 }
 
 function quarterKeyForMonth(isoMonth: string): string {
