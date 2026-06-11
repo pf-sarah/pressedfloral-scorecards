@@ -1393,7 +1393,7 @@ export default function ScorecardsApp() {
           {mode === "landing" && <DashboardScreen data={dashboard} profile={effectiveProfile} onMode={mountScreen} />}
           {mode === "personal" && (
             <div className="screen active">
-              <div style={{ maxWidth: "1100px", margin: "0 auto", padding: "16px" }}>
+              <div style={{ padding: "16px" }}>
                 <PersonalScorecardPanel
                   scorecards={myOwnScorecards}
                   employeeName={effectiveProfile?.linkedEmployeeName || ""}
