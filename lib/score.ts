@@ -80,9 +80,14 @@ export function buildScorecard(input: {
   goals: EditableGoal[];
   bonusPotentialPct?: number;
   submittedBy?: string;
+  /** Pass false when no Rippling payroll upload exists for this month —
+   *  forces baseEarnings to 0 so estimated salary doesn't inflate live cards. */
+  payrollAvailable?: boolean;
 }): Scorecard {
   const bonusPotentialPct = input.bonusPotentialPct ?? 10;
-  const earnings = baseEarnings({
+  // When payroll hasn't been uploaded yet (current / future months) use 0 so we
+  // never show a salary estimate as if it were real.
+  const earnings = input.payrollAvailable === false ? 0 : baseEarnings({
     payType: input.employee.payType,
     hourlyRate: input.employee.hourlyRate,
     hours: input.employee.hoursWorked,

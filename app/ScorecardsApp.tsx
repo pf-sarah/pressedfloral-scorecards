@@ -1684,13 +1684,16 @@ function PersonalScorecardPanel({
     ...(quarterKey ? allActuals[quarterKey] || {} : {}),
   }), [allActuals, currentPeriod, quarterKey]);
 
-  // Employee with earnings for this period's Rippling upload (next month's file)
-  const empWithEarnings = useMemo((): Employee | null => {
-    if (!myEmployee || !periodISO) return myEmployee;
+  // Employee with earnings for this period's Rippling upload (next month's file).
+  // Also tracks whether payroll data was actually found so buildScorecard can
+  // avoid using annualPay/12 estimates when no upload exists yet.
+  const [empWithEarnings, personalPayrollAvailable] = useMemo((): [Employee | null, boolean] => {
+    if (!myEmployee || !periodISO) return [myEmployee, false];
     const [py, pm] = periodISO.split("-").map(Number);
     const eKey = pm && py ? `${pm === 12 ? py + 1 : py}-${String(pm === 12 ? 1 : pm + 1).padStart(2, "0")}` : "";
     const src = eKey ? (rippling[eKey] || []).find((e) => e.name === myEmployee.name) : null;
-    return src ? { ...myEmployee, grossEarnings: src.grossEarnings, hoursWorked: src.hoursWorked } : myEmployee;
+    const emp = src ? { ...myEmployee, grossEarnings: src.grossEarnings, hoursWorked: src.hoursWorked } : myEmployee;
+    return [emp, !!src];
   }, [myEmployee, periodISO, rippling]);
 
   // Goals applicable to this employee for this period type
@@ -1727,9 +1730,9 @@ function PersonalScorecardPanel({
 
   const liveComputed = useMemo(() =>
     empWithEarnings && liveGoals.length > 0
-      ? buildScorecard({ employee: empWithEarnings, month: currentPeriod, periodType: isQuarterly ? "quarterly" : "monthly", goals: liveGoals })
+      ? buildScorecard({ employee: empWithEarnings, month: currentPeriod, periodType: isQuarterly ? "quarterly" : "monthly", goals: liveGoals, payrollAvailable: personalPayrollAvailable })
       : null,
-  [empWithEarnings, liveGoals, currentPeriod, isQuarterly]);
+  [empWithEarnings, liveGoals, currentPeriod, isQuarterly, personalPayrollAvailable]);
 
   // What employee/goals/metrics to render
   const displayEmp = submitted
@@ -3324,10 +3327,14 @@ function ScorecardsScreen(props: {
   const monthEmployees = monthRaw.length > 0 ? monthRaw : (singleMonthMode ? latestEmployees : []);
   const teamEmployees = scopedEmployeesForProfile(monthEmployees, props.profile, props.allEmployees);
 
-  // Earnings (hours + gross pay) come from the upload tagged to the same month being scored
+  // Earnings (hours + gross pay) come from the upload tagged to the same month being scored.
+  // payrollAvailable = false for current/future months that have no upload yet.
   const earningsUpload = props.rippling[selectedMonth] || [];
+  const payrollAvailable = earningsUpload.length > 0;
   function withActualEarnings(emp: Employee): Employee {
     const src = earningsUpload.find((e) => e.name === emp.name);
+    // Always override — if no upload for this month, earnings become undefined
+    // so buildScorecard's payrollAvailable=false gate can enforce zero.
     return { ...emp, grossEarnings: src?.grossEarnings, hoursWorked: src?.hoursWorked };
   }
   const periodActuals = {
@@ -3526,6 +3533,7 @@ function ScorecardsScreen(props: {
                   employee={withActualEarnings(emp)}
                   isoMonth={selectedMonth}
                   month={periodLabel}
+                  payrollAvailable={payrollAvailable}
                   baseGoals={goalsForEmployee(emp)}
                   allGoals={props.allGoals}
                   periodActuals={periodActuals}
@@ -3576,6 +3584,7 @@ function ScorecardsScreen(props: {
                 )
                 .sort((a, b) => a.name.localeCompare(b.name));
               const mEarningsUpload = props.rippling[m] || [];
+              const mPayrollAvailable = mEarningsUpload.length > 0;
               const mActuals = {
                 ...(props.allActuals[mLabel] || {}),
                 ...(props.allActuals[quarterKeyForMonth(m)] || {}),
@@ -3589,7 +3598,9 @@ function ScorecardsScreen(props: {
                     <div className="no-goals-msg" style={{ display: "block" }}>No employees match the current filter.</div>
                   ) : mFiltered.map((emp) => {
                     const src = mEarningsUpload.find((e) => e.name === emp.name);
-                    const empWithEarnings = src ? { ...emp, grossEarnings: src.grossEarnings, hoursWorked: src.hoursWorked } : emp;
+                    // Always override earnings — if no upload for this month, strip them to undefined
+                    // so baseEarnings() can't fall back to annualPay/12 estimates.
+                    const empWithEarnings = { ...emp, grossEarnings: src?.grossEarnings, hoursWorked: src?.hoursWorked };
                     const submitted = props.scorecards.find((sc) => sc.employeeName === emp.name && sc.scorecardMonth === mLabel);
                     return (
                       <LiveScorecardCard
@@ -3597,6 +3608,7 @@ function ScorecardsScreen(props: {
                         employee={empWithEarnings}
                         isoMonth={m}
                         month={mLabel}
+                        payrollAvailable={mPayrollAvailable}
                         baseGoals={goalsForEmployee(emp, mActuals, m)}
                         allGoals={props.allGoals}
                         periodActuals={mActuals}
@@ -3667,7 +3679,7 @@ function GoalRowMenu({ goalName, currentWeight, onApplyWeight, onRemove }: {
 }
 
 function LiveScorecardCard({
-  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, empSettings, onSettingsChange, onSubmit, onDeleteGoal, onApprove, onReturn, currentUserEmail, currentUserProfileId
+  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, payrollAvailable, empSettings, onSettingsChange, onSubmit, onDeleteGoal, onApprove, onReturn, currentUserEmail, currentUserProfileId
 }: {
   employee: Employee;
   isoMonth: string;
@@ -3678,6 +3690,7 @@ function LiveScorecardCard({
   allRippling: Record<string, Employee[]>;
   submittedScorecard: Scorecard | undefined;
   globalPeriodType: "monthly" | "quarterly";
+  payrollAvailable?: boolean;
   empSettings: EmployeeScorecardSettings[];
   onSettingsChange: (periodType: "monthly" | "quarterly", patch: { excludedGoalIds: string[]; addedGoalIds: string[]; weightOverrides: Record<string, number> }) => void;
   onSubmit: (scorecard: Scorecard) => void;
@@ -3816,7 +3829,14 @@ function LiveScorecardCard({
     });
   })();
 
-  const liveScorecard = buildScorecard({ employee: activeEmployee, month: activeMonth, periodType: cardPeriodType, goals: currentGoals, submittedBy: currentUserEmail });
+  // For quarterly cards, payrollAvailable is based on whether earnings were found across
+  // the quarter's months (quarterlyEmployee sums only months with actual uploads).
+  // For monthly cards, use the prop passed from the parent.
+  const activePayrollAvailable = cardPeriodType === "quarterly"
+    ? ((quarterlyEmployee.grossEarnings ?? 0) > 0)
+    : (payrollAvailable ?? false);
+
+  const liveScorecard = buildScorecard({ employee: activeEmployee, month: activeMonth, periodType: cardPeriodType, goals: currentGoals, submittedBy: currentUserEmail, payrollAvailable: activePayrollAvailable });
 
   const hasNoTarget = currentGoals.some((g) => periodActuals[metaKey("target", g)] == null || periodActuals[metaKey("min", g)] == null);
   const totalWeight = Number(currentGoals.reduce((sum, g) => sum + g.scWeight, 0).toFixed(1));
