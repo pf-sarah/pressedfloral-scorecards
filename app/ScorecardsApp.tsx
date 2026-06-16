@@ -419,8 +419,8 @@ export default function ScorecardsApp() {
   }, [authenticated, profile?.role, mode, viewAsProfile, isFixture, sb]);
 
   useEffect(() => {
-    if (!authenticated || !effectiveProfile?.id || mode !== "todos") return;
-    // In View As mode the admin already has adminUsers; derive subordinates from there.
+    if (!authenticated || !effectiveProfile?.id) return;
+    // In View As mode derive subordinates from adminUsers (already loaded for admins).
     if (viewAsProfile && adminUsers.length > 0) {
       setSubordinateProfiles(
         adminUsers
@@ -437,7 +437,7 @@ export default function ScorecardsApp() {
       );
       return;
     }
-    // Normal mode: call the API with the real session token.
+    // Normal mode: fetch on login so badge count is accurate from the start.
     if (!sb) return;
     sb.auth.getSession().then(({ data: { session } }) => {
       const token = session?.access_token;
@@ -459,7 +459,7 @@ export default function ScorecardsApp() {
         })
         .catch(() => {});
     });
-  }, [authenticated, effectiveProfile?.id, viewAsProfile, adminUsers, mode, sb]);
+  }, [authenticated, effectiveProfile?.id, viewAsProfile, adminUsers, sb]);
 
   useEffect(() => {
     if (!toast) return;
@@ -932,8 +932,15 @@ export default function ScorecardsApp() {
 
   const todoBadgeCount = useMemo(() => {
     const ripplingPending = roleAtLeast(effectiveProfile, "admin") && !appData.rippling[workMonth]?.length ? 1 : 0;
-    return ripplingPending + missingActuals.length + missingCurrentTargets.length + missingNextTargets.length;
-  }, [effectiveProfile, appData.rippling, workMonth, missingActuals, missingCurrentTargets, missingNextTargets]);
+    // Exclude goals that fall within a subordinate manager's scope — those belong
+    // to the "My managers" view, not the current user's own task list.
+    const isSubordinateGoal = (g: Goal) =>
+      subordinateProfiles.length > 0 && subordinateProfiles.some((sp) => scopedForProfile([g], sp).length > 0);
+    const ownActuals = missingActuals.filter((g) => !isSubordinateGoal(g));
+    const ownCurrentTargets = missingCurrentTargets.filter((g) => !isSubordinateGoal(g));
+    const ownNextTargets = missingNextTargets.filter((g) => !isSubordinateGoal(g));
+    return ripplingPending + ownActuals.length + ownCurrentTargets.length + ownNextTargets.length;
+  }, [effectiveProfile, appData.rippling, workMonth, missingActuals, missingCurrentTargets, missingNextTargets, subordinateProfiles]);
 
   // Aggregated data backing the Dashboard (home) screen. Everything here is derived
   // from existing app state — no new data sources.
