@@ -3099,7 +3099,11 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
   const [tierVal, setTierVal] = useState<string>(isNew ? "" : goal.goalTier);
   const [locVal, setLocVal] = useState<string>(isNew ? "__unset__" : (goal.location ?? ""));
   const [deptVal, setDeptVal] = useState<string>(isNew ? "__unset__" : (goal.department ?? ""));
+  // Individual goals can target either a position (role) or one specific employee
+  const initAssignType = !isNew && goal.employeeName ? "employee" : "position";
+  const [indivAssignType, setIndivAssignType] = useState<"position" | "employee">(initAssignType);
   const [roleVal, setRoleVal] = useState<string>(isNew ? "__unset__" : (goal.role ?? "__unset__"));
+  const [empVal, setEmpVal] = useState<string>(isNew ? "__unset__" : (goal.employeeName ?? "__unset__"));
   const [lowerVal, setLowerVal] = useState<string>(isNew ? "" : String(goal.lowerBetter));
   const [cappedVal, setCappedVal] = useState<string>(isNew ? "" : goal.capped);
   const [periodVal, setPeriodVal] = useState<string>(isNew ? "" : (goal.periodType || "monthly"));
@@ -3124,7 +3128,8 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
   if (!tierVal) missing.push("Type");
   if (!isDepartment && locVal === "__unset__") missing.push("Location");
   if (deptVal === "__unset__") missing.push("Department");
-  if (isIndividual && roleVal === "__unset__") missing.push("Position");
+  if (isIndividual && indivAssignType === "position" && roleVal === "__unset__") missing.push("Position");
+  if (isIndividual && indivAssignType === "employee" && empVal === "__unset__") missing.push("Employee");
   if (!lowerVal) missing.push("Lower is Better");
   if (!cappedVal) missing.push("Capped");
   if (!periodVal) missing.push("Period Type");
@@ -3138,8 +3143,8 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
       goalTier: tierVal as GoalTier,
       location: locVal === "" || locVal === GOAL_ALL ? undefined : locVal,
       department: deptVal === "" ? undefined : deptVal,
-      employeeName: undefined,
-      role: isIndividual && roleVal !== "__unset__" ? roleVal : undefined,
+      employeeName: isIndividual && indivAssignType === "employee" && empVal !== "__unset__" ? empVal : undefined,
+      role: isIndividual && indivAssignType === "position" && roleVal !== "__unset__" ? roleVal : undefined,
       lowerBetter: lowerVal === "true",
       capped: cappedVal as "yes" | "no",
       periodType: periodVal as "monthly" | "quarterly",
@@ -3175,7 +3180,7 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
           </DrawerField>
 
           <DrawerField label="Type" required>
-            <Select value={tierVal || undefined} onValueChange={(v) => { setTierVal(v); setRoleVal("__unset__"); }}>
+            <Select value={tierVal || undefined} onValueChange={(v) => { setTierVal(v); setRoleVal("__unset__"); setEmpVal("__unset__"); }}>
               <SelectTrigger className="w-full"><SelectValue placeholder="Select type…" /></SelectTrigger>
               <SelectContent>
                 {isAdmin && <SelectItem value="company">Company</SelectItem>}
@@ -3196,7 +3201,7 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
           </DrawerField>
 
           <DrawerField label="Department" required>
-            <Select value={deptVal === "__unset__" ? undefined : (deptVal === "" ? GOAL_ALL : deptVal)} onValueChange={(v) => { setDeptVal(v === GOAL_ALL ? "" : v); setRoleVal("__unset__"); }}>
+            <Select value={deptVal === "__unset__" ? undefined : (deptVal === "" ? GOAL_ALL : deptVal)} onValueChange={(v) => { setDeptVal(v === GOAL_ALL ? "" : v); setRoleVal("__unset__"); setEmpVal("__unset__"); }}>
               <SelectTrigger className="w-full"><SelectValue placeholder="Select department…" /></SelectTrigger>
               <SelectContent>
                 {isAdmin && !isIndividual && <SelectItem value={GOAL_ALL}>All departments</SelectItem>}
@@ -3205,7 +3210,28 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
             </Select>
           </DrawerField>
 
-          {isIndividual && (
+          {isIndividual ? (
+            <DrawerField label="Assign to">
+              <div className="flex rounded-md border border-input overflow-hidden text-sm">
+                <button
+                  type="button"
+                  className={`flex-1 px-3 py-1.5 text-center transition-colors ${indivAssignType === "position" ? "bg-primary text-primary-foreground font-medium" : "bg-background text-muted-foreground hover:bg-accent"}`}
+                  onClick={() => { setIndivAssignType("position"); setEmpVal("__unset__"); }}
+                >
+                  Position
+                </button>
+                <button
+                  type="button"
+                  className={`flex-1 px-3 py-1.5 text-center transition-colors ${indivAssignType === "employee" ? "bg-primary text-primary-foreground font-medium" : "bg-background text-muted-foreground hover:bg-accent"}`}
+                  onClick={() => { setIndivAssignType("employee"); setRoleVal("__unset__"); }}
+                >
+                  Specific employee
+                </button>
+              </div>
+            </DrawerField>
+          ) : null}
+
+          {isIndividual && indivAssignType === "position" ? (
             <DrawerField label="Position" required>
               <Select value={roleVal === "__unset__" ? undefined : roleVal} onValueChange={(v) => setRoleVal(v)}>
                 <SelectTrigger className="w-full"><SelectValue placeholder="Select position…" /></SelectTrigger>
@@ -3216,7 +3242,20 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
                 </SelectContent>
               </Select>
             </DrawerField>
-          )}
+          ) : null}
+
+          {isIndividual && indivAssignType === "employee" ? (
+            <DrawerField label="Employee" required>
+              <Select value={empVal === "__unset__" ? undefined : empVal} onValueChange={(v) => setEmpVal(v)}>
+                <SelectTrigger className="w-full"><SelectValue placeholder="Select employee…" /></SelectTrigger>
+                <SelectContent>
+                  {filteredEmployees.map((e) => (
+                    <SelectItem key={e.name} value={e.name}>{e.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </DrawerField>
+          ) : null}
 
           <DrawerField label="Period" required>
             <Select value={periodVal || undefined} onValueChange={(v) => setPeriodVal(v)}>
