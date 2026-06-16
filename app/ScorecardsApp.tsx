@@ -1455,6 +1455,11 @@ export default function ScorecardsApp() {
                 onApproveScorecard={approveScorecard}
                 onReturnScorecard={returnScorecard}
                 onScorecardSettingsChange={saveEmployeeScorecardSettings}
+                onSaveGoal={saveGoal}
+                onSaveTargetPair={(goal, period, target, min) => saveMonthTargetPair(goal, period, target, min)}
+                isAdmin={effectiveProfile?.role === "admin"}
+                allowedDepartments={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.departments || [])}
+                allowedLocations={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.locations || [])}
                 currentUserEmail={currentUserEmail}
                 currentUserProfileId={effectiveProfile?.id}
               />
@@ -3361,6 +3366,11 @@ function ScorecardsScreen(props: {
   onApproveScorecard: (scorecardId: string) => void;
   onReturnScorecard: (scorecardId: string, note: string) => void;
   onScorecardSettingsChange: (employeeName: string, periodType: "monthly" | "quarterly", patch: { excludedGoalIds: string[]; addedGoalIds: string[]; weightOverrides: Record<string, number> }) => void;
+  onSaveGoal: (goal: Goal) => Promise<Goal | null>;
+  onSaveTargetPair: (goal: Goal, period: string, target: string, min: string) => void;
+  isAdmin?: boolean;
+  allowedDepartments?: string[];
+  allowedLocations?: string[];
   currentUserEmail: string;
   currentUserProfileId?: string;
 }) {
@@ -3611,6 +3621,12 @@ function ScorecardsScreen(props: {
                   onDeleteGoal={props.onDeleteGoal}
                   onApprove={props.onApproveScorecard}
                   onReturn={props.onReturnScorecard}
+                  onSaveGoal={props.onSaveGoal}
+                  onSaveTargetPair={props.onSaveTargetPair}
+                  teamEmployees={teamEmployees}
+                  isAdmin={props.isAdmin}
+                  allowedDepartments={props.allowedDepartments}
+                  allowedLocations={props.allowedLocations}
                   currentUserEmail={props.currentUserEmail}
                   currentUserProfileId={props.currentUserProfileId}
                 />
@@ -3686,6 +3702,12 @@ function ScorecardsScreen(props: {
                         onDeleteGoal={props.onDeleteGoal}
                         onApprove={props.onApproveScorecard}
                         onReturn={props.onReturnScorecard}
+                        onSaveGoal={props.onSaveGoal}
+                        onSaveTargetPair={props.onSaveTargetPair}
+                        teamEmployees={mTeam}
+                        isAdmin={props.isAdmin}
+                        allowedDepartments={props.allowedDepartments}
+                        allowedLocations={props.allowedLocations}
                         currentUserEmail={props.currentUserEmail}
                         currentUserProfileId={props.currentUserProfileId}
                       />
@@ -3744,7 +3766,7 @@ function GoalRowMenu({ goalName, currentWeight, onApplyWeight, onRemove }: {
 }
 
 function LiveScorecardCard({
-  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, payrollAvailable, empSettings, onSettingsChange, onSubmit, onDeleteGoal, onApprove, onReturn, currentUserEmail, currentUserProfileId
+  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, payrollAvailable, empSettings, onSettingsChange, onSubmit, onDeleteGoal, onApprove, onReturn, onSaveGoal, onSaveTargetPair, teamEmployees, isAdmin, allowedDepartments, allowedLocations, currentUserEmail, currentUserProfileId
 }: {
   employee: Employee;
   isoMonth: string;
@@ -3762,6 +3784,12 @@ function LiveScorecardCard({
   onDeleteGoal: (value: { scorecardId: string; goalName: string }) => void;
   onApprove: (scorecardId: string) => void;
   onReturn: (scorecardId: string, note: string) => void;
+  onSaveGoal: (goal: Goal) => Promise<Goal | null>;
+  onSaveTargetPair: (goal: Goal, period: string, target: string, min: string) => void;
+  teamEmployees: Employee[];
+  isAdmin?: boolean;
+  allowedDepartments?: string[];
+  allowedLocations?: string[];
   currentUserEmail: string;
   currentUserProfileId?: string;
 }) {
@@ -3788,6 +3816,7 @@ function LiveScorecardCard({
 
   // --- state ---
   const [open, setOpen] = useState(false);
+  const [creatingGoal, setCreatingGoal] = useState<Goal | null>(null);
   const [cardPeriodType, setCardPeriodType] = useState<"monthly" | "quarterly">(globalPeriodType);
   const initSettings = settingsForPeriod(globalPeriodType);
   const [goalIds, setGoalIds] = useState<string[]>(() => computeGoalIds(globalPeriodType, initSettings));
@@ -4062,9 +4091,23 @@ function LiveScorecardCard({
                 <Button variant="outline" size="sm" className="text-[12px]">+ Add goal</Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent align="start" side="top" className="max-h-[240px] w-56 overflow-y-auto">
-                {availableToAdd.length === 0 ? (
-                  <div className="px-2 py-2 text-[11px] text-muted-foreground">No more goals available</div>
-                ) : availableToAdd.map((g) => (
+                <DropdownMenuItem className="text-[12.5px] font-medium" onSelect={() => {
+                  setCreatingGoal({
+                    ...emptyGoal,
+                    id: `goal-${Date.now()}`,
+                    goalTier: "individual",
+                    location: employee.location,
+                    department: employee.department,
+                    role: employee.role || undefined,
+                    periodType: cardPeriodType,
+                    startMonth: isoMonth,
+                    name: "",
+                  });
+                }}>
+                  Create new goal…
+                </DropdownMenuItem>
+                {availableToAdd.length > 0 && <DropdownMenuSeparator />}
+                {availableToAdd.map((g) => (
                   <DropdownMenuItem key={g.id} onSelect={() => {
                     const next = [...goalIds, g.id];
                     setGoalIds(next);
@@ -4075,6 +4118,33 @@ function LiveScorecardCard({
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
+
+            <Sheet open={!!creatingGoal} onOpenChange={(open) => { if (!open) setCreatingGoal(null); }}>
+              <SheetContent side="right" className="flex w-full flex-col gap-0 p-0 sm:max-w-md">
+                {creatingGoal ? (
+                  <GoalEditor
+                    key={creatingGoal.id}
+                    goal={creatingGoal}
+                    actuals={periodActuals}
+                    isAdmin={isAdmin}
+                    allowedDepartments={allowedDepartments}
+                    allowedLocations={allowedLocations}
+                    teamEmployees={teamEmployees}
+                    onSave={async (goal) => {
+                      const saved = await onSaveGoal(goal);
+                      if (saved) {
+                        const next = [...goalIds, saved.id];
+                        setGoalIds(next);
+                        scheduleSettingsSave(next, weightOverrides, cardPeriodType);
+                      }
+                      return saved ?? null;
+                    }}
+                    onSaveTargetPair={(goal, target, min) => onSaveTargetPair(goal, activeMonth, target, min)}
+                    onCancel={() => setCreatingGoal(null)}
+                  />
+                ) : null}
+              </SheetContent>
+            </Sheet>
             {(isCurrentMonth || isFutureMonth) && (
               <span className="text-[11.5px] italic text-muted-foreground">Actuals can only be entered for past months</span>
             )}
