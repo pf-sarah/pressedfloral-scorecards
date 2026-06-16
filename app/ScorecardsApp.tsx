@@ -881,7 +881,7 @@ export default function ScorecardsApp() {
     const tasks: { label: string; detail: string; action: Screen }[] = [];
     if (roleAtLeast(effectiveProfile, "admin") && !appData.rippling[workMonth]?.length) tasks.push({ label: "Upload Rippling data", detail: `${formatMonthLabel(workMonth)} data not uploaded yet.`, action: "rippling" });
     if (missingActuals.length) tasks.push({ label: "Enter shared actuals", detail: `${missingActuals.length} company or department goals need actuals.`, action: "setup" });
-    if (missingCurrentTargets.length) tasks.push({ label: "Set current month targets", detail: `${missingCurrentTargets.length} goals need targets for this month.`, action: "todos" });
+    if (missingCurrentTargets.length) tasks.push({ label: "Set current month goals", detail: `${missingCurrentTargets.length} goals are missing a goal value for this month.`, action: "todos" });
     return tasks;
   }, [appData.rippling, workMonth, missingActuals, missingCurrentTargets, effectiveProfile]);
 
@@ -921,7 +921,7 @@ export default function ScorecardsApp() {
     if (missingActuals.length)
       actions.push({ key: "actuals", label: "Enter shared actuals", detail: `${missingActuals.length} company/department goal${missingActuals.length > 1 ? "s" : ""} awaiting actuals`, action: "setup", count: missingActuals.length });
     if (missingCurrentTargets.length)
-      actions.push({ key: "targets", label: "Set this month’s targets", detail: `${missingCurrentTargets.length} goal${missingCurrentTargets.length > 1 ? "s" : ""} still need a target`, action: "todos", count: missingCurrentTargets.length });
+      actions.push({ key: "targets", label: "Set this month’s goals", detail: `${missingCurrentTargets.length} goal${missingCurrentTargets.length > 1 ? "s" : ""} still need a goal value`, action: "todos", count: missingCurrentTargets.length });
     if (isManagerRole && expected > 0 && missingScorecardsScoped.length)
       actions.push({ key: "scorecards", label: "Submit team scorecards", detail: `${missingScorecardsScoped.length} of ${expected} not submitted for ${workMonthLabel}`, action: "scorecard", count: missingScorecardsScoped.length });
 
@@ -1149,7 +1149,7 @@ export default function ScorecardsApp() {
         actual_value: value === "" ? null : Number(value)
       }, { onConflict: "period,goal_tier,location,department,goal_name" });
       if (result.error) {
-        showSupabaseError(result.error, "Target could not be saved.");
+        showSupabaseError(result.error, "Goal could not be saved.");
         return;
       }
     }
@@ -1171,7 +1171,7 @@ export default function ScorecardsApp() {
         { period, goal_tier: "__meta__", location: null, department: null, goal_name: minKey, actual_value: min === "" ? null : Number(min) }
       ], { onConflict: "period,goal_tier,location,department,goal_name" });
       if (result.error) {
-        showSupabaseError(result.error, "Target and minimum could not be saved.");
+        showSupabaseError(result.error, "Goal and minimum could not be saved.");
         return;
       }
     }
@@ -1861,7 +1861,7 @@ function PersonalScorecardPanel({
             <TableRow className="hover:bg-transparent">
               <TableHead>Type</TableHead>
               <TableHead>Goal</TableHead>
-              <TableHead className="text-right">Target</TableHead>
+              <TableHead className="text-right">Goal</TableHead>
               <TableHead className="text-right">Min</TableHead>
               <TableHead className="text-right">Actual</TableHead>
               <TableHead className="text-right">Weight</TableHead>
@@ -2659,8 +2659,8 @@ function GoalsScreen(props: {
                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setActualEditId(null); }}
               />
             ) : (
-              <span title={!hasTargets ? "Set a target and minimum first" : undefined} className={canActual && !hasTargets ? "text-[11px] text-[var(--text-faint)]" : undefined}>
-                {actualVal != null ? formatNumber(actualVal as number) : (canActual && !hasTargets ? "no target" : dash)}
+              <span title={!hasTargets ? "Set a goal and minimum first" : undefined} className={canActual && !hasTargets ? "text-[11px] text-[var(--text-faint)]" : undefined}>
+                {actualVal != null ? formatNumber(actualVal as number) : (canActual && !hasTargets ? "no goal" : dash)}
               </span>
             )}
           </TableCell>
@@ -2681,7 +2681,7 @@ function GoalsScreen(props: {
                   {canActual && hasTargets ? (
                     <DropdownMenuItem onClick={() => setActualEditId(goal.id)}>Enter actual</DropdownMenuItem>
                   ) : canActual ? (
-                    <DropdownMenuItem disabled>Set target first</DropdownMenuItem>
+                    <DropdownMenuItem disabled>Set goal first</DropdownMenuItem>
                   ) : null}
                   {goal.goalTier === "company" && props.isAdmin && props.onAssignGoal && (
                     <DropdownMenuItem onClick={() => { setAssigningGoal(goal); setAssignEmployeeNames([]); }}>
@@ -2858,7 +2858,7 @@ function GoalsScreen(props: {
               <TableHead>Goal</TableHead>
               <TableHead>Lower</TableHead>
               <TableHead>Cap</TableHead>
-              <TableHead className="text-right">Target</TableHead>
+              <TableHead className="text-right">Goal</TableHead>
               <TableHead className="text-right">Min</TableHead>
               <TableHead className="text-right">Actual</TableHead>
               <TableHead>Status</TableHead>
@@ -3175,7 +3175,7 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
 
       <div className="flex-1 overflow-y-auto px-5 py-4">
         <div className="grid gap-4">
-          <DrawerField label="Goal name" required htmlFor="goal-name">
+          <DrawerField label="Goal Name" required htmlFor="goal-name">
             <Input id="goal-name" value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="e.g. Monthly Revenue" />
           </DrawerField>
 
@@ -3268,7 +3268,7 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
           </DrawerField>
 
           <div className="grid grid-cols-2 gap-3">
-            <DrawerField label="Target" htmlFor="goal-target">
+            <DrawerField label="Goal" htmlFor="goal-target">
               <Input id="goal-target" type="number" value={target} onChange={(e) => setTarget(e.target.value)} />
             </DrawerField>
             <DrawerField label="Minimum" htmlFor="goal-min">
@@ -3969,7 +3969,7 @@ function LiveScorecardCard({
           {hasNoTarget && (
             <div className="flex items-start gap-2 border-t border-[#f0e0a0] bg-[#fffbf0] px-4 py-2 text-[11.5px] text-[#7a5c00]">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-              <span>Some goals are missing targets or minimums for {activeMonth}. Set them in Goals &amp; Actuals before submitting.</span>
+              <span>Some goals are missing a goal value or minimum for {activeMonth}. Set them in Goals &amp; Actuals before submitting.</span>
             </div>
           )}
 
@@ -3979,7 +3979,7 @@ function LiveScorecardCard({
                 <TableRow className="hover:bg-transparent">
                   <TableHead>Type</TableHead>
                   <TableHead>Goal</TableHead>
-                  <TableHead className="text-center">Target</TableHead>
+                  <TableHead className="text-center">Goal</TableHead>
                   <TableHead className="text-center">Min</TableHead>
                   <TableHead className="text-center">Actual</TableHead>
                   <TableHead className="text-center">Weight</TableHead>
@@ -4089,7 +4089,7 @@ function LiveScorecardCard({
               size="sm"
               className="ml-auto"
               disabled={isCurrentMonth || hasNoTarget || currentGoals.length === 0 || !weightsValid}
-              title={isCurrentMonth ? "Scorecards can only be submitted for past months" : hasNoTarget ? "Set targets and minimums first" : hasUnsetWeights ? "Assign goal weights in Goals & Actuals first" : !weightsValid ? "Weights must add up to 100%" : undefined}
+              title={isCurrentMonth ? "Scorecards can only be submitted for past months" : hasNoTarget ? "Set goal values and minimums first" : hasUnsetWeights ? "Assign goal weights in Goals & Actuals first" : !weightsValid ? "Weights must add up to 100%" : undefined}
               onClick={() => { onSubmit(liveScorecard); setLastSubmitted(liveScorecard); }}
             >
               Submit scorecard
@@ -4240,7 +4240,7 @@ function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, currentUs
               <TableRow className="hover:bg-transparent">
                 <TableHead>Type</TableHead>
                 <TableHead>Goal</TableHead>
-                <TableHead className="text-center">Target</TableHead>
+                <TableHead className="text-center">Goal</TableHead>
                 <TableHead className="text-center">Min</TableHead>
                 <TableHead className="text-center">Weight</TableHead>
                 <TableHead className="text-center">Actual</TableHead>
@@ -5157,7 +5157,7 @@ function TodosScreen({
       {/* Current month targets — shown only when any are missing (always overdue) */}
       {currentTargetTotal > 0 && !allCurrentTargetsDone && (
         <TodoGroupCard
-          title={`${currentMonthLabel} targets`}
+          title={`${currentMonthLabel} goals`}
           meta={<>{currentTargetDoneCount}/{currentTargetTotal} set · Due {currentTargetDue.label} <DaysBadge diffDays={currentTargetDue.diffDays} /></>}
           done={currentTargetDoneCount}
           total={currentTargetTotal}
@@ -5175,7 +5175,7 @@ function TodosScreen({
               return (
                 <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} department={goal.department} saved={saved}>
                   <div className="ml-auto flex items-end gap-2">
-                    <TodoNumberField label="Target" value={draft.target} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
+                    <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
                     <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
                     <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveCurrentTargetPair(goal, draft.target, draft.min)}>Set</Button>
                   </div>
@@ -5186,7 +5186,7 @@ function TodosScreen({
       )}
 
       <TodoGroupCard
-        title={`${nextMonthLabel} targets`}
+        title={`${nextMonthLabel} goals`}
         meta={<>{targetDoneCount}/{targetTotal} set · Due {targetDue.label} <DaysBadge diffDays={targetDue.diffDays} /></>}
         done={targetDoneCount}
         total={targetTotal}
@@ -5207,7 +5207,7 @@ function TodosScreen({
               return (
                 <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} department={goal.department} saved={saved}>
                   <div className="ml-auto flex items-end gap-2">
-                    <TodoNumberField label="Target" value={draft.target} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
+                    <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
                     <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
                     <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveTargetPair(goal, draft.target, draft.min)}>Set</Button>
                   </div>
@@ -5237,7 +5237,7 @@ const guideStepsByRole: Record<"user" | "manager" | "admin", GuideStep[]> = {
     {
       title: "Explore What If Scenarios",
       bg: "#f0f7fa", border: "#b8d4e0", numBg: "#185FA5",
-      body: "The What If Scorecard lets you model how different actuals would affect your bonus — without saving anything. Great for understanding how close you are to hitting your targets.",
+      body: "The What If Scorecard lets you model how different actuals would affect your bonus — without saving anything. Great for understanding how close you are to hitting your goals.",
       bullets: [
         "Click What If Scorecard in the sidebar",
         "Your name and goals are pre-loaded",
@@ -5286,7 +5286,7 @@ const guideStepsByRole: Record<"user" | "manager" | "admin", GuideStep[]> = {
     {
       title: "Explore What If Scenarios",
       bg: "#f0f7fa", border: "#b8d4e0", numBg: "#185FA5",
-      body: "Model how different actuals, targets, or weights affect bonus calculations for any employee on your team — without saving anything.",
+      body: "Model how different actuals, goals, or weights affect bonus calculations for any employee on your team — without saving anything.",
       bullets: [
         "Click What If Scorecard in the sidebar",
         "Select an employee from your team",
@@ -5588,7 +5588,7 @@ function WhatIfScreen(props: {
   return (
     <div className="screen active">
       <p className="mb-1 text-[13px] text-muted-foreground">
-        Explore how changes to targets, actuals, and weights affect bonus calculations. Nothing here is saved.
+        Explore how changes to goals, actuals, and weights affect bonus calculations. Nothing here is saved.
       </p>
 
       <section>
@@ -5619,7 +5619,7 @@ function WhatIfScreen(props: {
               <button
                 onClick={loadCurrentScorecard}
                 style={{ padding: "6px 14px", fontSize: "12px", fontFamily: "var(--sans)", fontWeight: 600, border: "1.5px solid var(--brick)", borderRadius: "var(--radius-sm)", background: "var(--brick-light)", color: "var(--brick)", cursor: "pointer", whiteSpace: "nowrap" }}
-                title={`Load goals, targets, actuals, and earnings from ${formatMonthLabel(props.workMonth)}`}
+                title={`Load goals, actuals, and earnings from ${formatMonthLabel(props.workMonth)}`}
               >
                 ↓ Use current scorecard
               </button>
@@ -5641,7 +5641,7 @@ function WhatIfScreen(props: {
                 <TableRow className="hover:bg-transparent">
                   <TableHead>Type</TableHead>
                   <TableHead>Goal</TableHead>
-                  <TableHead className="text-center">Target</TableHead>
+                  <TableHead className="text-center">Goal</TableHead>
                   <TableHead className="text-center">Min</TableHead>
                   <TableHead className="text-center">Actual</TableHead>
                   <TableHead className="text-center">Lower</TableHead>
