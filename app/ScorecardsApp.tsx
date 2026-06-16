@@ -3514,7 +3514,8 @@ function ScorecardsScreen(props: {
     (filterEmployees.length === 0 || filterEmployees.includes(e.name)) &&
     (filterDepts.length === 0 || filterDepts.includes(e.department)) &&
     (filterLocations.length === 0 || filterLocations.includes(e.location)) &&
-    (globalPeriodType !== "quarterly" || goalsForEmployee(e).some((g) => g.periodType === "quarterly"))
+    (globalPeriodType !== "quarterly" || goalsForEmployee(e).some((g) => g.periodType === "quarterly")) &&
+    (globalPeriodType !== "monthly" || goalsForEmployee(e).some((g) => g.periodType !== "quarterly"))
   );
   const noRippling = singleMonthMode && latestEmployees.length === 0;
 
