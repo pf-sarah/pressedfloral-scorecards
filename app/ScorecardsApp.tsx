@@ -3471,12 +3471,11 @@ function ScorecardsScreen(props: {
   const relevantMonths = (() => {
     const now = new Date();
     const cur = now.getFullYear() * 12 + now.getMonth(); // months since year 0
-    const prev = cur - 1; // last completed month
     return props.months.filter((m) => {
       if (!/^\d{4}-\d{2}$/.test(m)) return false;
       const [y, mo] = m.split("-").map(Number);
       const val = y * 12 + (mo - 1);
-      return val >= cur - 12 && val <= prev;
+      return val >= cur - 12 && val <= cur + 3;
     });
   })();
 
@@ -3820,8 +3819,9 @@ function LiveScorecardCard({
   }, [globalPeriodType]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
-  // Actuals can only be entered for past months, not the current month
+  // Actuals can only be entered for past months, not current or future months
   const isCurrentMonth = isoMonth === currentMonthValue();
+  const isFutureMonth = isoMonth > currentMonthValue();
   const [lastSubmitted, setLastSubmitted] = useState<Scorecard | null>(null);
 
   const quarterKey = quarterKeyForMonth(isoMonth);
@@ -4002,7 +4002,7 @@ function LiveScorecardCard({
                       <TableCell className="text-center tabular-nums">{noTarget ? <span className="text-[10px] text-[var(--text-faint)]">not set</span> : formatNumber(goal.scTarget)}</TableCell>
                       <TableCell className="text-center tabular-nums">{noTarget ? <span className="text-[10px] text-[var(--text-faint)]">not set</span> : formatNumber(goal.scMin)}</TableCell>
                       <TableCell className="text-center tabular-nums" onClick={(e) => e.stopPropagation()}>
-                        {isInd && !isCurrentMonth ? (
+                        {isInd && !isCurrentMonth && !isFutureMonth ? (
                           <Input
                             aria-label={`Actual for ${goal.name}`}
                             type="number"
@@ -4075,7 +4075,7 @@ function LiveScorecardCard({
                 ))}
               </DropdownMenuContent>
             </DropdownMenu>
-            {isCurrentMonth && (
+            {(isCurrentMonth || isFutureMonth) && (
               <span className="text-[11.5px] italic text-muted-foreground">Actuals can only be entered for past months</span>
             )}
             {currentGoals.length > 0 && (
@@ -4088,8 +4088,8 @@ function LiveScorecardCard({
             <Button
               size="sm"
               className="ml-auto"
-              disabled={isCurrentMonth || hasNoTarget || currentGoals.length === 0 || !weightsValid}
-              title={isCurrentMonth ? "Scorecards can only be submitted for past months" : hasNoTarget ? "Set goal values and minimums first" : hasUnsetWeights ? "Assign goal weights in Goals & Actuals first" : !weightsValid ? "Weights must add up to 100%" : undefined}
+              disabled={isCurrentMonth || isFutureMonth || hasNoTarget || currentGoals.length === 0 || !weightsValid}
+              title={isCurrentMonth || isFutureMonth ? "Scorecards can only be submitted for past months" : hasNoTarget ? "Set goal values and minimums first" : hasUnsetWeights ? "Assign goal weights in Goals & Actuals first" : !weightsValid ? "Weights must add up to 100%" : undefined}
               onClick={() => { onSubmit(liveScorecard); setLastSubmitted(liveScorecard); }}
             >
               Submit scorecard
