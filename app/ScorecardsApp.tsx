@@ -5531,146 +5531,197 @@ type GuideStep = { title: string; bg: string; border: string; numBg: string; bod
 const guideStepsByRole: Record<"user" | "manager" | "admin", GuideStep[]> = {
   user: [
     {
-      title: "View Your Scorecard",
+      title: "My Scorecard",
       bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
-      body: "My Scorecard shows all the scorecards that have been submitted for you. Each card includes your goals, actuals, achievement percentages, and final bonus amount.",
+      body: "View all scorecards that have been submitted for you. Each card shows your goals, actuals, achievement percentages, and final bonus amount for that month.",
       bullets: [
         "Click My Scorecard in the sidebar",
-        "Expand any card to see goal-by-goal detail",
-        "Scorecards are submitted by your manager — reach out to them if one is missing"
+        "Expand any card to see goal-by-goal detail — achievement %, actual vs. goal, and bonus contribution",
+        "Scorecards are submitted by your manager — reach out to them if a month is missing",
+        "A goal that doesn't meet its minimum threshold contributes $0 to your bonus for that month"
       ]
     },
     {
-      title: "Explore What If Scenarios",
+      title: "What If Scorecard",
       bg: "#f0f7fa", border: "#b8d4e0", numBg: "#185FA5",
-      body: "The What If Scorecard lets you model how different actuals would affect your bonus — without saving anything. Great for understanding how close you are to hitting your goals.",
+      body: "Model how different actuals would change your bonus — without saving anything. Use this to understand how close you are to a target payout or what it would take to hit a goal.",
       bullets: [
         "Click What If Scorecard in the sidebar",
-        "Your name and goals are pre-loaded",
-        "Enter your base earnings and adjust actuals to see live bonus estimates",
-        "Nothing here is saved — experiment freely"
+        "Your name and goals are pre-loaded from the current month",
+        "Enter your base earnings and adjust any actuals to see live bonus estimates",
+        "Nothing you enter here is saved — experiment freely"
       ]
     }
   ],
   manager: [
     {
-      title: "Enter Department Actuals",
+      title: "To-do List",
       bg: "var(--brick-light)", border: "var(--taupe)", numBg: "var(--brick)",
-      body: "At the end of each month, enter the actual results for department goals. These are shared across everyone in the department — enter them once and they'll pre-fill on all scorecards.",
+      body: "Your prioritized task list for the month. Shows everything that still needs to be completed — entering actuals, setting goal values for upcoming months, and uploading payroll data. Tasks are grouped by due date.",
       bullets: [
-        "Go to Goals & Actuals in the sidebar",
-        "Select the month from the filter at the top",
-        "Use the ⋮ menu on each department goal row and choose Enter actual",
-        "Individual goal actuals are entered directly on each employee's scorecard"
+        "Click To-do List in the sidebar",
+        "Monthly tasks (last month's actuals) are due by the 17th of each month",
+        "Current and next month goal values appear here as soon as they need to be set",
+        "Use the month filter pills to focus on a specific period",
+        "If you supervise other managers, switch to My managers to see and complete their pending tasks"
       ]
     },
     {
-      title: "Build & Submit Team Scorecards",
-      bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
-      body: "For each employee, open their scorecard card, review goals and weights, enter individual actuals, and submit. Department actuals you already entered will pre-fill automatically.",
-      bullets: [
-        "Go to Team Scorecards in the sidebar",
-        "Select the scorecard month at the top",
-        "Expand an employee's card to see their goals",
-        "Enter actuals for individual goals — department actuals are pre-filled",
-        "Use the ⋮ menu on any goal row to adjust its weight",
-        "All weights must total 100% before you can submit",
-        "Click Submit Scorecard to save"
-      ]
-    },
-    {
-      title: "Review Historical Scorecards",
-      bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
-      body: "Search and review all submitted scorecards for your team. Filter by period, employee, department, or location.",
-      bullets: [
-        "Go to Historical Data in the sidebar",
-        "Select a period and optionally filter by name or department",
-        "Each card shows goal-level detail — achievement, actuals, and bonus contribution",
-        "Click ↓ Export filtered results CSV to download a spreadsheet"
-      ]
-    },
-    {
-      title: "Explore What If Scenarios",
+      title: "Goals & Actuals",
       bg: "#f0f7fa", border: "#b8d4e0", numBg: "#185FA5",
-      body: "Model how different actuals, goals, or weights affect bonus calculations for any employee on your team — without saving anything.",
+      body: "View the goal bank for your department and enter monthly actuals. Department actuals are shared — enter them once and they pre-fill on every scorecard for that department and month.",
+      bullets: [
+        "Click Goals & Actuals in the sidebar",
+        "Use the month selector at the top to navigate between months",
+        "Click the ⋮ menu on any goal row to enter the actual for that month",
+        "Individual goal actuals are entered directly on each employee's scorecard card, not here",
+        "Goals showing a — have no goal value set yet for that month — set them from the To-do List"
+      ]
+    },
+    {
+      title: "Team Scorecards",
+      bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
+      body: "Build and submit scorecards for every employee on your team. Department actuals you've already entered pre-fill automatically — you just need to add individual goal actuals and confirm weights.",
+      bullets: [
+        "Click Team Scorecards in the sidebar",
+        "Select the scorecard month at the top — you can view current and up to 3 months ahead, but can only submit for past months",
+        "Expand an employee card to see their goals and current actuals",
+        "Enter actuals for individual goals directly on the card",
+        "Use the ⋮ menu on any goal row to adjust its weight for that scorecard",
+        "All weights must total exactly 100% before you can submit",
+        "Click Submit Scorecard — submitted scorecards go to a supervisor for review if one is configured",
+        "Use + Add goal from an employee's card to pull in an existing goal or create a new one for that month"
+      ]
+    },
+    {
+      title: "Historical Data",
+      bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
+      body: "Search and review all submitted scorecards for your team. Filter by period, employee name, department, or location. Useful for auditing past bonuses or looking up a specific employee's history.",
+      bullets: [
+        "Click Historical Data in the sidebar",
+        "Select a period and optionally filter by name, department, or location",
+        "Expand any card to see goal-level detail — achievement %, actuals, and bonus contribution",
+        "Click ↓ Export filtered results CSV to download the current view as a spreadsheet"
+      ]
+    },
+    {
+      title: "What If Scorecard",
+      bg: "#f0f7fa", border: "#b8d4e0", numBg: "#185FA5",
+      body: "Model how different actuals, goal values, or weights affect the bonus for any employee on your team — without changing any real data. Helpful for planning conversations or explaining bonus calculations.",
       bullets: [
         "Click What If Scorecard in the sidebar",
-        "Select an employee from your team",
-        "Adjust actuals, weights, and earnings to explore scenarios",
-        "Nothing here is saved — experiment freely"
+        "Select any employee from your team",
+        "Adjust actuals, weights, and earnings to explore different scenarios",
+        "Nothing here is saved — all changes are for modeling only"
+      ]
+    },
+    {
+      title: "My Scorecard",
+      bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
+      body: "If your account is linked to an employee record, you can view your own submitted scorecards here — the same view your employees see for themselves.",
+      bullets: [
+        "Click My Scorecard in the sidebar",
+        "Only visible if your profile is linked to an employee name — ask an admin to set this up if it's missing",
+        "Expand any card to see your goal-by-goal breakdown and bonus amount"
       ]
     }
   ],
   admin: [
     {
-      title: "Upload Rippling Data",
+      title: "To-do List",
       bg: "var(--brick-light)", border: "var(--taupe)", numBg: "var(--brick)",
-      body: "At the start of each month, upload the previous month's Rippling CSV. This pre-loads employee names, roles, departments, locations, pay rates, and hours so scorecards calculate correctly.",
+      body: "Your central task checklist for each month. Shows every pending item across the full workflow — Rippling upload, entering actuals, setting goal values, and more — with due dates and completion tracking.",
       bullets: [
-        "Go to Rippling Data in the sidebar",
-        "Export Active_Employees_with_Hourly_and_Annual_Base_Pay.csv from Rippling for the previous (completed) month",
-        "Drop the file onto the upload area and review the preview",
-        "Click Save to App — this becomes the active employee bank"
+        "Click To-do List in the sidebar",
+        "Monthly tasks (Rippling upload + last month's actuals) are due by the 17th",
+        "Current and next month goal values appear here as soon as they're due to be set",
+        "Use the month filter pills at the top to focus on a specific period",
+        "Switch to My managers to see and complete pending tasks on behalf of managers you supervise"
       ]
     },
     {
-      title: "Manage the Goal Bank",
+      title: "Goals & Actuals",
       bg: "#f0f7fa", border: "#b8d4e0", numBg: "#185FA5",
-      body: "The Goal Bank is your permanent library of goals. Goals are reused month to month and pulled into scorecards automatically. Set it up once and update as needed.",
+      body: "The goal bank is your permanent library of company, department, and individual goals. Goals are reused month to month and automatically applied to scorecards. Enter company and department actuals here once — they pre-fill everywhere.",
       bullets: [
-        "Go to Goals & Actuals in the sidebar",
-        "Click + Add Goal to Bank to create a new goal",
-        "Set the type: Department (dept-wide) or Individual (specific employee)",
-        "Set a Weight % so it pre-fills on scorecards",
-        "Goals can be deactivated without being deleted — history stays intact"
+        "Click Goals & Actuals in the sidebar",
+        "Click + Add Goal to Bank to create a new goal — set its tier (Company, Department, or Individual), weight, and thresholds",
+        "Individual goals can be assigned to a position (all employees with that title) or a specific named employee",
+        "Use the month selector to navigate — click ⋮ on any goal row to enter or edit the actual for that month",
+        "Goals can be deactivated without being deleted — all historical actuals and scorecard data remain intact",
+        "Goals showing a — have no goal value set for that month — set them from the To-do List or directly from a scorecard card"
       ]
     },
     {
-      title: "Enter Company & Department Actuals",
+      title: "Team Scorecards",
+      bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
+      body: "Build and submit scorecards for every employee across all departments. Company and department actuals you've entered pre-fill automatically. You can view current and future months for planning, but submissions are limited to past months.",
+      bullets: [
+        "Click Team Scorecards in the sidebar",
+        "Select the scorecard month at the top — view up to 3 months ahead, submit only past months",
+        "Expand any employee card to see their goals, weights, and actuals",
+        "Enter actuals for individual goals directly on the card — company and dept actuals are pre-filled",
+        "Use the ⋮ menu on any goal row to adjust its weight for that scorecard",
+        "All weights must total exactly 100% before submitting",
+        "Click Submit Scorecard — routes to the employee's supervisor for review if one is configured",
+        "Use + Add goal to pull in an existing goal from the bank or create a brand-new one for that month"
+      ]
+    },
+    {
+      title: "Historical Data",
+      bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
+      body: "Search, review, and export all submitted scorecards across the entire organization. Use this for auditing, payroll verification, or reviewing an employee's full bonus history.",
+      bullets: [
+        "Click Historical Data in the sidebar",
+        "Filter by period, employee name, department, or location",
+        "Expand any card to see goal-level detail — achievement %, actuals vs. goals, and bonus contribution",
+        "Use Approve / Return buttons on submitted scorecards to complete the review workflow",
+        "Click ↓ Export filtered results CSV to download the current view as a spreadsheet for payroll"
+      ]
+    },
+    {
+      title: "Reports",
       bg: "#f0f7fa", border: "#b8d4e0", numBg: "#185FA5",
-      body: "At month end, enter actual results for company and department goals. These are shared across all employees — enter them once and they'll be available on every scorecard.",
+      body: "View aggregated analytics across all scorecards and employees. See bonus totals by department, period, or goal — useful for budget planning and identifying trends.",
       bullets: [
-        "Go to Goals & Actuals in the sidebar",
-        "Select the month from the filter at the top",
-        "Use the ⋮ menu on each goal row and choose Enter actual",
-        "Individual goal actuals are entered directly on each employee's scorecard"
+        "Click Reports in the sidebar",
+        "Filter by period, department, or location to narrow the data",
+        "View total bonus payouts, average achievement, and goal-level breakdowns",
+        "Export report data to CSV for further analysis"
       ]
     },
     {
-      title: "Build & Submit Team Scorecards",
-      bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
-      body: "For each employee, open their scorecard card, review goals and weights, enter individual actuals, and submit. Company and department actuals you already entered will pre-fill automatically.",
-      bullets: [
-        "Go to Team Scorecards in the sidebar",
-        "Select the scorecard month at the top",
-        "Expand an employee's card to see their goals",
-        "Enter actuals for individual goals — company and dept actuals are pre-filled",
-        "Use the ⋮ menu on any goal row to adjust its weight",
-        "All weights must total 100% before you can submit",
-        "Click Submit Scorecard to save"
-      ]
-    },
-    {
-      title: "Review Historical Scorecards",
-      bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
-      body: "Search and review all submitted scorecards. Filter by period, employee, department, or location. Export to CSV for payroll or further analysis.",
-      bullets: [
-        "Go to Historical Data in the sidebar",
-        "Select a period and optionally filter by location or department",
-        "Each card shows goal-level detail — achievement, actuals, and bonus contribution",
-        "Click ↓ Export filtered results CSV to download a full spreadsheet"
-      ]
-    },
-    {
-      title: "Manage Users & Permissions",
+      title: "Users",
       bg: "var(--brick-light)", border: "var(--taupe)", numBg: "var(--brick)",
-      body: "Invite new users, configure their role and department scope, and manage existing accounts from the Users screen.",
+      body: "Manage all user accounts — invite new managers and employees, set their role and department scope, link them to employee records, and configure supervisor relationships.",
       bullets: [
-        "Go to Users in the sidebar",
-        "Use Invite User to send a signup link — set their role (Admin / Manager / User) and scope",
-        "Managers are scoped to specific departments and locations",
-        "Users should be linked to an employee record so they can see their own scorecard",
-        "Use 👁 View as to see exactly what any user sees in the app"
+        "Click Users in the sidebar",
+        "Click Invite User — enter their email, set their role (Admin / Manager / Employee), and choose their department and location scope",
+        "Link a user to an employee record so they can see their own scorecard under My Scorecard",
+        "Set a Supervisor for each manager to enable scorecard review routing and the My managers To-do filter",
+        "Use 👁 View as to see exactly what any user sees — useful for troubleshooting and training",
+        "Enable Maintenance Mode to lock out non-admin users while making bulk changes"
+      ]
+    },
+    {
+      title: "What If Scorecard",
+      bg: "#f0f7fa", border: "#b8d4e0", numBg: "#185FA5",
+      body: "Model bonus scenarios for any employee without changing any real data. Useful for planning, explaining how the bonus formula works, or previewing the effect of a goal change.",
+      bullets: [
+        "Click What If Scorecard in the sidebar",
+        "Select any employee in the system",
+        "Adjust actuals, goal values, weights, and earnings to see live bonus estimates",
+        "Nothing here is saved — all inputs are for modeling only"
+      ]
+    },
+    {
+      title: "My Scorecard",
+      bg: "#eef5ec", border: "#aacfa5", numBg: "#1a5c1a",
+      body: "If your account is linked to an employee record, you can view your own submitted scorecards here — the same view your employees see.",
+      bullets: [
+        "Click My Scorecard in the sidebar",
+        "Only visible if your profile is linked to an employee name — set this under Users by editing your own account",
+        "Expand any card to see your goal-by-goal breakdown and final bonus amount"
       ]
     }
   ]
@@ -5678,26 +5729,29 @@ const guideStepsByRole: Record<"user" | "manager" | "admin", GuideStep[]> = {
 
 const guideTipsByRole: Record<"user" | "manager" | "admin", string[]> = {
   user: [
-    "Your scorecard is submitted by your manager — you can't edit it directly",
+    "Your scorecard is submitted by your manager — you can't edit it directly. Contact them if a month is missing.",
     "Scorecards are capped at <strong>200%</strong> total weighted achievement",
-    "If a goal's actual doesn't meet the minimum threshold, that goal contributes $0 to your bonus",
-    "Use <strong>What If Scorecard</strong> to understand what actuals you'd need to hit a target bonus"
+    "If a goal's actual doesn't meet its minimum threshold, that goal contributes <strong>$0</strong> to your bonus — even if you were close",
+    "Use <strong>What If Scorecard</strong> to see exactly what actuals you'd need to reach a target bonus"
   ],
   manager: [
-    "All goal weights on a scorecard must total exactly <strong>100%</strong> — the builder warns you if they don't",
+    "All goal weights on a scorecard must total exactly <strong>100%</strong> — you'll see a warning if they don't and won't be able to submit",
     "Scorecards are <strong>capped at 200%</strong> total weighted achievement",
-    "Achievements of <strong>120%+</strong> are flagged for review but not capped",
-    "If a goal's actual doesn't meet the minimum threshold, that goal contributes $0 to the bonus",
-    "Department actuals only need to be entered once — they apply to all scorecards in that department for the month"
+    "Achievements of <strong>120%+</strong> on a single goal are flagged for review but not automatically capped",
+    "If a goal's actual doesn't meet its minimum threshold, that goal contributes <strong>$0</strong> to the bonus",
+    "Department actuals only need to be entered once — they automatically apply to every employee in that department for the same month",
+    "You can view future months in Team Scorecards for planning, but scorecards can only be submitted for past months",
+    "If a supervisor is set for your account, submitted scorecards will route to them for approval before they're finalized"
   ],
   admin: [
-    "Upload Rippling data for the <strong>previous completed month</strong> — e.g. upload May's data in June once payroll is finalized",
-    "All goal weights on a scorecard must total exactly <strong>100%</strong> — the builder warns you if they don't",
+    "Upload Rippling data for the <strong>previous completed month</strong> — e.g. upload May's data in early June once payroll is finalized",
+    "All goal weights on a scorecard must total exactly <strong>100%</strong> — the builder warns you before you can submit",
     "Scorecards are <strong>capped at 200%</strong> total weighted achievement",
-    "Achievements of <strong>120%+</strong> are flagged for review but not capped",
-    "If a goal's actual doesn't meet the minimum threshold, that goal contributes $0 to the bonus",
-    "Goals can be <strong>deactivated</strong> in the Goal Bank without deleting them, keeping history intact",
-    "Use <strong>Maintenance Mode</strong> (under Users) to lock out non-admin users while making bulk changes"
+    "Achievements of <strong>120%+</strong> on a single goal are flagged for review but not automatically capped",
+    "If a goal's actual doesn't meet its minimum threshold, that goal contributes <strong>$0</strong> to the bonus",
+    "Goals can be <strong>deactivated</strong> without being deleted — history and past actuals stay intact",
+    "Set a <strong>Supervisor</strong> for each manager under Users to enable scorecard review routing and the My managers To-do filter",
+    "Use <strong>Maintenance Mode</strong> (under Users) to lock out non-admin users while making bulk changes to goals or data"
   ]
 };
 
@@ -5720,9 +5774,9 @@ function GuideScreen({ profile }: { profile: ManagerProfile | null }) {
       <section>
         <div className="section-title">How to use this app</div>
         <p style={{ fontSize: "13px", color: "var(--text-muted)", lineHeight: 1.7, marginTop: "4px" }}>
-          {viewAs === "user" && "As an employee, you can view your submitted scorecards and use the What If tool to model bonus scenarios."}
-          {viewAs === "manager" && "As a manager, you enter actuals, build and submit scorecards for your team, and review historical data."}
-          {viewAs === "admin" && "As an admin, you manage the full monthly workflow — from uploading payroll data to submitting scorecards and managing users."}
+          {viewAs === "user" && "As an employee, you can view your submitted scorecards and use the What If tool to model bonus scenarios. Each section below explains what it does and how to use it."}
+          {viewAs === "manager" && "As a manager, you have access to the To-do List, Goals & Actuals, Team Scorecards, Historical Data, What If Scorecard, and My Scorecard. Each section below covers one tab in the sidebar."}
+          {viewAs === "admin" && "As an admin, you have access to every section of the app. Each section below covers one tab in the sidebar — read through to understand the full monthly workflow."}
         </p>
         {canSwitchView && (
           <div style={{ display: "flex", gap: "6px", marginTop: "14px" }}>
