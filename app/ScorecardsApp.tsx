@@ -1860,7 +1860,7 @@ function PersonalScorecardPanel({
           <TableHeader className="bg-muted/40 [&_th]:h-9 [&_th]:px-2.5 [&_th]:text-[10px] [&_th]:font-medium [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
             <TableRow className="hover:bg-transparent">
               <TableHead>Type</TableHead>
-              <TableHead>Goal</TableHead>
+              <TableHead>Goal Name</TableHead>
               <TableHead className="text-right">Goal</TableHead>
               <TableHead className="text-right">Min</TableHead>
               <TableHead className="text-right">Actual</TableHead>
@@ -2855,7 +2855,7 @@ function GoalsScreen(props: {
               <TableHead>Type</TableHead>
               <TableHead>Loc</TableHead>
               <TableHead>Dept</TableHead>
-              <TableHead>Goal</TableHead>
+              <TableHead>Goal Name</TableHead>
               <TableHead>Lower</TableHead>
               <TableHead>Cap</TableHead>
               <TableHead className="text-right">Goal</TableHead>
@@ -3978,7 +3978,7 @@ function LiveScorecardCard({
               <TableHeader className="bg-muted/40 [&_th]:h-8 [&_th]:px-2.5 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
                 <TableRow className="hover:bg-transparent">
                   <TableHead>Type</TableHead>
-                  <TableHead>Goal</TableHead>
+                  <TableHead>Goal Name</TableHead>
                   <TableHead className="text-center">Goal</TableHead>
                   <TableHead className="text-center">Min</TableHead>
                   <TableHead className="text-center">Actual</TableHead>
@@ -4239,7 +4239,7 @@ function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, currentUs
             <TableHeader className="bg-muted/40 [&_th]:h-8 [&_th]:px-2.5 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
               <TableRow className="hover:bg-transparent">
                 <TableHead>Type</TableHead>
-                <TableHead>Goal</TableHead>
+                <TableHead>Goal Name</TableHead>
                 <TableHead className="text-center">Goal</TableHead>
                 <TableHead className="text-center">Min</TableHead>
                 <TableHead className="text-center">Weight</TableHead>
@@ -4663,7 +4663,7 @@ function HistoryScreen(props: {
                 </Select>
               </ReportControl>
               {metric === "goal" && (
-                <ReportControl label="Goal">
+                <ReportControl label="Goal Name">
                   <Select value={metricGoal || undefined} onValueChange={(v) => setMetricGoal(v)}>
                     <SelectTrigger size="sm" className="min-w-[9rem] text-[12px]"><SelectValue placeholder="Select a goal…" /></SelectTrigger>
                     <SelectContent>
@@ -5640,7 +5640,7 @@ function WhatIfScreen(props: {
               <TableHeader className="bg-muted/40 [&_th]:h-8 [&_th]:px-2 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
                 <TableRow className="hover:bg-transparent">
                   <TableHead>Type</TableHead>
-                  <TableHead>Goal</TableHead>
+                  <TableHead>Goal Name</TableHead>
                   <TableHead className="text-center">Goal</TableHead>
                   <TableHead className="text-center">Min</TableHead>
                   <TableHead className="text-center">Actual</TableHead>
