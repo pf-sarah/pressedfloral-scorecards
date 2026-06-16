@@ -286,7 +286,6 @@ export default function ScorecardsApp() {
   const [adminUsers, setAdminUsers] = useState<AdminManagedUser[]>([]);
   const [adminUsersLoading, setAdminUsersLoading] = useState(false);
   const [viewAsProfile, setViewAsProfile] = useState<ManagerProfile | null>(null);
-  const [subordinateProfiles, setSubordinateProfiles] = useState<ManagerProfile[]>([]);
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
 
@@ -413,29 +412,10 @@ export default function ScorecardsApp() {
   }, [authenticated, mode, profile]);
 
   useEffect(() => {
-    if (!authenticated || profile?.role !== "admin" || mode !== "users") return;
+    if (!authenticated || profile?.role !== "admin") return;
+    if (mode !== "users" && mode !== "todos") return;
     void loadAdminUsers();
   }, [authenticated, profile?.role, mode, isFixture, sb]);
-
-  useEffect(() => {
-    if (!authenticated || !profile?.id || !sb || mode !== "todos") return;
-    sb.from("manager_profiles")
-      .select("id, role, departments, locations, linked_employee_name, supervisor_id")
-      .eq("supervisor_id", profile.id)
-      .then(({ data }) => {
-        if (data) {
-          setSubordinateProfiles(data.map((row) => ({
-            id: String(row.id),
-            email: "",
-            role: (row.role as ProfileRole) || "manager",
-            departments: Array.isArray(row.departments) ? row.departments : [],
-            locations: Array.isArray(row.locations) ? row.locations : [],
-            linkedEmployeeName: typeof row.linked_employee_name === "string" && row.linked_employee_name.trim() ? row.linked_employee_name.trim() : undefined,
-            supervisorId: row.supervisor_id || undefined,
-          })));
-        }
-      });
-  }, [authenticated, profile?.id, mode, sb]);
 
   useEffect(() => {
     if (!toast) return;
@@ -1551,7 +1531,17 @@ export default function ScorecardsApp() {
               goals={appData.goals.filter((g) => g.active && (roleAtLeast(effectiveProfile, "admin") || g.goalTier !== "company") && scopedForProfile([g], effectiveProfile).length > 0)}
               allActuals={appData.actuals}
               allGoals={appData.goals.filter((g) => g.active)}
-              subordinateProfiles={subordinateProfiles}
+              subordinateProfiles={adminUsers
+                .filter((u) => u.supervisorId === effectiveProfile?.id && (u.role === "manager" || u.role === "admin"))
+                .map((u) => ({
+                  id: u.id,
+                  email: u.email,
+                  role: u.role,
+                  departments: u.departments,
+                  locations: u.locations,
+                  linkedEmployeeName: u.linkedEmployeeName,
+                  supervisorId: u.supervisorId,
+                }))}
               onSaveTarget={saveMonthTarget}
               onSaveCurrentTargetPair={(goal, target, min) => {
                 const today = new Date();
