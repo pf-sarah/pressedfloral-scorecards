@@ -413,12 +413,32 @@ export default function ScorecardsApp() {
   }, [authenticated, mode, profile]);
 
   useEffect(() => {
-    if (!authenticated || profile?.role !== "admin" || mode !== "users") return;
+    if (!authenticated || profile?.role !== "admin") return;
+    if (mode !== "users" && !(mode === "todos" && viewAsProfile)) return;
     void loadAdminUsers();
-  }, [authenticated, profile?.role, mode, isFixture, sb]);
+  }, [authenticated, profile?.role, mode, viewAsProfile, isFixture, sb]);
 
   useEffect(() => {
-    if (!authenticated || !profile?.id || !sb || mode !== "todos") return;
+    if (!authenticated || !effectiveProfile?.id || mode !== "todos") return;
+    // In View As mode the admin already has adminUsers; derive subordinates from there.
+    if (viewAsProfile && adminUsers.length > 0) {
+      setSubordinateProfiles(
+        adminUsers
+          .filter((u) => u.supervisorId === viewAsProfile.id)
+          .map((u) => ({
+            id: u.id,
+            email: u.email,
+            role: u.role,
+            departments: u.departments,
+            locations: u.locations,
+            linkedEmployeeName: u.linkedEmployeeName,
+            supervisorId: u.supervisorId,
+          }))
+      );
+      return;
+    }
+    // Normal mode: call the API with the real session token.
+    if (!sb) return;
     sb.auth.getSession().then(({ data: { session } }) => {
       const token = session?.access_token;
       if (!token) return;
@@ -439,7 +459,7 @@ export default function ScorecardsApp() {
         })
         .catch(() => {});
     });
-  }, [authenticated, profile?.id, mode, sb]);
+  }, [authenticated, effectiveProfile?.id, viewAsProfile, adminUsers, mode, sb]);
 
   useEffect(() => {
     if (!toast) return;
