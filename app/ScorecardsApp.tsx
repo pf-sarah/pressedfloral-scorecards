@@ -5429,7 +5429,7 @@ function TodosScreen({
                     min: String(currentActuals[metaKey("min", goal)] ?? "")
                   };
                   return (
-                    <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} department={goal.department} saved={saved}>
+                    <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
                       <div className="ml-auto flex items-end gap-2">
                         <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
                         <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
@@ -5462,7 +5462,7 @@ function TodosScreen({
                       min: String(nextActuals[metaKey("min", goal)] ?? "")
                     };
                     return (
-                      <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} department={goal.department} saved={saved}>
+                      <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
                         <div className="ml-auto flex items-end gap-2">
                           <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
                           <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
@@ -5552,7 +5552,7 @@ function TodosScreen({
                           min: String(currentActuals[metaKey("min", goal)] ?? ""),
                         };
                         return (
-                          <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} department={goal.department} saved={saved}>
+                          <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
                             <div className="ml-auto flex items-end gap-2">
                               <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
                               <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
@@ -5585,7 +5585,7 @@ function TodosScreen({
                             min: String(nextActuals[metaKey("min", goal)] ?? ""),
                           };
                           return (
-                            <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} department={goal.department} saved={saved}>
+                            <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
                               <div className="ml-auto flex items-end gap-2">
                                 <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
                                 <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
