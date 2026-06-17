@@ -173,6 +173,18 @@ function metaKey(type: "target" | "min", goal: Pick<Goal, "goalTier" | "location
   return `__${type}__${[goal.goalTier, goal.location || "", goal.department || "", goal.name].join("|")}`;
 }
 
+// Employee scorecard deactivation helpers — stored in actuals under a special sentinel period.
+const DEACT_PERIOD = "__employee_settings__";
+function deactMonthKey(employeeName: string, isoMonth: string) { return `__inactive_month__|${isoMonth}|${employeeName}`; }
+function deactFromKey(employeeName: string) { return `__inactive_from__|${employeeName}`; }
+function isoMonthToNum(isoMonth: string) { return Number(isoMonth.replace("-", "")); }
+function isDeactivatedForMonth(allActuals: Record<string, ActualsByKey>, employeeName: string, isoMonth: string): boolean {
+  const s = allActuals[DEACT_PERIOD] || {};
+  if (s[deactMonthKey(employeeName, isoMonth)]) return true;
+  const fromNum = s[deactFromKey(employeeName)];
+  return fromNum != null && isoMonthToNum(isoMonth) >= Number(fromNum);
+}
+
 function quarterKeyForMonth(isoMonth: string): string {
   const [y, m] = isoMonth.split("-").map(Number);
   if (!y || !m) return "";
@@ -1256,6 +1268,39 @@ export default function ScorecardsApp() {
     persistActuals(period, nextActuals);
   }
 
+  async function deactivateEmployee(employeeName: string, isoMonth: string, mode: "month" | "from" | "reactivate") {
+    const current = appData.actuals[DEACT_PERIOD] || {};
+    const rows: { period: string; goal_tier: string; location: null; department: null; goal_name: string; actual_value: number | null }[] = [];
+
+    if (mode === "month") {
+      rows.push({ period: DEACT_PERIOD, goal_tier: "__meta__", location: null, department: null, goal_name: deactMonthKey(employeeName, isoMonth), actual_value: 1 });
+      if (current[deactFromKey(employeeName)] != null)
+        rows.push({ period: DEACT_PERIOD, goal_tier: "__meta__", location: null, department: null, goal_name: deactFromKey(employeeName), actual_value: null });
+    } else if (mode === "from") {
+      rows.push({ period: DEACT_PERIOD, goal_tier: "__meta__", location: null, department: null, goal_name: deactFromKey(employeeName), actual_value: isoMonthToNum(isoMonth) });
+      for (const key of Object.keys(current)) {
+        if (key.startsWith("__inactive_month__") && key.endsWith(`|${employeeName}`))
+          rows.push({ period: DEACT_PERIOD, goal_tier: "__meta__", location: null, department: null, goal_name: key, actual_value: null });
+      }
+    } else {
+      for (const key of Object.keys(current)) {
+        if (key === deactFromKey(employeeName) || (key.startsWith("__inactive_month__") && key.endsWith(`|${employeeName}`)))
+          rows.push({ period: DEACT_PERIOD, goal_tier: "__meta__", location: null, department: null, goal_name: key, actual_value: null });
+      }
+    }
+
+    if (!isFixture && sb) {
+      const result = await sb.from("actuals").upsert(rows, { onConflict: "period,goal_tier,location,department,goal_name" });
+      if (result.error) { showSupabaseError(result.error, "Could not save scorecard deactivation."); return; }
+    }
+
+    const next = { ...current };
+    for (const row of rows) {
+      if (row.actual_value == null) delete next[row.goal_name]; else next[row.goal_name] = row.actual_value;
+    }
+    setAppData((c) => ({ ...c, actuals: { ...c.actuals, [DEACT_PERIOD]: next } }));
+  }
+
   async function saveRipplingForMonth(month: string, employees: Employee[]) {
     if (!isFixture && sb) {
       const deleteResult = await sb.from("rippling_employees").delete().eq("period", month);
@@ -1540,6 +1585,7 @@ export default function ScorecardsApp() {
                 currentUserEmail={currentUserEmail}
                 currentUserProfileId={effectiveProfile?.id}
                 employeePeriodTypes={employeePeriodTypes}
+                onDeactivateEmployee={effectiveProfile?.role === "admin" ? deactivateEmployee : undefined}
               />
             </div>
           )}
@@ -3485,6 +3531,7 @@ function ScorecardsScreen(props: {
   currentUserEmail: string;
   currentUserProfileId?: string;
   employeePeriodTypes?: Record<string, "monthly" | "quarterly">;
+  onDeactivateEmployee?: (employeeName: string, isoMonth: string, mode: "month" | "from" | "reactivate") => void;
 }) {
   const [filterEmployees, setFilterEmployees] = useState<string[]>([]);
   const [filterDepts, setFilterDepts] = useState<string[]>([]);
@@ -3572,6 +3619,7 @@ function ScorecardsScreen(props: {
     if (filterEmployees.length > 0 && !filterEmployees.includes(e.name)) return false;
     if (filterDepts.length > 0 && !filterDepts.includes(e.department)) return false;
     if (filterLocations.length > 0 && !filterLocations.includes(e.location)) return false;
+    if (singleMonthMode && isDeactivatedForMonth(props.allActuals, e.name, selectedMonth)) return false;
     // If this employee has a forced period type, only show them on their designated tab
     const forcedPeriod = props.employeePeriodTypes?.[e.name];
     if (forcedPeriod) return forcedPeriod === globalPeriodType;
@@ -3580,6 +3628,12 @@ function ScorecardsScreen(props: {
     if (globalPeriodType === "monthly") return goalsForEmployee(e).some((g) => g.periodType !== "quarterly");
     return true;
   });
+
+  // Employees deactivated for the selected month — shown separately with a Reactivate option
+  const deactivatedEmployees = singleMonthMode
+    ? sortedTeam.filter((e) => isDeactivatedForMonth(props.allActuals, e.name, selectedMonth))
+    : [];
+
   const noRippling = singleMonthMode && latestEmployees.length === 0;
 
   const employeeOptions = singleMonthMode
@@ -3721,38 +3775,74 @@ function ScorecardsScreen(props: {
             {filteredEmployees.map((emp) => {
               const submitted = props.scorecards.find((sc) => sc.employeeName === emp.name && sc.scorecardMonth === periodLabel);
               return (
-                <LiveScorecardCard
-                  key={emp.id || emp.name}
-                  employee={withActualEarnings(emp)}
-                  isoMonth={selectedMonth}
-                  month={periodLabel}
-                  payrollAvailable={payrollAvailable}
-                  baseGoals={goalsForEmployee(emp)}
-                  allGoals={props.allGoals}
-                  periodActuals={periodActuals}
-                  allRippling={props.rippling}
-                  submittedScorecard={submitted}
-                  globalPeriodType={globalPeriodType}
-                  forcePeriodType={props.employeePeriodTypes?.[emp.name]}
-                  empSettings={props.employeeScorecardSettings.filter((s) => s.employeeName === emp.name)}
-                  onSettingsChange={(pt, patch) => props.onScorecardSettingsChange(emp.name, pt, patch)}
-                  onSubmit={props.onSubmitScorecard}
-                  onDeleteGoal={props.onDeleteGoal}
-                  onApprove={props.onApproveScorecard}
-                  onReturn={props.onReturnScorecard}
-                  onSaveGoal={props.onSaveGoal}
-                  onSaveTargetPair={props.onSaveTargetPair}
-                  teamEmployees={teamEmployees}
-                  isAdmin={props.isAdmin}
-                  allowedDepartments={props.allowedDepartments}
-                  allowedLocations={props.allowedLocations}
-                  currentUserEmail={props.currentUserEmail}
-                  currentUserProfileId={props.currentUserProfileId}
-                />
+                <div key={emp.id || emp.name} className="relative group/card">
+                  {props.onDeactivateEmployee && (
+                    <div className="absolute right-2 top-2 z-20 opacity-0 group-hover/card:opacity-100 transition-opacity">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger className="inline-flex size-6 items-center justify-center rounded-md text-muted-foreground outline-none transition-colors hover:bg-accent hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50 data-[state=open]:bg-accent data-[state=open]:text-foreground">
+                          <MoreHorizontal className="size-3.5" />
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-56">
+                          <DropdownMenuLabel className="text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">Deactivate scorecard</DropdownMenuLabel>
+                          <DropdownMenuItem onSelect={() => props.onDeactivateEmployee!(emp.name, selectedMonth, "month")}>
+                            For {periodLabel} only
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onSelect={() => props.onDeactivateEmployee!(emp.name, selectedMonth, "from")}>
+                            From {periodLabel} forward
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </div>
+                  )}
+                  <LiveScorecardCard
+                    employee={withActualEarnings(emp)}
+                    isoMonth={selectedMonth}
+                    month={periodLabel}
+                    payrollAvailable={payrollAvailable}
+                    baseGoals={goalsForEmployee(emp)}
+                    allGoals={props.allGoals}
+                    periodActuals={periodActuals}
+                    allRippling={props.rippling}
+                    submittedScorecard={submitted}
+                    globalPeriodType={globalPeriodType}
+                    forcePeriodType={props.employeePeriodTypes?.[emp.name]}
+                    empSettings={props.employeeScorecardSettings.filter((s) => s.employeeName === emp.name)}
+                    onSettingsChange={(pt, patch) => props.onScorecardSettingsChange(emp.name, pt, patch)}
+                    onSubmit={props.onSubmitScorecard}
+                    onDeleteGoal={props.onDeleteGoal}
+                    onApprove={props.onApproveScorecard}
+                    onReturn={props.onReturnScorecard}
+                    onSaveGoal={props.onSaveGoal}
+                    onSaveTargetPair={props.onSaveTargetPair}
+                    teamEmployees={teamEmployees}
+                    isAdmin={props.isAdmin}
+                    allowedDepartments={props.allowedDepartments}
+                    allowedLocations={props.allowedLocations}
+                    currentUserEmail={props.currentUserEmail}
+                    currentUserProfileId={props.currentUserProfileId}
+                  />
+                </div>
               );
             })}
-            {!noRippling && filteredEmployees.length === 0 && (
+            {!noRippling && filteredEmployees.length === 0 && deactivatedEmployees.length === 0 && (
               <div className="no-goals-msg" style={{ display: "block" }}>No employees match the current filter.</div>
+            )}
+            {deactivatedEmployees.length > 0 && (
+              <div className="mt-3 flex flex-col gap-1.5">
+                <p className="px-0.5 text-[11px] font-semibold uppercase tracking-wide text-muted-foreground">
+                  Deactivated for {periodLabel} ({deactivatedEmployees.length})
+                </p>
+                {deactivatedEmployees.map((emp) => (
+                  <div key={emp.name} className="flex items-center justify-between rounded-lg border border-border bg-muted/40 px-4 py-2.5">
+                    <span className="text-[13px] text-muted-foreground">{emp.name}</span>
+                    {props.onDeactivateEmployee && (
+                      <Button size="sm" variant="outline" className="h-7 text-[12px]" onClick={() => props.onDeactivateEmployee!(emp.name, selectedMonth, "reactivate")}>
+                        Reactivate
+                      </Button>
+                    )}
+                  </div>
+                ))}
+              </div>
             )}
           </div>
         </section>
@@ -5481,7 +5571,7 @@ function TodosScreen({
           {subordinateProfiles.map((subProfile) => {
             const displayName = subProfile.linkedEmployeeName || subProfile.email || "Manager";
             const subTargetGoals = scopedForProfile(allGoals, subProfile).filter(
-              (g) => g.active && (g.goalTier === "company" || g.goalTier === "department")
+              (g) => g.active && (g.goalTier === "company" || g.goalTier === "department") && (isAdmin || g.goalTier !== "company")
             );
 
             const subActualsGoals = subTargetGoals.filter(
