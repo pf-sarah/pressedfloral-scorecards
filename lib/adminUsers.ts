@@ -26,6 +26,7 @@ export type AdminManagedUser = {
   locations: string[];
   linkedEmployeeName?: string;
   supervisorId?: string;
+  scorecardPeriodType?: "monthly" | "quarterly";
   hasProfile: boolean;
   status: "active" | "invited" | "unconfirmed";
   invitedAt?: string;
@@ -42,6 +43,7 @@ export type AdminUserPayload = {
   locations: string[];
   linkedEmployeeName?: string;
   supervisorId?: string;
+  scorecardPeriodType?: "monthly" | "quarterly";
   allDepartments?: boolean;
   allLocations?: boolean;
 };
@@ -87,11 +89,12 @@ export function normalizeAdminUserPayload(input: unknown, options: NormalizeOpti
   const locations = uniqueAllowedStrings(source.locations, allowedLocations);
   const linkedEmployeeName = normalizeOptionalString(source.linkedEmployeeName);
   const supervisorId = normalizeOptionalString(source.supervisorId);
+  const scorecardPeriodType: "monthly" | "quarterly" = source.scorecardPeriodType === "quarterly" ? "quarterly" : "monthly";
 
   if (role === "admin") {
     return {
       ok: true,
-      value: { id, email, role, departments: [], locations: [], allDepartments: true, allLocations: true }
+      value: { id, email, role, departments: [], locations: [], allDepartments: true, allLocations: true, linkedEmployeeName, scorecardPeriodType }
     };
   }
 
@@ -99,7 +102,7 @@ export function normalizeAdminUserPayload(input: unknown, options: NormalizeOpti
     if (!linkedEmployeeName) return { ok: false, error: "Choose the employee this viewer can access." };
     return {
       ok: true,
-      value: { id, email, role, departments: [], locations: [], linkedEmployeeName, allDepartments: true, allLocations: true }
+      value: { id, email, role, departments: [], locations: [], linkedEmployeeName, allDepartments: true, allLocations: true, scorecardPeriodType }
     };
   }
 
@@ -120,6 +123,7 @@ export function normalizeAdminUserPayload(input: unknown, options: NormalizeOpti
       locations: allLocations ? [] : locations,
       linkedEmployeeName,
       supervisorId: supervisorId || undefined,
+      scorecardPeriodType,
       allDepartments,
       allLocations
     }
@@ -133,7 +137,8 @@ export function adminProfileToRow(userId: string, payload: AdminUserPayload) {
     departments: payload.departments,
     locations: payload.locations,
     linked_employee_name: payload.linkedEmployeeName || null,
-    supervisor_id: payload.supervisorId || null
+    supervisor_id: payload.supervisorId || null,
+    scorecard_period_type: payload.scorecardPeriodType || "monthly"
   };
 }
 

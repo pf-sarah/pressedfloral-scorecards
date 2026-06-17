@@ -10,6 +10,7 @@ export type ManagerProfile = {
   locations: string[];
   linkedEmployeeName?: string;
   supervisorId?: string;   // profile id of this manager's supervisor
+  scorecardPeriodType?: "monthly" | "quarterly";
 };
 
 export type Goal = {

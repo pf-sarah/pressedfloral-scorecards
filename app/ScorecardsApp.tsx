@@ -287,6 +287,7 @@ export default function ScorecardsApp() {
   const [adminUsersLoading, setAdminUsersLoading] = useState(false);
   const [viewAsProfile, setViewAsProfile] = useState<ManagerProfile | null>(null);
   const [subordinateProfiles, setSubordinateProfiles] = useState<ManagerProfile[]>([]);
+  const [employeePeriodTypes, setEmployeePeriodTypes] = useState<Record<string, "monthly" | "quarterly">>({});
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
 
@@ -460,6 +461,30 @@ export default function ScorecardsApp() {
         .catch(() => {});
     });
   }, [authenticated, effectiveProfile?.id, viewAsProfile, adminUsers, sb]);
+
+  // Load employee period type preferences (which employees are on quarterly scorecards).
+  // For admins, derive from adminUsers. For managers, call the lightweight API endpoint.
+  useEffect(() => {
+    if (!authenticated || !sb) return;
+    if (adminUsers.length > 0) {
+      const map: Record<string, "monthly" | "quarterly"> = {};
+      for (const u of adminUsers) {
+        if (u.linkedEmployeeName && u.scorecardPeriodType === "quarterly") {
+          map[u.linkedEmployeeName] = "quarterly";
+        }
+      }
+      setEmployeePeriodTypes(map);
+      return;
+    }
+    sb.auth.getSession().then(({ data: { session } }) => {
+      const token = session?.access_token;
+      if (!token) return;
+      fetch("/api/employee-period-types", { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => r.json())
+        .then((body) => { if (body.periodTypes) setEmployeePeriodTypes(body.periodTypes); })
+        .catch(() => {});
+    });
+  }, [authenticated, adminUsers, sb]);
 
   useEffect(() => {
     if (!toast) return;
@@ -1514,6 +1539,7 @@ export default function ScorecardsApp() {
                 allowedLocations={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.locations || [])}
                 currentUserEmail={currentUserEmail}
                 currentUserProfileId={effectiveProfile?.id}
+                employeePeriodTypes={employeePeriodTypes}
               />
             </div>
           )}
@@ -2421,7 +2447,7 @@ function UserPermissionForm(props: {
       role,
       departments: role === "manager" ? (current.allDepartments ? [...departments] : current.departments) : [],
       locations: role === "manager" ? (current.allLocations ? [...locations] : current.locations) : [],
-      linkedEmployeeName: role === "admin" ? "" : current.linkedEmployeeName,
+      linkedEmployeeName: current.linkedEmployeeName,
       allDepartments: role === "manager" ? current.allDepartments : true,
       allLocations: role === "manager" ? current.allLocations : true
     }));
@@ -2441,7 +2467,8 @@ function UserPermissionForm(props: {
       linkedEmployeeName: draft.linkedEmployeeName || undefined,
       supervisorId: (draft as AdminUserPayload & { supervisorId?: string }).supervisorId || undefined,
       allDepartments: !isManager || allDepts,
-      allLocations: !isManager || allLocs
+      allLocations: !isManager || allLocs,
+      scorecardPeriodType: (draft as AdminUserPayload).scorecardPeriodType ?? "monthly"
     });
     if (saved && props.mode === "invite") setDraft(userDraftFromUser());
   }
@@ -2465,6 +2492,20 @@ function UserPermissionForm(props: {
           </Select>
         </DrawerField>
       </div>
+
+      {draft.role === "admin" && (
+        <div className="flex flex-wrap items-end gap-3">
+          <DrawerField label="Linked employee (optional)" className="min-w-[12rem] flex-1">
+            <Select value={draft.linkedEmployeeName || "__none__"} onValueChange={(v) => setDraft({ ...draft, linkedEmployeeName: v === "__none__" ? "" : v })}>
+              <SelectTrigger className="w-full" aria-label="Linked employee"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">No linked employee</SelectItem>
+                {employeeNames.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </DrawerField>
+        </div>
+      )}
 
       {draft.role === "manager" && (
         <div className="flex flex-wrap items-end gap-3">
@@ -2513,6 +2554,20 @@ function UserPermissionForm(props: {
         </div>
       )}
 
+      {draft.linkedEmployeeName && (
+        <div className="flex flex-wrap items-end gap-3">
+          <DrawerField label="Scorecard period" className="w-[180px]">
+            <Select value={(draft as AdminUserPayload).scorecardPeriodType ?? "monthly"} onValueChange={(v) => setDraft({ ...draft, scorecardPeriodType: v as "monthly" | "quarterly" })}>
+              <SelectTrigger className="w-full" aria-label="Scorecard period"><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="monthly">Monthly</SelectItem>
+                <SelectItem value="quarterly">Quarterly</SelectItem>
+              </SelectContent>
+            </Select>
+          </DrawerField>
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         {props.onCancel && <Button variant="outline" size="sm" onClick={props.onCancel}>Cancel</Button>}
         <Button size="sm" onClick={handleSubmit}>{props.submitLabel}</Button>
@@ -2530,7 +2585,8 @@ function userDraftFromUser(user?: AdminManagedUser): AdminUserPayload & { email:
       locations: ["Utah"],
       linkedEmployeeName: "",
       allDepartments: false,
-      allLocations: false
+      allLocations: false,
+      scorecardPeriodType: "monthly" as const
     };
   }
   const isManager = user.role === "manager";
@@ -2546,7 +2602,8 @@ function userDraftFromUser(user?: AdminManagedUser): AdminUserPayload & { email:
     linkedEmployeeName: user.linkedEmployeeName || "",
     supervisorId: user.supervisorId || "",
     allDepartments: allDepts,
-    allLocations: allLocs
+    allLocations: allLocs,
+    scorecardPeriodType: user.scorecardPeriodType ?? "monthly"
   };
 }
 
@@ -3427,6 +3484,7 @@ function ScorecardsScreen(props: {
   allowedLocations?: string[];
   currentUserEmail: string;
   currentUserProfileId?: string;
+  employeePeriodTypes?: Record<string, "monthly" | "quarterly">;
 }) {
   const [filterEmployees, setFilterEmployees] = useState<string[]>([]);
   const [filterDepts, setFilterDepts] = useState<string[]>([]);
@@ -3510,13 +3568,18 @@ function ScorecardsScreen(props: {
   }
 
   const sortedTeam = [...teamEmployees].sort((a, b) => a.name.localeCompare(b.name));
-  const filteredEmployees = sortedTeam.filter((e) =>
-    (filterEmployees.length === 0 || filterEmployees.includes(e.name)) &&
-    (filterDepts.length === 0 || filterDepts.includes(e.department)) &&
-    (filterLocations.length === 0 || filterLocations.includes(e.location)) &&
-    (globalPeriodType !== "quarterly" || goalsForEmployee(e).some((g) => g.periodType === "quarterly")) &&
-    (globalPeriodType !== "monthly" || goalsForEmployee(e).some((g) => g.periodType !== "quarterly"))
-  );
+  const filteredEmployees = sortedTeam.filter((e) => {
+    if (filterEmployees.length > 0 && !filterEmployees.includes(e.name)) return false;
+    if (filterDepts.length > 0 && !filterDepts.includes(e.department)) return false;
+    if (filterLocations.length > 0 && !filterLocations.includes(e.location)) return false;
+    // If this employee has a forced period type, only show them on their designated tab
+    const forcedPeriod = props.employeePeriodTypes?.[e.name];
+    if (forcedPeriod) return forcedPeriod === globalPeriodType;
+    // Otherwise apply the standard goal-based filter
+    if (globalPeriodType === "quarterly") return goalsForEmployee(e).some((g) => g.periodType === "quarterly");
+    if (globalPeriodType === "monthly") return goalsForEmployee(e).some((g) => g.periodType !== "quarterly");
+    return true;
+  });
   const noRippling = singleMonthMode && latestEmployees.length === 0;
 
   const employeeOptions = singleMonthMode
@@ -3670,6 +3733,7 @@ function ScorecardsScreen(props: {
                   allRippling={props.rippling}
                   submittedScorecard={submitted}
                   globalPeriodType={globalPeriodType}
+                  forcePeriodType={props.employeePeriodTypes?.[emp.name]}
                   empSettings={props.employeeScorecardSettings.filter((s) => s.employeeName === emp.name)}
                   onSettingsChange={(pt, patch) => props.onScorecardSettingsChange(emp.name, pt, patch)}
                   onSubmit={props.onSubmitScorecard}
@@ -3751,6 +3815,7 @@ function ScorecardsScreen(props: {
                         allRippling={props.rippling}
                         submittedScorecard={submitted}
                         globalPeriodType={globalPeriodType}
+                        forcePeriodType={props.employeePeriodTypes?.[emp.name]}
                         empSettings={props.employeeScorecardSettings.filter((s) => s.employeeName === emp.name)}
                         onSettingsChange={(pt, patch) => props.onScorecardSettingsChange(emp.name, pt, patch)}
                         onSubmit={props.onSubmitScorecard}
@@ -3821,7 +3886,7 @@ function GoalRowMenu({ goalName, currentWeight, onApplyWeight, onRemove }: {
 }
 
 function LiveScorecardCard({
-  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, payrollAvailable, empSettings, onSettingsChange, onSubmit, onDeleteGoal, onApprove, onReturn, onSaveGoal, onSaveTargetPair, teamEmployees, isAdmin, allowedDepartments, allowedLocations, currentUserEmail, currentUserProfileId
+  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, forcePeriodType, payrollAvailable, empSettings, onSettingsChange, onSubmit, onDeleteGoal, onApprove, onReturn, onSaveGoal, onSaveTargetPair, teamEmployees, isAdmin, allowedDepartments, allowedLocations, currentUserEmail, currentUserProfileId
 }: {
   employee: Employee;
   isoMonth: string;
@@ -3832,6 +3897,7 @@ function LiveScorecardCard({
   allRippling: Record<string, Employee[]>;
   submittedScorecard: Scorecard | undefined;
   globalPeriodType: "monthly" | "quarterly";
+  forcePeriodType?: "monthly" | "quarterly";
   payrollAvailable?: boolean;
   empSettings: EmployeeScorecardSettings[];
   onSettingsChange: (periodType: "monthly" | "quarterly", patch: { excludedGoalIds: string[]; addedGoalIds: string[]; weightOverrides: Record<string, number> }) => void;
@@ -3872,8 +3938,9 @@ function LiveScorecardCard({
   // --- state ---
   const [open, setOpen] = useState(false);
   const [creatingGoal, setCreatingGoal] = useState<Goal | null>(null);
-  const [cardPeriodType, setCardPeriodType] = useState<"monthly" | "quarterly">(globalPeriodType);
-  const initSettings = settingsForPeriod(globalPeriodType);
+  const effectivePeriodType = forcePeriodType ?? globalPeriodType;
+  const [cardPeriodType, setCardPeriodType] = useState<"monthly" | "quarterly">(effectivePeriodType);
+  const initSettings = settingsForPeriod(effectivePeriodType);
   const [goalIds, setGoalIds] = useState<string[]>(() => computeGoalIds(globalPeriodType, initSettings));
   const [indActuals, setIndActuals] = useState<Record<string, string>>({});
   const [weightOverrides, setWeightOverrides] = useState<Record<string, string>>(() =>
@@ -3897,10 +3964,10 @@ function LiveScorecardCard({
     }, 600);
   }
 
-  // Sync period type when the global toggle changes
+  // Sync period type when the global toggle changes (forcePeriodType overrides the global tab)
   useEffect(() => {
-    handlePeriodTypeChange(globalPeriodType);
-  }, [globalPeriodType]); // eslint-disable-line react-hooks/exhaustive-deps
+    handlePeriodTypeChange(forcePeriodType ?? globalPeriodType);
+  }, [globalPeriodType, forcePeriodType]); // eslint-disable-line react-hooks/exhaustive-deps
 
 
   // Actuals can only be entered for past months, not current or future months
@@ -5162,8 +5229,13 @@ function TodosScreen({
   const isAdmin = roleAtLeast(profile, "admin");
   const ripplingDone = hasRippling && !ripplingParsed;
 
+  // Goals that fall within a subordinate manager's scope belong in "My Managers", not "My Tasks".
+  const isSubordinateGoal = (g: Goal) =>
+    subordinateProfiles.length > 0 && subordinateProfiles.some((sp) => scopedForProfile([g], sp).length > 0);
+
   // All company/dept goals that have targets set for workMonth — each is its own actuals item
   const actualsGoals = goals.filter((g) =>
+    !isSubordinateGoal(g) &&
     (isAdmin ? true : g.goalTier !== "company") &&
     (g.goalTier === "company" || g.goalTier === "department") &&
     workActuals[metaKey("target", g)] != null &&
@@ -5174,7 +5246,7 @@ function TodosScreen({
   const adminTotal = (isAdmin ? 1 : 0) + actualsGoals.length;
   const adminDoneCount = (isAdmin ? (ripplingDone ? 1 : 0) : 0) + actualsDoneCount;
 
-  const targetGoals = goals.filter((g) => (isAdmin ? true : g.goalTier !== "company") && (g.goalTier === "company" || g.goalTier === "department"));
+  const targetGoals = goals.filter((g) => !isSubordinateGoal(g) && (isAdmin ? true : g.goalTier !== "company") && (g.goalTier === "company" || g.goalTier === "department"));
 
   // Current month targets (overdue if not set — month already started)
   const currentTargetGoals = targetGoals;

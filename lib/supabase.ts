@@ -127,7 +127,8 @@ export function profileFromRow(email: string, row: Record<string, any>): Manager
     departments: Array.isArray(row.departments) ? row.departments : [],
     locations: Array.isArray(row.locations) ? row.locations : [],
     linkedEmployeeName: typeof row.linked_employee_name === "string" && row.linked_employee_name.trim() ? row.linked_employee_name.trim() : undefined,
-  supervisorId: row.supervisor_id || undefined
+  supervisorId: row.supervisor_id || undefined,
+  scorecardPeriodType: row.scorecard_period_type === "quarterly" ? "quarterly" : "monthly"
   };
 }
 
