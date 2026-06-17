@@ -1585,7 +1585,7 @@ export default function ScorecardsApp() {
                 currentUserEmail={currentUserEmail}
                 currentUserProfileId={effectiveProfile?.id}
                 employeePeriodTypes={employeePeriodTypes}
-                onDeactivateEmployee={effectiveProfile?.role === "admin" ? deactivateEmployee : undefined}
+                onDeactivateEmployee={roleAtLeast(effectiveProfile, "manager") ? deactivateEmployee : undefined}
               />
             </div>
           )}
