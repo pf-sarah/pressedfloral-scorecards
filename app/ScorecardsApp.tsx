@@ -932,7 +932,7 @@ export default function ScorecardsApp() {
     const today = new Date();
     const currentMonthVal = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
     const currentLabel = formatMonthLabel(currentMonthVal);
-    const currentActuals = appData.actuals[currentLabel] || {};
+    const currentActuals = { ...(appData.actuals[currentLabel] || {}), ...(appData.actuals[quarterKeyForMonth(currentMonthVal)] || {}) };
     const isAdmin = roleAtLeast(effectiveProfile, "admin");
     return appData.goals.filter((g) =>
       goalActiveForMonth(g, currentMonthVal) &&
@@ -948,7 +948,7 @@ export default function ScorecardsApp() {
     const next = new Date(today.getFullYear(), today.getMonth() + 1, 1);
     const nextVal = `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
     const nextLabel = formatMonthLabel(nextVal);
-    const nextActuals = appData.actuals[nextLabel] || {};
+    const nextActuals = { ...(appData.actuals[nextLabel] || {}), ...(appData.actuals[quarterKeyForMonth(nextVal)] || {}) };
     const isAdmin = roleAtLeast(effectiveProfile, "admin");
     return appData.goals.filter((g) =>
       goalActiveForMonth(g, nextVal) &&
@@ -5299,14 +5299,15 @@ function TodosScreen({
   const [showCompletedCurrentTargets, setShowCompletedCurrentTargets] = useState(false);
 
   const workMonthLabel = formatMonthLabel(workMonth);
-  const workActuals = allActuals[workMonthLabel] || {};
+  // Merge quarterly-period actuals so quarterly goals stored under "Q2 2025" are found when checking "June 2025"
+  const workActuals = { ...(allActuals[workMonthLabel] || {}), ...(allActuals[quarterKeyForMonth(workMonth)] || {}) };
 
   const currentMonthValue = useMemo(() => {
     const today = new Date();
     return `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, "0")}`;
   }, []);
   const currentMonthLabel = useMemo(() => formatMonthLabel(currentMonthValue), [currentMonthValue]);
-  const currentActuals = allActuals[currentMonthLabel] || {};
+  const currentActuals = { ...(allActuals[currentMonthLabel] || {}), ...(allActuals[quarterKeyForMonth(currentMonthValue)] || {}) };
 
   const nextMonthValue = useMemo(() => {
     const today = new Date();
@@ -5314,7 +5315,7 @@ function TodosScreen({
     return `${next.getFullYear()}-${String(next.getMonth() + 1).padStart(2, "0")}`;
   }, []);
   const nextMonthLabel = useMemo(() => formatMonthLabel(nextMonthValue), [nextMonthValue]);
-  const nextActuals = allActuals[nextMonthLabel] || {};
+  const nextActuals = { ...(allActuals[nextMonthLabel] || {}), ...(allActuals[quarterKeyForMonth(nextMonthValue)] || {}) };
 
   const isAdmin = roleAtLeast(profile, "admin");
   const ripplingDone = hasRippling && !ripplingParsed;
