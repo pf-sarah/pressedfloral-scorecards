@@ -5492,7 +5492,7 @@ function TodosScreen({
   const showCurrentSection = monthFilter === "all" || monthFilter === "current";
   const showNextSection = monthFilter === "all" || monthFilter === "next";
 
-  const showQuarterlyCard = (quarterLabel: string) => quarterFilter === "all" || quarterFilter === quarterLabel;
+  const showQuarterlyCard = (quarterLabel: string) => monthFilter === "all" && (quarterFilter === "all" || quarterFilter === quarterLabel);
 
   // Unique ordered list of quarters relevant to the to-do list
   const uniqueQuarters = Array.from(new Set([workQuarterLabel, currentQuarterLabel, ...(nextIsNewQuarter ? [nextQuarterLabel] : [])]));
