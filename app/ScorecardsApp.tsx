@@ -5574,7 +5574,7 @@ function TodosScreen({
 
       {assignFilter === "mine" ? (
         <>
-          {showPrevSection && (
+          {showPrevSection && quarterFilter === "all" && (
             <TodoGroupCard
               title={`Monthly actuals · ${workMonthLabel}`}
               meta={<>{monthlyAdminDone}/{allMonthlyAdminRows.length} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
@@ -5607,7 +5607,7 @@ function TodosScreen({
             </TodoGroupCard>
           )}
 
-          {showCurrentSection && currentMonthlyGoals.length > 0 && currentMonthlyGoals.some((g) => currentActuals[metaKey("target", g)] == null) && (
+          {showCurrentSection && quarterFilter === "all" && currentMonthlyGoals.length > 0 && currentMonthlyGoals.some((g) => currentActuals[metaKey("target", g)] == null) && (
             <TodoGroupCard
               title={`${currentMonthLabel} monthly goals`}
               meta={<>{currentMonthlyGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length}/{currentMonthlyGoals.length} set · Due {currentTargetDue.label} <DaysBadge diffDays={currentTargetDue.diffDays} /></>}
@@ -5660,7 +5660,7 @@ function TodosScreen({
             </TodoGroupCard>
           )}
 
-          {showNextSection && nextMonthlyGoals.length > 0 && (
+          {showNextSection && quarterFilter === "all" && nextMonthlyGoals.length > 0 && (
             <TodoGroupCard
               title={`${nextMonthLabel} monthly goals`}
               meta={<>{nextMonthlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length}/{nextMonthlyGoals.length} set · Due {targetDue.label} <DaysBadge diffDays={targetDue.diffDays} /></>}
@@ -5758,7 +5758,7 @@ function TodosScreen({
               <div key={subProfile.id} className="flex flex-col gap-3">
                 <h3 className="text-[13px] font-semibold text-foreground">{displayName}</h3>
 
-                {showPrevSection && (
+                {showPrevSection && quarterFilter === "all" && (
                   <TodoGroupCard
                     title={`Monthly actuals · ${workMonthLabel}`}
                     meta={<>{subMonthlyActualsDone}/{subMonthlyActuals.length} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
@@ -5817,7 +5817,7 @@ function TodosScreen({
                   </TodoGroupCard>
                 )}
 
-                {showCurrentSection && subCurrentMonthly.length > 0 && subCurrentMonthlyDone < subCurrentMonthly.length && (
+                {showCurrentSection && quarterFilter === "all" && subCurrentMonthly.length > 0 && subCurrentMonthlyDone < subCurrentMonthly.length && (
                   <TodoGroupCard
                     title={`${currentMonthLabel} monthly goals`}
                     meta={<>{subCurrentMonthlyDone}/{subCurrentMonthly.length} set · Due {currentTargetDue.label} <DaysBadge diffDays={currentTargetDue.diffDays} /></>}
@@ -5870,7 +5870,7 @@ function TodosScreen({
                   </TodoGroupCard>
                 )}
 
-                {showNextSection && subNextMonthly.length > 0 && (
+                {showNextSection && quarterFilter === "all" && subNextMonthly.length > 0 && (
                   <TodoGroupCard
                     title={`${nextMonthLabel} monthly goals`}
                     meta={<>{subNextMonthlyDone}/{subNextMonthly.length} set · Due {targetDue.label} <DaysBadge diffDays={targetDue.diffDays} /></>}
