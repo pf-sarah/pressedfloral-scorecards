@@ -5500,50 +5500,58 @@ function TodosScreen({
     quarterlyActualsGoals.length > 0 || currentQuarterlyGoals.length > 0 || nextQuarterlyGoals.length > 0;
   const showQuarterPills = hasQuarterlyContent && (isAdmin || subordinateProfiles.length > 0);
 
-  const monthFilterOptions: { value: typeof monthFilter; label: string }[] = [
-    { value: "all", label: "All" },
-    { value: "prev", label: workMonthLabel },
-    { value: "current", label: currentMonthLabel },
-    { value: "next", label: nextMonthLabel },
-  ];
+  const allFiltersDefault = monthFilter === "all" && quarterFilter === "all";
 
   return (
     <div className="screen active">
       {/* Filters */}
       <div className="mb-4 flex flex-col gap-2">
-        <div className="flex flex-wrap gap-1.5">
-          {monthFilterOptions.map(({ value, label }) => (
+        {/* Unified period row: months + quarters in one line */}
+        <div className="flex flex-wrap items-center gap-1.5">
+          {/* All — resets both month and quarter */}
+          <button
+            type="button"
+            onClick={() => { setMonthFilter("all"); setQuarterFilter("all"); }}
+            className={`rounded-full px-3 py-1 text-[12px] font-medium transition-colors ${allFiltersDefault ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground"}`}
+          >
+            All
+          </button>
+
+          {/* Month pills — toggleable (click active to deselect) */}
+          {([
+            { value: "prev" as const, label: workMonthLabel },
+            { value: "current" as const, label: currentMonthLabel },
+            { value: "next" as const, label: nextMonthLabel },
+          ] as const).map(({ value, label }) => (
             <button
               key={value}
               type="button"
-              onClick={() => setMonthFilter(value)}
+              onClick={() => setMonthFilter(monthFilter === value ? "all" : value)}
               className={`rounded-full px-3 py-1 text-[12px] font-medium transition-colors ${monthFilter === value ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground"}`}
             >
               {label}
             </button>
           ))}
+
+          {/* Divider + quarter pills — outlined style to distinguish from month pills */}
+          {showQuarterPills && (
+            <>
+              <span className="mx-0.5 h-4 w-px shrink-0 bg-border" />
+              {uniqueQuarters.map((q) => (
+                <button
+                  key={q}
+                  type="button"
+                  onClick={() => setQuarterFilter(quarterFilter === q ? "all" : q)}
+                  className={`rounded-full border px-3 py-1 text-[12px] font-medium transition-colors ${quarterFilter === q ? "border-foreground bg-foreground text-background" : "border-border bg-transparent text-muted-foreground hover:border-foreground/40 hover:text-foreground"}`}
+                >
+                  {q}
+                </button>
+              ))}
+            </>
+          )}
         </div>
-        {showQuarterPills && (
-          <div className="flex flex-wrap gap-1.5">
-            <button
-              type="button"
-              onClick={() => setQuarterFilter("all")}
-              className={`rounded-full px-3 py-1 text-[12px] font-medium transition-colors ${quarterFilter === "all" ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground"}`}
-            >
-              All quarters
-            </button>
-            {uniqueQuarters.map((q) => (
-              <button
-                key={q}
-                type="button"
-                onClick={() => setQuarterFilter(quarterFilter === q ? "all" : q)}
-                className={`rounded-full px-3 py-1 text-[12px] font-medium transition-colors ${quarterFilter === q ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground"}`}
-              >
-                {q}
-              </button>
-            ))}
-          </div>
-        )}
+
+        {/* My tasks / My managers toggle */}
         {subordinateProfiles.length > 0 && (
           <div className="flex overflow-hidden rounded-md border border-input text-[12.5px]">
             <button
