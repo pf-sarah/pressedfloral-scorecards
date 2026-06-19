@@ -5385,12 +5385,28 @@ function TodosScreen({
     return { label: due.toLocaleDateString("default", { month: "short", day: "numeric" }), diffDays };
   }
 
+  function quarterLabelToStart(quarterLabel: string): { year: number; month: number } {
+    const [q, yearStr] = quarterLabel.split(" ");
+    const year = Number(yearStr);
+    const month = (Number(q.slice(1)) - 1) * 3 + 1; // Q1→1, Q2→4, Q3→7, Q4→10
+    return { year, month };
+  }
+
   const today = new Date();
   const adminDue = dueDate(today.getFullYear(), today.getMonth() + 1, 17);
+  // Quarterly actuals are due the 17th of the first month of the NEXT quarter
+  const workQStart = quarterLabelToStart(workQuarterLabel);
+  const nextQMonth = workQStart.month + 3;
+  const nextQYear = nextQMonth > 12 ? workQStart.year + 1 : workQStart.year;
+  const quarterlyActualsDue = dueDate(nextQYear, nextQMonth > 12 ? nextQMonth - 12 : nextQMonth, 17);
   const [cYear, cMonth] = currentMonthValue.split("-").map(Number);
   const currentTargetDue = dueDate(cYear, cMonth, 1); // due on the 1st of the current month → always overdue
+  const currentQStart = quarterLabelToStart(currentQuarterLabel);
+  const currentQuarterTargetDue = dueDate(currentQStart.year, currentQStart.month, 1);
   const [nYear, nMonth] = nextMonthValue.split("-").map(Number);
   const targetDue = dueDate(nYear, nMonth, 1);
+  const nextQStart = quarterLabelToStart(nextQuarterLabel);
+  const nextQuarterTargetDue = dueDate(nextQStart.year, nextQStart.month, 1);
 
   function DaysBadge({ diffDays }: { diffDays: number }) {
     if (diffDays < 0) return <Badge className="border-transparent bg-[#9B2C2C]/10 font-medium text-[#9B2C2C]">{Math.abs(diffDays)}d overdue</Badge>;
@@ -5539,7 +5555,7 @@ function TodosScreen({
               {quarterlyActualsGoals.length > 0 && (
                 <TodoGroupCard
                   title={`Quarterly actuals · ${workQuarterLabel}`}
-                  meta={<>{quarterlyActualsDone}/{quarterlyActualRows.length} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
+                  meta={<>{quarterlyActualsDone}/{quarterlyActualRows.length} done · Due {quarterlyActualsDue.label} <DaysBadge diffDays={quarterlyActualsDue.diffDays} /></>}
                   done={quarterlyActualsDone}
                   total={quarterlyActualRows.length}
                   showCompleted={showCompletedAdminQ}
@@ -5586,7 +5602,7 @@ function TodosScreen({
               {currentQuarterlyGoals.length > 0 && currentQuarterlyGoals.some((g) => currentActuals[metaKey("target", g)] == null) && (
                 <TodoGroupCard
                   title={`${currentQuarterLabel} quarterly goals`}
-                  meta={<>{currentQuarterlyGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length}/{currentQuarterlyGoals.length} set · Due {currentTargetDue.label} <DaysBadge diffDays={currentTargetDue.diffDays} /></>}
+                  meta={<>{currentQuarterlyGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length}/{currentQuarterlyGoals.length} set · Due {currentQuarterTargetDue.label} <DaysBadge diffDays={currentQuarterTargetDue.diffDays} /></>}
                   done={currentQuarterlyGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length}
                   total={currentQuarterlyGoals.length}
                   showCompleted={showCompletedCurrentTargetsQ}
@@ -5643,7 +5659,7 @@ function TodosScreen({
               {nextQuarterlyGoals.length > 0 && (
                 <TodoGroupCard
                   title={`${nextQuarterLabel} quarterly goals`}
-                  meta={<>{nextQuarterlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length}/{nextQuarterlyGoals.length} set · Due {targetDue.label} <DaysBadge diffDays={targetDue.diffDays} /></>}
+                  meta={<>{nextQuarterlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length}/{nextQuarterlyGoals.length} set · Due {nextQuarterTargetDue.label} <DaysBadge diffDays={nextQuarterTargetDue.diffDays} /></>}
                   done={nextQuarterlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length}
                   total={nextQuarterlyGoals.length}
                   showCompleted={showCompletedTargetsQ}
@@ -5746,7 +5762,7 @@ function TodosScreen({
                     {subQuarterlyActuals.length > 0 && (
                       <TodoGroupCard
                         title={`Quarterly actuals · ${workQuarterLabel}`}
-                        meta={<>{subQuarterlyActualsDone}/{subQuarterlyActuals.length} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
+                        meta={<>{subQuarterlyActualsDone}/{subQuarterlyActuals.length} done · Due {quarterlyActualsDue.label} <DaysBadge diffDays={quarterlyActualsDue.diffDays} /></>}
                         done={subQuarterlyActualsDone}
                         total={subQuarterlyActuals.length}
                         showCompleted={showAdminQCompleted}
@@ -5806,7 +5822,7 @@ function TodosScreen({
                     {subCurrentQuarterly.length > 0 && subCurrentQuarterlyDone < subCurrentQuarterly.length && (
                       <TodoGroupCard
                         title={`${currentQuarterLabel} quarterly goals`}
-                        meta={<>{subCurrentQuarterlyDone}/{subCurrentQuarterly.length} set · Due {currentTargetDue.label} <DaysBadge diffDays={currentTargetDue.diffDays} /></>}
+                        meta={<>{subCurrentQuarterlyDone}/{subCurrentQuarterly.length} set · Due {currentQuarterTargetDue.label} <DaysBadge diffDays={currentQuarterTargetDue.diffDays} /></>}
                         done={subCurrentQuarterlyDone}
                         total={subCurrentQuarterly.length}
                         showCompleted={showCurrentQCompleted}
@@ -5863,7 +5879,7 @@ function TodosScreen({
                     {subNextQuarterly.length > 0 && (
                       <TodoGroupCard
                         title={`${nextQuarterLabel} quarterly goals`}
-                        meta={<>{subNextQuarterlyDone}/{subNextQuarterly.length} set · Due {targetDue.label} <DaysBadge diffDays={targetDue.diffDays} /></>}
+                        meta={<>{subNextQuarterlyDone}/{subNextQuarterly.length} set · Due {nextQuarterTargetDue.label} <DaysBadge diffDays={nextQuarterTargetDue.diffDays} /></>}
                         done={subNextQuarterlyDone}
                         total={subNextQuarterly.length}
                         showCompleted={showNextQCompleted}
