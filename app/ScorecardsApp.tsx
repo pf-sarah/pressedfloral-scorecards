@@ -5288,8 +5288,15 @@ function TodosScreen({
   const [showCompletedTargetsQ, setShowCompletedTargetsQ] = useState(false);
   const [showCompletedCurrentTargets, setShowCompletedCurrentTargets] = useState(false);
   const [showCompletedCurrentTargetsQ, setShowCompletedCurrentTargetsQ] = useState(false);
-  const [monthFilter, setMonthFilter] = useState<"all" | "prev" | "current" | "next">("all");
-  const [quarterFilter, setQuarterFilter] = useState<"all" | string>("all");
+  type MonthKey = "prev" | "current" | "next";
+  const [selectedMonths, setSelectedMonths] = useState<Set<MonthKey>>(new Set());
+  const [selectedQuarters, setSelectedQuarters] = useState<Set<string>>(new Set());
+  function toggleMonth(v: MonthKey) {
+    setSelectedMonths((prev) => { const s = new Set(prev); s.has(v) ? s.delete(v) : s.add(v); return s; });
+  }
+  function toggleQuarter(q: string) {
+    setSelectedQuarters((prev) => { const s = new Set(prev); s.has(q) ? s.delete(q) : s.add(q); return s; });
+  }
   const [assignFilter, setAssignFilter] = useState<"mine" | "managers">("mine");
   type MgrKey = "admin" | "current" | "next" | "adminQ" | "currentQ" | "nextQ";
   const [mgrShowCompleted, setMgrShowCompleted] = useState<Record<string, Record<MgrKey, boolean>>>({});
@@ -5488,11 +5495,13 @@ function TodosScreen({
   const monthlyAdminDone = allMonthlyAdminRows.filter((r) => r.done).length;
   const quarterlyActualsDone = quarterlyActualRows.filter((r) => r.done).length;
 
-  const showPrevSection = monthFilter === "all" || monthFilter === "prev";
-  const showCurrentSection = monthFilter === "all" || monthFilter === "current";
-  const showNextSection = monthFilter === "all" || monthFilter === "next";
-
-  const showQuarterlyCard = (quarterLabel: string) => monthFilter === "all" && (quarterFilter === "all" || quarterFilter === quarterLabel);
+  const nothingSelected = selectedMonths.size === 0 && selectedQuarters.size === 0;
+  const showPrevSection = nothingSelected || selectedMonths.has("prev");
+  const showCurrentSection = nothingSelected || selectedMonths.has("current");
+  const showNextSection = nothingSelected || selectedMonths.has("next");
+  // Quarterly card shows when its quarter is selected, or nothing is selected at all.
+  // If only months are selected, quarterly cards are suppressed; if only quarters are selected, monthly cards are suppressed.
+  const showQuarterlyCard = (quarterLabel: string) => nothingSelected || selectedQuarters.has(quarterLabel);
 
   // Unique ordered list of quarters relevant to the to-do list
   const uniqueQuarters = Array.from(new Set([workQuarterLabel, currentQuarterLabel, ...(nextIsNewQuarter ? [nextQuarterLabel] : [])]));
@@ -5500,24 +5509,22 @@ function TodosScreen({
     quarterlyActualsGoals.length > 0 || currentQuarterlyGoals.length > 0 || nextQuarterlyGoals.length > 0;
   const showQuarterPills = hasQuarterlyContent && (isAdmin || subordinateProfiles.length > 0);
 
-  const allFiltersDefault = monthFilter === "all" && quarterFilter === "all";
-
   return (
     <div className="screen active">
       {/* Filters */}
       <div className="mb-4 flex flex-col gap-2">
-        {/* Unified period row: months + quarters in one line */}
+        {/* Unified period row: months + quarters in one line, multi-select */}
         <div className="flex flex-wrap items-center gap-1.5">
-          {/* All — resets both month and quarter */}
+          {/* All — clears all selections */}
           <button
             type="button"
-            onClick={() => { setMonthFilter("all"); setQuarterFilter("all"); }}
-            className={`rounded-full px-3 py-1 text-[12px] font-medium transition-colors ${allFiltersDefault ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground"}`}
+            onClick={() => { setSelectedMonths(new Set()); setSelectedQuarters(new Set()); }}
+            className={`rounded-full px-3 py-1 text-[12px] font-medium transition-colors ${nothingSelected ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground"}`}
           >
             All
           </button>
 
-          {/* Month pills — toggleable (click active to deselect) */}
+          {/* Month pills — multi-select toggle */}
           {([
             { value: "prev" as const, label: workMonthLabel },
             { value: "current" as const, label: currentMonthLabel },
@@ -5526,14 +5533,14 @@ function TodosScreen({
             <button
               key={value}
               type="button"
-              onClick={() => setMonthFilter(monthFilter === value ? "all" : value)}
-              className={`rounded-full px-3 py-1 text-[12px] font-medium transition-colors ${monthFilter === value ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground"}`}
+              onClick={() => toggleMonth(value)}
+              className={`rounded-full px-3 py-1 text-[12px] font-medium transition-colors ${selectedMonths.has(value) ? "bg-foreground text-background" : "bg-muted text-muted-foreground hover:text-foreground"}`}
             >
               {label}
             </button>
           ))}
 
-          {/* Divider + quarter pills — outlined style to distinguish from month pills */}
+          {/* Divider + quarter pills — outlined style, multi-select toggle */}
           {showQuarterPills && (
             <>
               <span className="mx-0.5 h-4 w-px shrink-0 bg-border" />
@@ -5541,8 +5548,8 @@ function TodosScreen({
                 <button
                   key={q}
                   type="button"
-                  onClick={() => setQuarterFilter(quarterFilter === q ? "all" : q)}
-                  className={`rounded-full border px-3 py-1 text-[12px] font-medium transition-colors ${quarterFilter === q ? "border-foreground bg-foreground text-background" : "border-border bg-transparent text-muted-foreground hover:border-foreground/40 hover:text-foreground"}`}
+                  onClick={() => toggleQuarter(q)}
+                  className={`rounded-full border px-3 py-1 text-[12px] font-medium transition-colors ${selectedQuarters.has(q) ? "border-foreground bg-foreground text-background" : "border-border bg-transparent text-muted-foreground hover:border-foreground/40 hover:text-foreground"}`}
                 >
                   {q}
                 </button>
@@ -5574,7 +5581,7 @@ function TodosScreen({
 
       {assignFilter === "mine" ? (
         <>
-          {showPrevSection && quarterFilter === "all" && (
+          {showPrevSection && (
             <TodoGroupCard
               title={`Monthly actuals · ${workMonthLabel}`}
               meta={<>{monthlyAdminDone}/{allMonthlyAdminRows.length} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
@@ -5607,7 +5614,7 @@ function TodosScreen({
             </TodoGroupCard>
           )}
 
-          {showCurrentSection && quarterFilter === "all" && currentMonthlyGoals.length > 0 && currentMonthlyGoals.some((g) => currentActuals[metaKey("target", g)] == null) && (
+          {showCurrentSection && currentMonthlyGoals.length > 0 && currentMonthlyGoals.some((g) => currentActuals[metaKey("target", g)] == null) && (
             <TodoGroupCard
               title={`${currentMonthLabel} monthly goals`}
               meta={<>{currentMonthlyGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length}/{currentMonthlyGoals.length} set · Due {currentTargetDue.label} <DaysBadge diffDays={currentTargetDue.diffDays} /></>}
@@ -5660,7 +5667,7 @@ function TodosScreen({
             </TodoGroupCard>
           )}
 
-          {showNextSection && quarterFilter === "all" && nextMonthlyGoals.length > 0 && (
+          {showNextSection && nextMonthlyGoals.length > 0 && (
             <TodoGroupCard
               title={`${nextMonthLabel} monthly goals`}
               meta={<>{nextMonthlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length}/{nextMonthlyGoals.length} set · Due {targetDue.label} <DaysBadge diffDays={targetDue.diffDays} /></>}
@@ -5758,7 +5765,7 @@ function TodosScreen({
               <div key={subProfile.id} className="flex flex-col gap-3">
                 <h3 className="text-[13px] font-semibold text-foreground">{displayName}</h3>
 
-                {showPrevSection && quarterFilter === "all" && (
+                {showPrevSection && (
                   <TodoGroupCard
                     title={`Monthly actuals · ${workMonthLabel}`}
                     meta={<>{subMonthlyActualsDone}/{subMonthlyActuals.length} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
@@ -5817,7 +5824,7 @@ function TodosScreen({
                   </TodoGroupCard>
                 )}
 
-                {showCurrentSection && quarterFilter === "all" && subCurrentMonthly.length > 0 && subCurrentMonthlyDone < subCurrentMonthly.length && (
+                {showCurrentSection && subCurrentMonthly.length > 0 && subCurrentMonthlyDone < subCurrentMonthly.length && (
                   <TodoGroupCard
                     title={`${currentMonthLabel} monthly goals`}
                     meta={<>{subCurrentMonthlyDone}/{subCurrentMonthly.length} set · Due {currentTargetDue.label} <DaysBadge diffDays={currentTargetDue.diffDays} /></>}
@@ -5870,7 +5877,7 @@ function TodosScreen({
                   </TodoGroupCard>
                 )}
 
-                {showNextSection && quarterFilter === "all" && subNextMonthly.length > 0 && (
+                {showNextSection && subNextMonthly.length > 0 && (
                   <TodoGroupCard
                     title={`${nextMonthLabel} monthly goals`}
                     meta={<>{subNextMonthlyDone}/{subNextMonthly.length} set · Due {targetDue.label} <DaysBadge diffDays={targetDue.diffDays} /></>}
