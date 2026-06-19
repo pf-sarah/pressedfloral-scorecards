@@ -5323,11 +5323,18 @@ function TodosScreen({
   const isSubordinateGoal = (g: Goal) =>
     subordinateProfiles.length > 0 && subordinateProfiles.some((sp) => scopedForProfile([g], sp).length > 0);
 
-  // All company/dept goals that have targets set for workMonth — each is its own actuals item
-  const actualsGoals = goals.filter((g) =>
+  // Base filter shared across all three sections: scope + tier + subordinate exclusion
+  const baseGoalFilter = (g: Goal) =>
     !isSubordinateGoal(g) &&
     (isAdmin ? true : g.goalTier !== "company") &&
-    (g.goalTier === "company" || g.goalTier === "department") &&
+    (g.goalTier === "company" || g.goalTier === "department");
+
+  // All company/dept goals that have targets set for workMonth — each is its own actuals item
+  // Must be active for workMonth and not month-specifically deactivated
+  const actualsGoals = goals.filter((g) =>
+    baseGoalFilter(g) &&
+    goalActiveForMonth(g, workMonth) &&
+    !workActuals["__monthly_inactive__" + actualKey(g)] &&
     workActuals[metaKey("target", g)] != null &&
     workActuals[metaKey("min", g)] != null
   );
@@ -5336,15 +5343,22 @@ function TodosScreen({
   const adminTotal = (isAdmin ? 1 : 0) + actualsGoals.length;
   const adminDoneCount = (isAdmin ? (ripplingDone ? 1 : 0) : 0) + actualsDoneCount;
 
-  const targetGoals = goals.filter((g) => !isSubordinateGoal(g) && (isAdmin ? true : g.goalTier !== "company") && (g.goalTier === "company" || g.goalTier === "department"));
-
-  // Current month targets (overdue if not set — month already started)
-  const currentTargetGoals = targetGoals;
+  // Current month targets — only goals active for the current month
+  const currentTargetGoals = goals.filter((g) =>
+    baseGoalFilter(g) &&
+    goalActiveForMonth(g, currentMonthValue) &&
+    !currentActuals["__monthly_inactive__" + actualKey(g)]
+  );
   const currentTargetDoneCount = currentTargetGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length;
   const currentTargetTotal = currentTargetGoals.length;
   const allCurrentTargetsDone = currentTargetDoneCount === currentTargetTotal && currentTargetTotal > 0;
 
-  // Next month targets
+  // Next month targets — only goals active for next month
+  const targetGoals = goals.filter((g) =>
+    baseGoalFilter(g) &&
+    goalActiveForMonth(g, nextMonthValue) &&
+    !nextActuals["__monthly_inactive__" + actualKey(g)]
+  );
   const targetDoneCount = targetGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length;
   const targetTotal = targetGoals.length;
 
@@ -5570,21 +5584,28 @@ function TodosScreen({
         <div className="flex flex-col gap-6">
           {subordinateProfiles.map((subProfile) => {
             const displayName = subProfile.linkedEmployeeName || subProfile.email || "Manager";
-            const subTargetGoals = scopedForProfile(allGoals, subProfile).filter(
-              (g) => g.active && (g.goalTier === "company" || g.goalTier === "department") && (isAdmin || g.goalTier !== "company")
-            );
+            const subBaseFilter = (g: Goal) =>
+              g.active && (g.goalTier === "company" || g.goalTier === "department") && (isAdmin || g.goalTier !== "company");
+            const subScopedGoals = scopedForProfile(allGoals, subProfile).filter(subBaseFilter);
 
-            const subActualsGoals = subTargetGoals.filter(
-              (g) => workActuals[metaKey("target", g)] != null && workActuals[metaKey("min", g)] != null
+            const subActualsGoals = subScopedGoals.filter(
+              (g) => goalActiveForMonth(g, workMonth) && !workActuals["__monthly_inactive__" + actualKey(g)] &&
+                workActuals[metaKey("target", g)] != null && workActuals[metaKey("min", g)] != null
             );
             const subActualsDone = subActualsGoals.filter((g) => workActuals[actualKey(g)] != null).length;
 
-            const subCurrentDone = subTargetGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length;
-            const subCurrentTotal = subTargetGoals.length;
+            const subCurrentGoals = subScopedGoals.filter(
+              (g) => goalActiveForMonth(g, currentMonthValue) && !currentActuals["__monthly_inactive__" + actualKey(g)]
+            );
+            const subCurrentDone = subCurrentGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length;
+            const subCurrentTotal = subCurrentGoals.length;
             const subAllCurrentDone = subCurrentTotal > 0 && subCurrentDone === subCurrentTotal;
 
-            const subNextDone = subTargetGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length;
-            const subNextTotal = subTargetGoals.length;
+            const subNextGoals = subScopedGoals.filter(
+              (g) => goalActiveForMonth(g, nextMonthValue) && !nextActuals["__monthly_inactive__" + actualKey(g)]
+            );
+            const subNextDone = subNextGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length;
+            const subNextTotal = subNextGoals.length;
 
             const showAdminCompleted = getMgrCompleted(subProfile.id, "admin");
             const showCurrentCompleted = getMgrCompleted(subProfile.id, "current");
@@ -5633,7 +5654,7 @@ function TodosScreen({
                     showCompleted={showCurrentCompleted}
                     onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "current")}
                   >
-                    {subTargetGoals
+                    {subCurrentGoals
                       .filter((g) => showCurrentCompleted || currentActuals[metaKey("target", g)] == null)
                       .map((goal) => {
                         const saved = currentActuals[metaKey("target", goal)] != null;
@@ -5663,10 +5684,10 @@ function TodosScreen({
                     showCompleted={showNextCompleted}
                     onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "next")}
                   >
-                    {subTargetGoals.length === 0 ? (
+                    {subNextGoals.length === 0 ? (
                       <div className="py-3 text-[13px] text-muted-foreground">No company or department goals in bank</div>
                     ) : (
-                      subTargetGoals
+                      subNextGoals
                         .filter((g) => showNextCompleted || nextActuals[metaKey("target", g)] == null)
                         .map((goal) => {
                           const saved = nextActuals[metaKey("target", goal)] != null;
