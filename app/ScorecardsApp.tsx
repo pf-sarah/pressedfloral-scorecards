@@ -3623,9 +3623,10 @@ function ScorecardsScreen(props: {
     // If this employee has a forced period type, only show them on their designated tab
     const forcedPeriod = props.employeePeriodTypes?.[e.name];
     if (forcedPeriod) return forcedPeriod === globalPeriodType;
-    // Otherwise apply the standard goal-based filter
-    if (globalPeriodType === "quarterly") return goalsForEmployee(e).some((g) => g.periodType === "quarterly");
-    if (globalPeriodType === "monthly") return goalsForEmployee(e).some((g) => g.periodType !== "quarterly");
+    // Otherwise apply the standard goal-based filter, gating on active month when in single-month mode
+    const activeInPeriod = (g: Goal) => !singleMonthMode || goalActiveForMonth(g, selectedMonth);
+    if (globalPeriodType === "quarterly") return goalsForEmployee(e).some((g) => g.periodType === "quarterly" && activeInPeriod(g));
+    if (globalPeriodType === "monthly") return goalsForEmployee(e).some((g) => g.periodType !== "quarterly" && activeInPeriod(g));
     return true;
   });
 
