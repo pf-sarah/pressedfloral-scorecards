@@ -5567,152 +5567,142 @@ function TodosScreen({
       {assignFilter === "mine" ? (
         <>
           {showPrevSection && (
-            <>
-              <TodoGroupCard
-                title={`Monthly actuals · ${workMonthLabel}`}
-                meta={<>{monthlyAdminDone}/{allMonthlyAdminRows.length} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
-                done={monthlyAdminDone}
-                total={allMonthlyAdminRows.length}
-                showCompleted={showCompletedAdmin}
-                onToggleCompleted={() => setShowCompletedAdmin((v) => !v)}
-              >
-                {visibleMonthlyAdminRows.length === 0 ? (
-                  <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All monthly tasks complete</div>
-                ) : (
-                  visibleMonthlyAdminRows.map((row) => <React.Fragment key={row.key}>{row.node}</React.Fragment>)
-                )}
-              </TodoGroupCard>
-              {quarterlyActualsGoals.length > 0 && showQuarterlyCard(workQuarterLabel) && (
-                <TodoGroupCard
-                  title={`Quarterly actuals · ${workQuarterLabel}`}
-                  meta={<>{quarterlyActualsDone}/{quarterlyActualRows.length} done · Due {quarterlyActualsDue.label} <DaysBadge diffDays={quarterlyActualsDue.diffDays} /></>}
-                  done={quarterlyActualsDone}
-                  total={quarterlyActualRows.length}
-                  showCompleted={showCompletedAdminQ}
-                  onToggleCompleted={() => setShowCompletedAdminQ((v) => !v)}
-                >
-                  {visibleQuarterlyActualRows.length === 0 ? (
-                    <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All quarterly actuals complete</div>
-                  ) : (
-                    visibleQuarterlyActualRows.map((row) => <React.Fragment key={row.key}>{row.node}</React.Fragment>)
-                  )}
-                </TodoGroupCard>
+            <TodoGroupCard
+              title={`Monthly actuals · ${workMonthLabel}`}
+              meta={<>{monthlyAdminDone}/{allMonthlyAdminRows.length} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
+              done={monthlyAdminDone}
+              total={allMonthlyAdminRows.length}
+              showCompleted={showCompletedAdmin}
+              onToggleCompleted={() => setShowCompletedAdmin((v) => !v)}
+            >
+              {visibleMonthlyAdminRows.length === 0 ? (
+                <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All monthly tasks complete</div>
+              ) : (
+                visibleMonthlyAdminRows.map((row) => <React.Fragment key={row.key}>{row.node}</React.Fragment>)
               )}
-            </>
+            </TodoGroupCard>
+          )}
+          {quarterlyActualsGoals.length > 0 && showQuarterlyCard(workQuarterLabel) && (
+            <TodoGroupCard
+              title={`Quarterly actuals · ${workQuarterLabel}`}
+              meta={<>{quarterlyActualsDone}/{quarterlyActualRows.length} done · Due {quarterlyActualsDue.label} <DaysBadge diffDays={quarterlyActualsDue.diffDays} /></>}
+              done={quarterlyActualsDone}
+              total={quarterlyActualRows.length}
+              showCompleted={showCompletedAdminQ}
+              onToggleCompleted={() => setShowCompletedAdminQ((v) => !v)}
+            >
+              {visibleQuarterlyActualRows.length === 0 ? (
+                <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All quarterly actuals complete</div>
+              ) : (
+                visibleQuarterlyActualRows.map((row) => <React.Fragment key={row.key}>{row.node}</React.Fragment>)
+              )}
+            </TodoGroupCard>
           )}
 
-          {showCurrentSection && currentTargetTotal > 0 && !allCurrentTargetsDone && (
-            <>
-              {currentMonthlyGoals.length > 0 && currentMonthlyGoals.some((g) => currentActuals[metaKey("target", g)] == null) && (
-                <TodoGroupCard
-                  title={`${currentMonthLabel} monthly goals`}
-                  meta={<>{currentMonthlyGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length}/{currentMonthlyGoals.length} set · Due {currentTargetDue.label} <DaysBadge diffDays={currentTargetDue.diffDays} /></>}
-                  done={currentMonthlyGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length}
-                  total={currentMonthlyGoals.length}
-                  showCompleted={showCompletedCurrentTargets}
-                  onToggleCompleted={() => setShowCompletedCurrentTargets((v) => !v)}
-                >
-                  {currentMonthlyGoals
-                    .filter((g) => showCompletedCurrentTargets || currentActuals[metaKey("target", g)] == null)
-                    .map((goal) => {
-                      const saved = currentActuals[metaKey("target", goal)] != null;
-                      const draft = draftCurrentTargets[goal.id] ?? { target: String(currentActuals[metaKey("target", goal)] ?? ""), min: String(currentActuals[metaKey("min", goal)] ?? "") };
-                      return (
-                        <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
-                          <div className="ml-auto flex items-end gap-2">
-                            <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
-                            <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
-                            <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveCurrentTargetPair(goal, draft.target, draft.min)}>Set</Button>
-                          </div>
-                        </TodoRow>
-                      );
-                    })}
-                </TodoGroupCard>
-              )}
-              {currentQuarterlyGoals.length > 0 && currentQuarterlyGoals.some((g) => currentActuals[metaKey("target", g)] == null) && showQuarterlyCard(currentQuarterLabel) && (
-                <TodoGroupCard
-                  title={`${currentQuarterLabel} quarterly goals`}
-                  meta={<>{currentQuarterlyGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length}/{currentQuarterlyGoals.length} set · Due {currentQuarterTargetDue.label} <DaysBadge diffDays={currentQuarterTargetDue.diffDays} /></>}
-                  done={currentQuarterlyGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length}
-                  total={currentQuarterlyGoals.length}
-                  showCompleted={showCompletedCurrentTargetsQ}
-                  onToggleCompleted={() => setShowCompletedCurrentTargetsQ((v) => !v)}
-                >
-                  {currentQuarterlyGoals
-                    .filter((g) => showCompletedCurrentTargetsQ || currentActuals[metaKey("target", g)] == null)
-                    .map((goal) => {
-                      const saved = currentActuals[metaKey("target", goal)] != null;
-                      const draft = draftCurrentTargets[goal.id] ?? { target: String(currentActuals[metaKey("target", goal)] ?? ""), min: String(currentActuals[metaKey("min", goal)] ?? "") };
-                      return (
-                        <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
-                          <div className="ml-auto flex items-end gap-2">
-                            <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
-                            <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
-                            <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveCurrentTargetPair(goal, draft.target, draft.min)}>Set</Button>
-                          </div>
-                        </TodoRow>
-                      );
-                    })}
-                </TodoGroupCard>
-              )}
-            </>
+          {showCurrentSection && currentMonthlyGoals.length > 0 && currentMonthlyGoals.some((g) => currentActuals[metaKey("target", g)] == null) && (
+            <TodoGroupCard
+              title={`${currentMonthLabel} monthly goals`}
+              meta={<>{currentMonthlyGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length}/{currentMonthlyGoals.length} set · Due {currentTargetDue.label} <DaysBadge diffDays={currentTargetDue.diffDays} /></>}
+              done={currentMonthlyGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length}
+              total={currentMonthlyGoals.length}
+              showCompleted={showCompletedCurrentTargets}
+              onToggleCompleted={() => setShowCompletedCurrentTargets((v) => !v)}
+            >
+              {currentMonthlyGoals
+                .filter((g) => showCompletedCurrentTargets || currentActuals[metaKey("target", g)] == null)
+                .map((goal) => {
+                  const saved = currentActuals[metaKey("target", goal)] != null;
+                  const draft = draftCurrentTargets[goal.id] ?? { target: String(currentActuals[metaKey("target", goal)] ?? ""), min: String(currentActuals[metaKey("min", goal)] ?? "") };
+                  return (
+                    <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
+                      <div className="ml-auto flex items-end gap-2">
+                        <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
+                        <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
+                        <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveCurrentTargetPair(goal, draft.target, draft.min)}>Set</Button>
+                      </div>
+                    </TodoRow>
+                  );
+                })}
+            </TodoGroupCard>
+          )}
+          {currentQuarterlyGoals.length > 0 && currentQuarterlyGoals.some((g) => currentActuals[metaKey("target", g)] == null) && showQuarterlyCard(currentQuarterLabel) && (
+            <TodoGroupCard
+              title={`${currentQuarterLabel} quarterly goals`}
+              meta={<>{currentQuarterlyGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length}/{currentQuarterlyGoals.length} set · Due {currentQuarterTargetDue.label} <DaysBadge diffDays={currentQuarterTargetDue.diffDays} /></>}
+              done={currentQuarterlyGoals.filter((g) => currentActuals[metaKey("target", g)] != null).length}
+              total={currentQuarterlyGoals.length}
+              showCompleted={showCompletedCurrentTargetsQ}
+              onToggleCompleted={() => setShowCompletedCurrentTargetsQ((v) => !v)}
+            >
+              {currentQuarterlyGoals
+                .filter((g) => showCompletedCurrentTargetsQ || currentActuals[metaKey("target", g)] == null)
+                .map((goal) => {
+                  const saved = currentActuals[metaKey("target", goal)] != null;
+                  const draft = draftCurrentTargets[goal.id] ?? { target: String(currentActuals[metaKey("target", goal)] ?? ""), min: String(currentActuals[metaKey("min", goal)] ?? "") };
+                  return (
+                    <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
+                      <div className="ml-auto flex items-end gap-2">
+                        <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
+                        <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
+                        <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveCurrentTargetPair(goal, draft.target, draft.min)}>Set</Button>
+                      </div>
+                    </TodoRow>
+                  );
+                })}
+            </TodoGroupCard>
           )}
 
-          {showNextSection && (
-            <>
-              {nextMonthlyGoals.length > 0 && (
-                <TodoGroupCard
-                  title={`${nextMonthLabel} monthly goals`}
-                  meta={<>{nextMonthlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length}/{nextMonthlyGoals.length} set · Due {targetDue.label} <DaysBadge diffDays={targetDue.diffDays} /></>}
-                  done={nextMonthlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length}
-                  total={nextMonthlyGoals.length}
-                  showCompleted={showCompletedTargets}
-                  onToggleCompleted={() => setShowCompletedTargets((v) => !v)}
-                >
-                  {nextMonthlyGoals
-                    .filter((g) => showCompletedTargets || nextActuals[metaKey("target", g)] == null)
-                    .map((goal) => {
-                      const saved = nextActuals[metaKey("target", goal)] != null;
-                      const draft = draftTargets[goal.id] ?? { target: String(nextActuals[metaKey("target", goal)] ?? ""), min: String(nextActuals[metaKey("min", goal)] ?? "") };
-                      return (
-                        <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
-                          <div className="ml-auto flex items-end gap-2">
-                            <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
-                            <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
-                            <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveTargetPair(goal, draft.target, draft.min)}>Set</Button>
-                          </div>
-                        </TodoRow>
-                      );
-                    })}
-                </TodoGroupCard>
-              )}
-              {nextQuarterlyGoals.length > 0 && showQuarterlyCard(nextQuarterLabel) && (
-                <TodoGroupCard
-                  title={`${nextQuarterLabel} quarterly goals`}
-                  meta={<>{nextQuarterlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length}/{nextQuarterlyGoals.length} set · Due {nextQuarterTargetDue.label} <DaysBadge diffDays={nextQuarterTargetDue.diffDays} /></>}
-                  done={nextQuarterlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length}
-                  total={nextQuarterlyGoals.length}
-                  showCompleted={showCompletedTargetsQ}
-                  onToggleCompleted={() => setShowCompletedTargetsQ((v) => !v)}
-                >
-                  {nextQuarterlyGoals
-                    .filter((g) => showCompletedTargetsQ || nextActuals[metaKey("target", g)] == null)
-                    .map((goal) => {
-                      const saved = nextActuals[metaKey("target", goal)] != null;
-                      const draft = draftTargets[goal.id] ?? { target: String(nextActuals[metaKey("target", goal)] ?? ""), min: String(nextActuals[metaKey("min", goal)] ?? "") };
-                      return (
-                        <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
-                          <div className="ml-auto flex items-end gap-2">
-                            <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
-                            <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
-                            <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveTargetPair(goal, draft.target, draft.min)}>Set</Button>
-                          </div>
-                        </TodoRow>
-                      );
-                    })}
-                </TodoGroupCard>
-              )}
-            </>
+          {showNextSection && nextMonthlyGoals.length > 0 && (
+            <TodoGroupCard
+              title={`${nextMonthLabel} monthly goals`}
+              meta={<>{nextMonthlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length}/{nextMonthlyGoals.length} set · Due {targetDue.label} <DaysBadge diffDays={targetDue.diffDays} /></>}
+              done={nextMonthlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length}
+              total={nextMonthlyGoals.length}
+              showCompleted={showCompletedTargets}
+              onToggleCompleted={() => setShowCompletedTargets((v) => !v)}
+            >
+              {nextMonthlyGoals
+                .filter((g) => showCompletedTargets || nextActuals[metaKey("target", g)] == null)
+                .map((goal) => {
+                  const saved = nextActuals[metaKey("target", goal)] != null;
+                  const draft = draftTargets[goal.id] ?? { target: String(nextActuals[metaKey("target", goal)] ?? ""), min: String(nextActuals[metaKey("min", goal)] ?? "") };
+                  return (
+                    <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
+                      <div className="ml-auto flex items-end gap-2">
+                        <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
+                        <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
+                        <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveTargetPair(goal, draft.target, draft.min)}>Set</Button>
+                      </div>
+                    </TodoRow>
+                  );
+                })}
+            </TodoGroupCard>
+          )}
+          {nextQuarterlyGoals.length > 0 && showQuarterlyCard(nextQuarterLabel) && (
+            <TodoGroupCard
+              title={`${nextQuarterLabel} quarterly goals`}
+              meta={<>{nextQuarterlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length}/{nextQuarterlyGoals.length} set · Due {nextQuarterTargetDue.label} <DaysBadge diffDays={nextQuarterTargetDue.diffDays} /></>}
+              done={nextQuarterlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length}
+              total={nextQuarterlyGoals.length}
+              showCompleted={showCompletedTargetsQ}
+              onToggleCompleted={() => setShowCompletedTargetsQ((v) => !v)}
+            >
+              {nextQuarterlyGoals
+                .filter((g) => showCompletedTargetsQ || nextActuals[metaKey("target", g)] == null)
+                .map((goal) => {
+                  const saved = nextActuals[metaKey("target", goal)] != null;
+                  const draft = draftTargets[goal.id] ?? { target: String(nextActuals[metaKey("target", goal)] ?? ""), min: String(nextActuals[metaKey("min", goal)] ?? "") };
+                  return (
+                    <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
+                      <div className="ml-auto flex items-end gap-2">
+                        <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
+                        <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
+                        <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveTargetPair(goal, draft.target, draft.min)}>Set</Button>
+                      </div>
+                    </TodoRow>
+                  );
+                })}
+            </TodoGroupCard>
           )}
         </>
       ) : (
@@ -5761,178 +5751,168 @@ function TodosScreen({
                 <h3 className="text-[13px] font-semibold text-foreground">{displayName}</h3>
 
                 {showPrevSection && (
-                  <>
-                    <TodoGroupCard
-                      title={`Monthly actuals · ${workMonthLabel}`}
-                      meta={<>{subMonthlyActualsDone}/{subMonthlyActuals.length} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
-                      done={subMonthlyActualsDone}
-                      total={subMonthlyActuals.length}
-                      showCompleted={showAdminCompleted}
-                      onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "admin")}
-                    >
-                      {subMonthlyActuals.filter((g) => showAdminCompleted || workActuals[actualKey(g)] == null).length === 0 ? (
-                        <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All monthly tasks complete</div>
-                      ) : (
-                        subMonthlyActuals
-                          .filter((g) => showAdminCompleted || workActuals[actualKey(g)] == null)
-                          .map((goal) => {
-                            const done = workActuals[actualKey(goal)] != null;
-                            const draft = draftActuals[goal.id] ?? String(workActuals[actualKey(goal)] ?? "");
-                            return (
-                              <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={done}>
-                                <div className="ml-auto flex items-end gap-2">
-                                  <TodoNumberField label="Actual" value={draft} onChange={(v) => setDraftActuals((prev) => ({ ...prev, [goal.id]: v }))} />
-                                  <Button size="sm" className="h-8" disabled={draft === ""} onClick={() => onSaveActual(goal, draft)}>Set</Button>
-                                </div>
-                              </TodoRow>
-                            );
-                          })
-                      )}
-                    </TodoGroupCard>
-                    {subQuarterlyActuals.length > 0 && showQuarterlyCard(workQuarterLabel) && (
-                      <TodoGroupCard
-                        title={`Quarterly actuals · ${workQuarterLabel}`}
-                        meta={<>{subQuarterlyActualsDone}/{subQuarterlyActuals.length} done · Due {quarterlyActualsDue.label} <DaysBadge diffDays={quarterlyActualsDue.diffDays} /></>}
-                        done={subQuarterlyActualsDone}
-                        total={subQuarterlyActuals.length}
-                        showCompleted={showAdminQCompleted}
-                        onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "adminQ")}
-                      >
-                        {subQuarterlyActuals.filter((g) => showAdminQCompleted || workActuals[actualKey(g)] == null).length === 0 ? (
-                          <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All quarterly actuals complete</div>
-                        ) : (
-                          subQuarterlyActuals
-                            .filter((g) => showAdminQCompleted || workActuals[actualKey(g)] == null)
-                            .map((goal) => {
-                              const done = workActuals[actualKey(goal)] != null;
-                              const draft = draftActuals[goal.id] ?? String(workActuals[actualKey(goal)] ?? "");
-                              return (
-                                <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={done}>
-                                  <div className="ml-auto flex items-end gap-2">
-                                    <TodoNumberField label="Actual" value={draft} onChange={(v) => setDraftActuals((prev) => ({ ...prev, [goal.id]: v }))} />
-                                    <Button size="sm" className="h-8" disabled={draft === ""} onClick={() => onSaveActual(goal, draft)}>Set</Button>
-                                  </div>
-                                </TodoRow>
-                              );
-                            })
-                        )}
-                      </TodoGroupCard>
+                  <TodoGroupCard
+                    title={`Monthly actuals · ${workMonthLabel}`}
+                    meta={<>{subMonthlyActualsDone}/{subMonthlyActuals.length} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
+                    done={subMonthlyActualsDone}
+                    total={subMonthlyActuals.length}
+                    showCompleted={showAdminCompleted}
+                    onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "admin")}
+                  >
+                    {subMonthlyActuals.filter((g) => showAdminCompleted || workActuals[actualKey(g)] == null).length === 0 ? (
+                      <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All monthly tasks complete</div>
+                    ) : (
+                      subMonthlyActuals
+                        .filter((g) => showAdminCompleted || workActuals[actualKey(g)] == null)
+                        .map((goal) => {
+                          const done = workActuals[actualKey(goal)] != null;
+                          const draft = draftActuals[goal.id] ?? String(workActuals[actualKey(goal)] ?? "");
+                          return (
+                            <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={done}>
+                              <div className="ml-auto flex items-end gap-2">
+                                <TodoNumberField label="Actual" value={draft} onChange={(v) => setDraftActuals((prev) => ({ ...prev, [goal.id]: v }))} />
+                                <Button size="sm" className="h-8" disabled={draft === ""} onClick={() => onSaveActual(goal, draft)}>Set</Button>
+                              </div>
+                            </TodoRow>
+                          );
+                        })
                     )}
-                  </>
+                  </TodoGroupCard>
+                )}
+                {subQuarterlyActuals.length > 0 && showQuarterlyCard(workQuarterLabel) && (
+                  <TodoGroupCard
+                    title={`Quarterly actuals · ${workQuarterLabel}`}
+                    meta={<>{subQuarterlyActualsDone}/{subQuarterlyActuals.length} done · Due {quarterlyActualsDue.label} <DaysBadge diffDays={quarterlyActualsDue.diffDays} /></>}
+                    done={subQuarterlyActualsDone}
+                    total={subQuarterlyActuals.length}
+                    showCompleted={showAdminQCompleted}
+                    onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "adminQ")}
+                  >
+                    {subQuarterlyActuals.filter((g) => showAdminQCompleted || workActuals[actualKey(g)] == null).length === 0 ? (
+                      <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All quarterly actuals complete</div>
+                    ) : (
+                      subQuarterlyActuals
+                        .filter((g) => showAdminQCompleted || workActuals[actualKey(g)] == null)
+                        .map((goal) => {
+                          const done = workActuals[actualKey(goal)] != null;
+                          const draft = draftActuals[goal.id] ?? String(workActuals[actualKey(goal)] ?? "");
+                          return (
+                            <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={done}>
+                              <div className="ml-auto flex items-end gap-2">
+                                <TodoNumberField label="Actual" value={draft} onChange={(v) => setDraftActuals((prev) => ({ ...prev, [goal.id]: v }))} />
+                                <Button size="sm" className="h-8" disabled={draft === ""} onClick={() => onSaveActual(goal, draft)}>Set</Button>
+                              </div>
+                            </TodoRow>
+                          );
+                        })
+                    )}
+                  </TodoGroupCard>
                 )}
 
-                {showCurrentSection && subCurrentBase.length > 0 && (subCurrentMonthlyDone < subCurrentMonthly.length || subCurrentQuarterlyDone < subCurrentQuarterly.length) && (
-                  <>
-                    {subCurrentMonthly.length > 0 && subCurrentMonthlyDone < subCurrentMonthly.length && (
-                      <TodoGroupCard
-                        title={`${currentMonthLabel} monthly goals`}
-                        meta={<>{subCurrentMonthlyDone}/{subCurrentMonthly.length} set · Due {currentTargetDue.label} <DaysBadge diffDays={currentTargetDue.diffDays} /></>}
-                        done={subCurrentMonthlyDone}
-                        total={subCurrentMonthly.length}
-                        showCompleted={showCurrentCompleted}
-                        onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "current")}
-                      >
-                        {subCurrentMonthly
-                          .filter((g) => showCurrentCompleted || currentActuals[metaKey("target", g)] == null)
-                          .map((goal) => {
-                            const saved = currentActuals[metaKey("target", goal)] != null;
-                            const draft = draftCurrentTargets[goal.id] ?? { target: String(currentActuals[metaKey("target", goal)] ?? ""), min: String(currentActuals[metaKey("min", goal)] ?? "") };
-                            return (
-                              <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
-                                <div className="ml-auto flex items-end gap-2">
-                                  <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
-                                  <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
-                                  <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveCurrentTargetPair(goal, draft.target, draft.min)}>Set</Button>
-                                </div>
-                              </TodoRow>
-                            );
-                          })}
-                      </TodoGroupCard>
-                    )}
-                    {subCurrentQuarterly.length > 0 && subCurrentQuarterlyDone < subCurrentQuarterly.length && showQuarterlyCard(currentQuarterLabel) && (
-                      <TodoGroupCard
-                        title={`${currentQuarterLabel} quarterly goals`}
-                        meta={<>{subCurrentQuarterlyDone}/{subCurrentQuarterly.length} set · Due {currentQuarterTargetDue.label} <DaysBadge diffDays={currentQuarterTargetDue.diffDays} /></>}
-                        done={subCurrentQuarterlyDone}
-                        total={subCurrentQuarterly.length}
-                        showCompleted={showCurrentQCompleted}
-                        onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "currentQ")}
-                      >
-                        {subCurrentQuarterly
-                          .filter((g) => showCurrentQCompleted || currentActuals[metaKey("target", g)] == null)
-                          .map((goal) => {
-                            const saved = currentActuals[metaKey("target", goal)] != null;
-                            const draft = draftCurrentTargets[goal.id] ?? { target: String(currentActuals[metaKey("target", goal)] ?? ""), min: String(currentActuals[metaKey("min", goal)] ?? "") };
-                            return (
-                              <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
-                                <div className="ml-auto flex items-end gap-2">
-                                  <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
-                                  <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
-                                  <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveCurrentTargetPair(goal, draft.target, draft.min)}>Set</Button>
-                                </div>
-                              </TodoRow>
-                            );
-                          })}
-                      </TodoGroupCard>
-                    )}
-                  </>
+                {showCurrentSection && subCurrentMonthly.length > 0 && subCurrentMonthlyDone < subCurrentMonthly.length && (
+                  <TodoGroupCard
+                    title={`${currentMonthLabel} monthly goals`}
+                    meta={<>{subCurrentMonthlyDone}/{subCurrentMonthly.length} set · Due {currentTargetDue.label} <DaysBadge diffDays={currentTargetDue.diffDays} /></>}
+                    done={subCurrentMonthlyDone}
+                    total={subCurrentMonthly.length}
+                    showCompleted={showCurrentCompleted}
+                    onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "current")}
+                  >
+                    {subCurrentMonthly
+                      .filter((g) => showCurrentCompleted || currentActuals[metaKey("target", g)] == null)
+                      .map((goal) => {
+                        const saved = currentActuals[metaKey("target", goal)] != null;
+                        const draft = draftCurrentTargets[goal.id] ?? { target: String(currentActuals[metaKey("target", goal)] ?? ""), min: String(currentActuals[metaKey("min", goal)] ?? "") };
+                        return (
+                          <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
+                            <div className="ml-auto flex items-end gap-2">
+                              <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
+                              <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
+                              <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveCurrentTargetPair(goal, draft.target, draft.min)}>Set</Button>
+                            </div>
+                          </TodoRow>
+                        );
+                      })}
+                  </TodoGroupCard>
+                )}
+                {subCurrentQuarterly.length > 0 && subCurrentQuarterlyDone < subCurrentQuarterly.length && showQuarterlyCard(currentQuarterLabel) && (
+                  <TodoGroupCard
+                    title={`${currentQuarterLabel} quarterly goals`}
+                    meta={<>{subCurrentQuarterlyDone}/{subCurrentQuarterly.length} set · Due {currentQuarterTargetDue.label} <DaysBadge diffDays={currentQuarterTargetDue.diffDays} /></>}
+                    done={subCurrentQuarterlyDone}
+                    total={subCurrentQuarterly.length}
+                    showCompleted={showCurrentQCompleted}
+                    onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "currentQ")}
+                  >
+                    {subCurrentQuarterly
+                      .filter((g) => showCurrentQCompleted || currentActuals[metaKey("target", g)] == null)
+                      .map((goal) => {
+                        const saved = currentActuals[metaKey("target", goal)] != null;
+                        const draft = draftCurrentTargets[goal.id] ?? { target: String(currentActuals[metaKey("target", goal)] ?? ""), min: String(currentActuals[metaKey("min", goal)] ?? "") };
+                        return (
+                          <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
+                            <div className="ml-auto flex items-end gap-2">
+                              <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
+                              <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftCurrentTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
+                              <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveCurrentTargetPair(goal, draft.target, draft.min)}>Set</Button>
+                            </div>
+                          </TodoRow>
+                        );
+                      })}
+                  </TodoGroupCard>
                 )}
 
-                {showNextSection && (
-                  <>
-                    {subNextMonthly.length > 0 && (
-                      <TodoGroupCard
-                        title={`${nextMonthLabel} monthly goals`}
-                        meta={<>{subNextMonthlyDone}/{subNextMonthly.length} set · Due {targetDue.label} <DaysBadge diffDays={targetDue.diffDays} /></>}
-                        done={subNextMonthlyDone}
-                        total={subNextMonthly.length}
-                        showCompleted={showNextCompleted}
-                        onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "next")}
-                      >
-                        {subNextMonthly
-                          .filter((g) => showNextCompleted || nextActuals[metaKey("target", g)] == null)
-                          .map((goal) => {
-                            const saved = nextActuals[metaKey("target", goal)] != null;
-                            const draft = draftTargets[goal.id] ?? { target: String(nextActuals[metaKey("target", goal)] ?? ""), min: String(nextActuals[metaKey("min", goal)] ?? "") };
-                            return (
-                              <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
-                                <div className="ml-auto flex items-end gap-2">
-                                  <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
-                                  <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
-                                  <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveTargetPair(goal, draft.target, draft.min)}>Set</Button>
-                                </div>
-                              </TodoRow>
-                            );
-                          })}
-                      </TodoGroupCard>
-                    )}
-                    {subNextQuarterly.length > 0 && showQuarterlyCard(nextQuarterLabel) && (
-                      <TodoGroupCard
-                        title={`${nextQuarterLabel} quarterly goals`}
-                        meta={<>{subNextQuarterlyDone}/{subNextQuarterly.length} set · Due {nextQuarterTargetDue.label} <DaysBadge diffDays={nextQuarterTargetDue.diffDays} /></>}
-                        done={subNextQuarterlyDone}
-                        total={subNextQuarterly.length}
-                        showCompleted={showNextQCompleted}
-                        onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "nextQ")}
-                      >
-                        {subNextQuarterly
-                          .filter((g) => showNextQCompleted || nextActuals[metaKey("target", g)] == null)
-                          .map((goal) => {
-                            const saved = nextActuals[metaKey("target", goal)] != null;
-                            const draft = draftTargets[goal.id] ?? { target: String(nextActuals[metaKey("target", goal)] ?? ""), min: String(nextActuals[metaKey("min", goal)] ?? "") };
-                            return (
-                              <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
-                                <div className="ml-auto flex items-end gap-2">
-                                  <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
-                                  <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
-                                  <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveTargetPair(goal, draft.target, draft.min)}>Set</Button>
-                                </div>
-                              </TodoRow>
-                            );
-                          })}
-                      </TodoGroupCard>
-                    )}
-                  </>
+                {showNextSection && subNextMonthly.length > 0 && (
+                  <TodoGroupCard
+                    title={`${nextMonthLabel} monthly goals`}
+                    meta={<>{subNextMonthlyDone}/{subNextMonthly.length} set · Due {targetDue.label} <DaysBadge diffDays={targetDue.diffDays} /></>}
+                    done={subNextMonthlyDone}
+                    total={subNextMonthly.length}
+                    showCompleted={showNextCompleted}
+                    onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "next")}
+                  >
+                    {subNextMonthly
+                      .filter((g) => showNextCompleted || nextActuals[metaKey("target", g)] == null)
+                      .map((goal) => {
+                        const saved = nextActuals[metaKey("target", goal)] != null;
+                        const draft = draftTargets[goal.id] ?? { target: String(nextActuals[metaKey("target", goal)] ?? ""), min: String(nextActuals[metaKey("min", goal)] ?? "") };
+                        return (
+                          <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
+                            <div className="ml-auto flex items-end gap-2">
+                              <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
+                              <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
+                              <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveTargetPair(goal, draft.target, draft.min)}>Set</Button>
+                            </div>
+                          </TodoRow>
+                        );
+                      })}
+                  </TodoGroupCard>
+                )}
+                {subNextQuarterly.length > 0 && showQuarterlyCard(nextQuarterLabel) && (
+                  <TodoGroupCard
+                    title={`${nextQuarterLabel} quarterly goals`}
+                    meta={<>{subNextQuarterlyDone}/{subNextQuarterly.length} set · Due {nextQuarterTargetDue.label} <DaysBadge diffDays={nextQuarterTargetDue.diffDays} /></>}
+                    done={subNextQuarterlyDone}
+                    total={subNextQuarterly.length}
+                    showCompleted={showNextQCompleted}
+                    onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "nextQ")}
+                  >
+                    {subNextQuarterly
+                      .filter((g) => showNextQCompleted || nextActuals[metaKey("target", g)] == null)
+                      .map((goal) => {
+                        const saved = nextActuals[metaKey("target", goal)] != null;
+                        const draft = draftTargets[goal.id] ?? { target: String(nextActuals[metaKey("target", goal)] ?? ""), min: String(nextActuals[metaKey("min", goal)] ?? "") };
+                        return (
+                          <TodoRow key={goal.id} name={goal.name} goalTier={goal.goalTier} location={goal.location} department={goal.department} saved={saved}>
+                            <div className="ml-auto flex items-end gap-2">
+                              <TodoNumberField label="Goal" value={draft.target} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, target: v } }))} />
+                              <TodoNumberField label="Min" value={draft.min} onChange={(v) => setDraftTargets((prev) => ({ ...prev, [goal.id]: { ...draft, min: v } }))} />
+                              <Button size="sm" className="h-8" disabled={draft.target === ""} onClick={() => onSaveTargetPair(goal, draft.target, draft.min)}>Set</Button>
+                            </div>
+                          </TodoRow>
+                        );
+                      })}
+                  </TodoGroupCard>
                 )}
               </div>
             );
