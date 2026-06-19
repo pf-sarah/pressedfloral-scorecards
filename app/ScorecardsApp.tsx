@@ -3593,6 +3593,7 @@ function ScorecardsScreen(props: {
   function goalsForEmployee(employee: Employee, actuals: Record<string, number | null> = periodActuals, month: string = selectedMonth): Goal[] {
     const regularGoals = props.allGoals.filter((goal) => {
       if (actuals["__monthly_inactive__" + actualKey(goal)]) return false;
+      if (month && !goalActiveForMonth(goal, month)) return false;
       if (goal.goalTier === "company") return false;
       if (goal.goalTier === "department") return goal.department === employee.department && (!goal.location || goal.location === employee.location);
       return goal.role === employee.role && goal.department === employee.department && (!goal.location || goal.location === employee.location);
@@ -3623,10 +3624,9 @@ function ScorecardsScreen(props: {
     // If this employee has a forced period type, only show them on their designated tab
     const forcedPeriod = props.employeePeriodTypes?.[e.name];
     if (forcedPeriod) return forcedPeriod === globalPeriodType;
-    // Otherwise apply the standard goal-based filter, gating on active month when in single-month mode
-    const activeInPeriod = (g: Goal) => !singleMonthMode || goalActiveForMonth(g, selectedMonth);
-    if (globalPeriodType === "quarterly") return goalsForEmployee(e).some((g) => g.periodType === "quarterly" && activeInPeriod(g));
-    if (globalPeriodType === "monthly") return goalsForEmployee(e).some((g) => g.periodType !== "quarterly" && activeInPeriod(g));
+    // Otherwise apply the standard goal-based filter (goalsForEmployee already gates on goalActiveForMonth)
+    if (globalPeriodType === "quarterly") return goalsForEmployee(e).some((g) => g.periodType === "quarterly");
+    if (globalPeriodType === "monthly") return goalsForEmployee(e).some((g) => g.periodType !== "quarterly");
     return true;
   });
 
