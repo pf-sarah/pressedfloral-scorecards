@@ -3283,7 +3283,8 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
     if (locVal && locVal !== "__unset__" && locVal !== "" && e.location !== locVal) return false;
     return true;
   }).sort((a, b) => a.name.localeCompare(b.name));
-  const filteredRoles = [...new Set(filteredEmployees.map((e) => e.role).filter(Boolean))].sort();
+  const rolesFromDept = deptVal && deptVal !== "__unset__" && deptVal !== "" ? (rolesByDepartment[deptVal] ?? []) : Object.values(rolesByDepartment).flat();
+  const filteredRoles = [...new Set([...filteredEmployees.map((e) => e.role).filter(Boolean), ...rolesFromDept])].sort();
 
   const missing: string[] = [];
   if (!draft.name.trim()) missing.push("Goal Name");
