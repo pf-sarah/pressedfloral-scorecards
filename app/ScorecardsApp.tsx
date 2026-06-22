@@ -5582,7 +5582,7 @@ function TodosScreen({
 
       {assignFilter === "mine" ? (
         <>
-          {showPrevSection && (
+          {showPrevSection && allMonthlyAdminRows.length > 0 && (
             <TodoGroupCard
               title={`Monthly actuals · ${workMonthLabel}`}
               meta={<>{monthlyAdminDone}/{allMonthlyAdminRows.length} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
@@ -5766,7 +5766,7 @@ function TodosScreen({
               <div key={subProfile.id} className="flex flex-col gap-3">
                 <h3 className="text-[13px] font-semibold text-foreground">{displayName}</h3>
 
-                {showPrevSection && (
+                {showPrevSection && subMonthlyActuals.length > 0 && (
                   <TodoGroupCard
                     title={`Monthly actuals · ${workMonthLabel}`}
                     meta={<>{subMonthlyActualsDone}/{subMonthlyActuals.length} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
