@@ -100,15 +100,15 @@ const departments = SCORECARD_DEPARTMENTS;
 const locations = SCORECARD_LOCATIONS;
 
 const rolesByDepartment: Record<string, string[]> = {
-  "Client Care": ["Client Care Manager", "Client Care Specialist", "Client Experience Manager", "Senior Client Care Specialist"],
-  Design: ["Design Specialist", "Design Team Manager", "Senior Design Specialist"],
+  "Client Care": ["Client Care Lead", "Client Care Manager", "Client Care Specialist", "Client Experience Manager", "Senior Client Care Specialist"],
+  Design: ["Design Specialist", "Design Team Manager", "Master Design Specialist", "Senior Design Specialist"],
   Experience: ["Director of Product & Client Experience", "Product & Design Lead", "UX Design Specialist"],
-  Fulfillment: ["Fulfillment Specialist", "Fulfillment Team Manager", "Senior Fulfillment Specialist"],
+  Fulfillment: ["Fulfillment Specialist", "Fulfillment Team Manager", "Master Fulfillment Specialist", "Senior Fulfillment Specialist"],
   "General & Administrative": ["Human Resources Manager"],
   Growth: ["Business Development Manager"],
   Marketing: ["Community Specialist", "Head of Marketing", "Social Media Manager", "Social Media Specialist"],
   Operations: ["Director of Operations", "General Manager", "Head of Preservation & Design"],
-  Preservation: ["Preservation Specialist", "Preservation Team Manager", "Senior Preservation Specialist"],
+  Preservation: ["Master Preservation Specialist", "Preservation Specialist", "Preservation Team Manager", "Senior Preservation Specialist"],
   Resin: ["Resin Design Specialist", "Resin Team Manager", "Senior Resin Design Specialist"]
 };
 
