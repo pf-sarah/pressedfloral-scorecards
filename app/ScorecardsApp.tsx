@@ -5349,6 +5349,8 @@ function TodosScreen({
   const workQuarterLabel = quarterKeyForMonth(workMonth);
   // Only show quarterly goals in the "next month" section when next month opens a new quarter
   const nextIsNewQuarter = nextQuarterLabel !== currentQuarterLabel;
+  // Quarterly actuals only appear after the quarter has fully ended (current month is in a later quarter)
+  const workQuarterEnded = workQuarterLabel !== currentQuarterLabel;
 
   // All company/dept goals with targets set for workMonth — split monthly vs quarterly
   const actualsGoalsBase = goals.filter((g) =>
@@ -5359,7 +5361,8 @@ function TodosScreen({
     workActuals[metaKey("min", g)] != null
   );
   const monthlyActualsGoals = actualsGoalsBase.filter((g) => g.periodType !== "quarterly");
-  const quarterlyActualsGoals = actualsGoalsBase.filter((g) => g.periodType === "quarterly");
+  // Only show quarterly actuals once the quarter has fully ended
+  const quarterlyActualsGoals = workQuarterEnded ? actualsGoalsBase.filter((g) => g.periodType === "quarterly") : [];
   const actualsDoneCount = actualsGoalsBase.filter((g) => workActuals[actualKey(g)] != null).length;
 
   const adminTotal = (isAdmin ? 1 : 0) + actualsGoalsBase.length;
@@ -5506,7 +5509,7 @@ function TodosScreen({
   const showQuarterlyCard = (quarterLabel: string) => nothingSelected || selectedQuarters.has(quarterLabel);
 
   // Unique ordered list of quarters relevant to the to-do list
-  const uniqueQuarters = Array.from(new Set([workQuarterLabel, currentQuarterLabel, ...(nextIsNewQuarter ? [nextQuarterLabel] : [])]));
+  const uniqueQuarters = Array.from(new Set([...(workQuarterEnded ? [workQuarterLabel] : []), currentQuarterLabel, ...(nextIsNewQuarter ? [nextQuarterLabel] : [])]));
   const hasQuarterlyContent =
     quarterlyActualsGoals.length > 0 || currentQuarterlyGoals.length > 0 || nextQuarterlyGoals.length > 0;
   const showQuarterPills = hasQuarterlyContent && (isAdmin || subordinateProfiles.length > 0);
@@ -5736,7 +5739,7 @@ function TodosScreen({
                 workActuals[metaKey("target", g)] != null && workActuals[metaKey("min", g)] != null
             );
             const subMonthlyActuals = subActualsBase.filter((g) => g.periodType !== "quarterly");
-            const subQuarterlyActuals = subActualsBase.filter((g) => g.periodType === "quarterly");
+            const subQuarterlyActuals = workQuarterEnded ? subActualsBase.filter((g) => g.periodType === "quarterly") : [];
             const subMonthlyActualsDone = subMonthlyActuals.filter((g) => workActuals[actualKey(g)] != null).length;
             const subQuarterlyActualsDone = subQuarterlyActuals.filter((g) => workActuals[actualKey(g)] != null).length;
 
