@@ -1818,15 +1818,13 @@ function PersonalScorecardPanel({
     ...(quarterKey ? allActuals[quarterKey] || {} : {}),
   }), [allActuals, currentPeriod, quarterKey]);
 
-  // Employee with earnings for this period's Rippling upload (next month's file).
-  // Also tracks whether payroll data was actually found so buildScorecard can
-  // avoid using annualPay/12 estimates when no upload exists yet.
+  // Employee with earnings for this period. rippling[periodISO] holds that month's payroll
+  // (uploaded the following month). Always strip earnings when no upload exists so stale
+  // hours from a prior month don't bleed into the current period card.
   const [empWithEarnings, personalPayrollAvailable] = useMemo((): [Employee | null, boolean] => {
     if (!myEmployee || !periodISO) return [myEmployee, false];
-    const [py, pm] = periodISO.split("-").map(Number);
-    const eKey = pm && py ? `${pm === 12 ? py + 1 : py}-${String(pm === 12 ? 1 : pm + 1).padStart(2, "0")}` : "";
-    const src = eKey ? (rippling[eKey] || []).find((e) => e.name === myEmployee.name) : null;
-    const emp = src ? { ...myEmployee, grossEarnings: src.grossEarnings, hoursWorked: src.hoursWorked } : myEmployee;
+    const src = (rippling[periodISO] || []).find((e) => e.name === myEmployee.name);
+    const emp = { ...myEmployee, grossEarnings: src?.grossEarnings, hoursWorked: src?.hoursWorked };
     return [emp, !!src];
   }, [myEmployee, periodISO, rippling]);
 
@@ -4079,9 +4077,7 @@ function LiveScorecardCard({
     let totalGross = 0;
     let totalHours = 0;
     for (const qm of qMonths) {
-      const [qy, qmm] = qm.split("-").map(Number);
-      const earningsKey = `${qmm === 12 ? qy + 1 : qy}-${String(qmm === 12 ? 1 : qmm + 1).padStart(2, "0")}`;
-      const src = (allRippling[earningsKey] || []).find((e) => e.name === employee.name);
+      const src = (allRippling[qm] || []).find((e) => e.name === employee.name);
       if (src?.grossEarnings) totalGross += src.grossEarnings;
       if (src?.hoursWorked) totalHours += src.hoursWorked;
     }
