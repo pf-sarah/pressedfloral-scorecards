@@ -5284,6 +5284,7 @@ function TodosScreen({
   onSaveActual: (goal: Goal, value: string) => void;
   onRipplingUpload: (employees: Employee[]) => void;
 }) {
+  const [showCompletedSections, setShowCompletedSections] = useState(false);
   const [showCompletedAdmin, setShowCompletedAdmin] = useState(false);
   const [showCompletedAdminQ, setShowCompletedAdminQ] = useState(false);
   const [showCompletedTargets, setShowCompletedTargets] = useState(false);
@@ -5500,6 +5501,15 @@ function TodosScreen({
   const monthlyAdminDone = allMonthlyAdminRows.filter((r) => r.done).length;
   const quarterlyActualsDone = quarterlyActualRows.filter((r) => r.done).length;
 
+  // Section-level completion flags — used to auto-hide finished cards
+  const prevMonthlySectionDone = allMonthlyAdminRows.length > 0 && monthlyAdminDone === allMonthlyAdminRows.length;
+  const prevQuarterlySectionDone = quarterlyActualRows.length > 0 && quarterlyActualsDone === quarterlyActualRows.length;
+  const nextMonthlyTargetDone = nextMonthlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length;
+  const nextMonthlySectionDone = nextMonthlyGoals.length > 0 && nextMonthlyTargetDone === nextMonthlyGoals.length;
+  const nextQTargetDone = nextQuarterlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length;
+  const nextQuarterlySectionDone = nextQuarterlyGoals.length > 0 && nextQTargetDone === nextQuarterlyGoals.length;
+  const anyMineSectionComplete = prevMonthlySectionDone || prevQuarterlySectionDone || nextMonthlySectionDone || nextQuarterlySectionDone;
+
   const nothingSelected = selectedMonths.size === 0 && selectedQuarters.size === 0;
   const showPrevSection = nothingSelected || selectedMonths.has("prev");
   const showCurrentSection = nothingSelected || selectedMonths.has("current");
@@ -5563,6 +5573,17 @@ function TodosScreen({
           )}
         </div>
 
+        {/* Show completed sections toggle */}
+        {anyMineSectionComplete && (
+          <button
+            type="button"
+            onClick={() => setShowCompletedSections((v) => !v)}
+            className="self-start text-[12px] text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"
+          >
+            {showCompletedSections ? "Hide completed" : "Show completed"}
+          </button>
+        )}
+
         {/* My tasks / My managers toggle */}
         {subordinateProfiles.length > 0 && (
           <div className="flex overflow-hidden rounded-md border border-input text-[12.5px]">
@@ -5586,7 +5607,7 @@ function TodosScreen({
 
       {assignFilter === "mine" ? (
         <>
-          {showPrevSection && allMonthlyAdminRows.length > 0 && (
+          {showPrevSection && allMonthlyAdminRows.length > 0 && (!prevMonthlySectionDone || showCompletedSections) && (
             <TodoGroupCard
               title={`Monthly actuals · ${workMonthLabel}`}
               meta={<>{monthlyAdminDone}/{allMonthlyAdminRows.length} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
@@ -5602,7 +5623,7 @@ function TodosScreen({
               )}
             </TodoGroupCard>
           )}
-          {quarterlyActualsGoals.length > 0 && showQuarterlyCard(workQuarterLabel) && (
+          {quarterlyActualsGoals.length > 0 && showQuarterlyCard(workQuarterLabel) && (!prevQuarterlySectionDone || showCompletedSections) && (
             <TodoGroupCard
               title={`Quarterly actuals · ${workQuarterLabel}`}
               meta={<>{quarterlyActualsDone}/{quarterlyActualRows.length} done · Due {quarterlyActualsDue.label} <DaysBadge diffDays={quarterlyActualsDue.diffDays} /></>}
@@ -5672,7 +5693,7 @@ function TodosScreen({
             </TodoGroupCard>
           )}
 
-          {showNextSection && nextMonthlyGoals.length > 0 && (
+          {showNextSection && nextMonthlyGoals.length > 0 && (!nextMonthlySectionDone || showCompletedSections) && (
             <TodoGroupCard
               title={`${nextMonthLabel} monthly goals`}
               meta={<>{nextMonthlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length}/{nextMonthlyGoals.length} set · Due {targetDue.label} <DaysBadge diffDays={targetDue.diffDays} /></>}
@@ -5698,7 +5719,7 @@ function TodosScreen({
                 })}
             </TodoGroupCard>
           )}
-          {nextQuarterlyGoals.length > 0 && showQuarterlyCard(nextQuarterLabel) && (
+          {nextQuarterlyGoals.length > 0 && showQuarterlyCard(nextQuarterLabel) && (!nextQuarterlySectionDone || showCompletedSections) && (
             <TodoGroupCard
               title={`${nextQuarterLabel} quarterly goals`}
               meta={<>{nextQuarterlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length}/{nextQuarterlyGoals.length} set · Due {nextQuarterTargetDue.label} <DaysBadge diffDays={nextQuarterTargetDue.diffDays} /></>}
@@ -5766,11 +5787,16 @@ function TodosScreen({
             const showNextCompleted = getMgrCompleted(subProfile.id, "next");
             const showNextQCompleted = getMgrCompleted(subProfile.id, "nextQ");
 
+            const subPrevMonthlySectionDone = subMonthlyActuals.length > 0 && subMonthlyActualsDone === subMonthlyActuals.length;
+            const subPrevQuarterlySectionDone = subQuarterlyActuals.length > 0 && subQuarterlyActualsDone === subQuarterlyActuals.length;
+            const subNextMonthlySectionDone = subNextMonthly.length > 0 && subNextMonthlyDone === subNextMonthly.length;
+            const subNextQuarterlySectionDone = subNextQuarterly.length > 0 && subNextQuarterlyDone === subNextQuarterly.length;
+
             return (
               <div key={subProfile.id} className="flex flex-col gap-3">
                 <h3 className="text-[13px] font-semibold text-foreground">{displayName}</h3>
 
-                {showPrevSection && subMonthlyActuals.length > 0 && (
+                {showPrevSection && subMonthlyActuals.length > 0 && (!subPrevMonthlySectionDone || showCompletedSections) && (
                   <TodoGroupCard
                     title={`Monthly actuals · ${workMonthLabel}`}
                     meta={<>{subMonthlyActualsDone}/{subMonthlyActuals.length} done · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
@@ -5799,7 +5825,7 @@ function TodosScreen({
                     )}
                   </TodoGroupCard>
                 )}
-                {subQuarterlyActuals.length > 0 && showQuarterlyCard(workQuarterLabel) && (
+                {subQuarterlyActuals.length > 0 && showQuarterlyCard(workQuarterLabel) && (!subPrevQuarterlySectionDone || showCompletedSections) && (
                   <TodoGroupCard
                     title={`Quarterly actuals · ${workQuarterLabel}`}
                     meta={<>{subQuarterlyActualsDone}/{subQuarterlyActuals.length} done · Due {quarterlyActualsDue.label} <DaysBadge diffDays={quarterlyActualsDue.diffDays} /></>}
@@ -5882,7 +5908,7 @@ function TodosScreen({
                   </TodoGroupCard>
                 )}
 
-                {showNextSection && subNextMonthly.length > 0 && (
+                {showNextSection && subNextMonthly.length > 0 && (!subNextMonthlySectionDone || showCompletedSections) && (
                   <TodoGroupCard
                     title={`${nextMonthLabel} monthly goals`}
                     meta={<>{subNextMonthlyDone}/{subNextMonthly.length} set · Due {targetDue.label} <DaysBadge diffDays={targetDue.diffDays} /></>}
@@ -5908,7 +5934,7 @@ function TodosScreen({
                       })}
                   </TodoGroupCard>
                 )}
-                {subNextQuarterly.length > 0 && showQuarterlyCard(nextQuarterLabel) && (
+                {subNextQuarterly.length > 0 && showQuarterlyCard(nextQuarterLabel) && (!subNextQuarterlySectionDone || showCompletedSections) && (
                   <TodoGroupCard
                     title={`${nextQuarterLabel} quarterly goals`}
                     meta={<>{subNextQuarterlyDone}/{subNextQuarterly.length} set · Due {nextQuarterTargetDue.label} <DaysBadge diffDays={nextQuarterTargetDue.diffDays} /></>}
