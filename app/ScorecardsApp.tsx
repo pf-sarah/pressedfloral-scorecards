@@ -550,12 +550,51 @@ export default function ScorecardsApp() {
     const isUser = loadedProfile.role === "user";
 
     if (isUser) {
-      const scQuery = loadedProfile.linkedEmployeeName
-        ? client.from("scorecards").select("*").eq("employee_name", loadedProfile.linkedEmployeeName).order("scorecard_month", { ascending: false })
+      const linkedName = loadedProfile.linkedEmployeeName;
+      const scQuery = linkedName
+        ? client.from("scorecards").select("*").eq("employee_name", linkedName).order("scorecard_month", { ascending: false })
         : client.from("scorecards").select("*").order("scorecard_month", { ascending: false });
-      const { data } = await scQuery;
-      const scorecards = (data || []).map(scorecardFromRow);
-      setAppData((current) => ({ ...current, goals: [] as Goal[], scorecards, rippling: {} }));
+
+      const [scResult, goalsResult, actualsResult, ripplingResult, assignmentsResult, settingsResult] = await Promise.all([
+        scQuery,
+        client.from("goals_bank").select("*").order("goal_tier").order("department").order("name"),
+        client.from("actuals").select("*"),
+        linkedName
+          ? client.from("rippling_employees").select("*").eq("full_name", linkedName).order("period", { ascending: false })
+          : client.from("rippling_employees").select("*").order("period", { ascending: false }),
+        linkedName
+          ? client.from("goal_assignments").select("*").eq("employee_name", linkedName)
+          : client.from("goal_assignments").select("*"),
+        linkedName
+          ? client.from("employee_scorecard_settings").select("*").eq("employee_name", linkedName)
+          : client.from("employee_scorecard_settings").select("*"),
+      ]);
+
+      const scorecards = (scResult.data || []).map(scorecardFromRow);
+      const goals = (goalsResult.data || []).map(goalFromRow);
+
+      const rippling: Record<string, Employee[]> = {};
+      for (const row of ripplingResult.data || []) {
+        const period = row.period || fixtureMonth;
+        const emp = employeeFromRow(row);
+        rippling[period] = [...(rippling[period] || []), emp];
+      }
+
+      const actualsByPeriod: Record<string, Record<string, any>[]> = {};
+      for (const row of actualsResult.data || []) {
+        const period = row.period || "";
+        if (!actualsByPeriod[period]) actualsByPeriod[period] = [];
+        actualsByPeriod[period].push(row);
+      }
+      const actuals: Record<string, ActualsByKey> = {};
+      for (const [period, rows] of Object.entries(actualsByPeriod)) {
+        actuals[period] = actualsFromRows(rows);
+      }
+
+      const goalAssignments: GoalAssignment[] = (assignmentsResult.data || []).map(goalAssignmentFromRow);
+      const employeeScorecardSettings: EmployeeScorecardSettings[] = (settingsResult.data || []).map(employeeScorecardSettingsFromRow);
+
+      setAppData((current) => ({ ...current, goals, scorecards, rippling, actuals: { ...current.actuals, ...actuals }, goalAssignments, employeeScorecardSettings }));
       return;
     }
 
