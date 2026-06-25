@@ -2595,6 +2595,20 @@ function UserPermissionForm(props: {
   const departmentOptions = departments.map((department) => ({ value: department, label: department }));
   const locationOptions = locations.map((location) => ({ value: location, label: location }));
 
+  function setLinkedEmployee(name: string) {
+    const emp = props.employees.find((e) => e.name === name);
+    setDraft((current) => ({
+      ...current,
+      linkedEmployeeName: name,
+      ...(draft.role === "manager" && emp ? {
+        departments: emp.department ? [emp.department] : current.departments,
+        locations: emp.location ? [emp.location] : current.locations,
+        allDepartments: false,
+        allLocations: false,
+      } : {})
+    }));
+  }
+
   function setRole(role: ProfileRole) {
     setDraft((current) => ({
       ...current,
@@ -2668,7 +2682,7 @@ function UserPermissionForm(props: {
             <MultiSelectDropdown label="All locations" emptyLabel="No locations" triggerClassName="w-full" options={locationOptions} selected={draft.locations} onChange={(values) => setDraft({ ...draft, locations: values })} />
           </DrawerField>
           <DrawerField label="Reporting tree root" className="min-w-[12rem] flex-1">
-            <Select value={draft.linkedEmployeeName || ALL_LOCATIONS} onValueChange={(v) => setDraft({ ...draft, linkedEmployeeName: v === ALL_LOCATIONS ? "" : v })}>
+            <Select value={draft.linkedEmployeeName || ALL_LOCATIONS} onValueChange={(v) => v === ALL_LOCATIONS ? setDraft({ ...draft, linkedEmployeeName: "" }) : setLinkedEmployee(v)}>
               <SelectTrigger className="w-full" aria-label="Reporting tree root"><SelectValue /></SelectTrigger>
               <SelectContent>
                 <SelectItem value={ALL_LOCATIONS}>No linked employee</SelectItem>
