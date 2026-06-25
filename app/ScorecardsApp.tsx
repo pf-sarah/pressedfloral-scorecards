@@ -2361,6 +2361,7 @@ function UsersScreen(props: {
         <UserPermissionForm
           mode="invite"
           employees={props.employees}
+          allUsers={props.users}
           submitLabel="Send invite"
           onSubmit={props.onInvite}
         />
