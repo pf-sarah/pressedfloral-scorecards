@@ -2678,6 +2678,11 @@ function UserPermissionForm(props: {
               </SelectContent>
             </Select>
           </DrawerField>
+        </div>
+      )}
+
+      {draft.role && (props.allUsers || []).length > 0 && (
+        <div className="flex flex-wrap items-end gap-3">
           <DrawerField label="Supervisor" className="min-w-[12rem] flex-1">
             <Select
               value={(draft as AdminUserPayload & { supervisorId?: string }).supervisorId || "__none__"}
@@ -2687,7 +2692,7 @@ function UserPermissionForm(props: {
               <SelectContent>
                 <SelectItem value="__none__">No supervisor</SelectItem>
                 {(props.allUsers || []).filter((u) => u.id !== draft.id && (u.role === "manager" || u.role === "admin")).map((u) => (
-                  <SelectItem key={u.id} value={u.id}>{u.email}</SelectItem>
+                  <SelectItem key={u.id} value={u.id}>{u.linkedEmployeeName || u.email}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
