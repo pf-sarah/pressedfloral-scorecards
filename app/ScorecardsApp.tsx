@@ -2630,11 +2630,9 @@ function UserPermissionForm(props: {
   return (
     <div className="flex flex-col gap-3">
       <div className="flex flex-wrap items-end gap-3">
-        {props.mode === "invite" && (
-          <DrawerField label="Email" htmlFor="user-email" className="min-w-[14rem] flex-1">
-            <Input id="user-email" aria-label="Invite email" type="email" value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} placeholder="name@pressedfloral.com" />
-          </DrawerField>
-        )}
+        <DrawerField label="Email" htmlFor="user-email" className="min-w-[14rem] flex-1">
+          <Input id="user-email" aria-label="Email" type="email" value={draft.email} onChange={(e) => setDraft({ ...draft, email: e.target.value })} placeholder="name@pressedfloral.com" />
+        </DrawerField>
         <DrawerField label="Role" className="w-[160px]">
           <Select value={draft.role || undefined} onValueChange={(v) => setRole(v as ProfileRole)}>
             <SelectTrigger className="w-full" aria-label="User role"><SelectValue placeholder="Select role…" /></SelectTrigger>

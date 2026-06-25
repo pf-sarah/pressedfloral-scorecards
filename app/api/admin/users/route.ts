@@ -117,6 +117,15 @@ export async function PATCH(request: NextRequest) {
   const targetResult = await admin.client.auth.admin.getUserById(targetId);
   if (targetResult.error || !targetResult.data.user) return jsonError("User not found.", 404);
 
+  // Update email in Auth if it changed
+  let authUser = targetResult.data.user;
+  const newEmail = payload.value.email?.toLowerCase();
+  if (newEmail && newEmail !== authUser.email?.toLowerCase()) {
+    const emailUpdate = await admin.client.auth.admin.updateUserById(targetId, { email: newEmail });
+    if (emailUpdate.error) return jsonError(emailUpdate.error.message, 400);
+    authUser = emailUpdate.data.user;
+  }
+
   const profileResult = await admin.client
     .from("manager_profiles")
     .upsert(adminProfileToRow(targetId, payload.value), { onConflict: "id" })
@@ -124,7 +133,7 @@ export async function PATCH(request: NextRequest) {
     .single();
   if (profileResult.error) return jsonError(profileResult.error.message, 500);
 
-  return NextResponse.json({ user: mapManagedUser(targetResult.data.user, profileResult.data) });
+  return NextResponse.json({ user: mapManagedUser(authUser, profileResult.data) });
 }
 
 export async function DELETE(request: NextRequest) {
