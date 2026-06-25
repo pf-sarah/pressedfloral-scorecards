@@ -771,6 +771,68 @@ export default function ScorecardsApp() {
     return true;
   }
 
+  async function deactivateAdminUser(user: AdminManagedUser) {
+    if (isFixture) {
+      setAdminUsers((current) => current.map((u) => u.id === user.id ? { ...u, status: "deactivated" as const, deactivatedAt: new Date().toISOString() } : u));
+      showToast("User deactivated");
+      return;
+    }
+    if (!sb) return;
+    const sessionResult = await sb.auth.getSession();
+    const token = sessionResult.data.session?.access_token;
+    if (!token) { showToast("Sign in again to manage users.", "error"); return; }
+    const response = await fetch("/api/admin/users?action=deactivate", {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ id: user.id })
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) { showToast(body?.error ?? "Failed to deactivate user.", "error"); return; }
+    setAdminUsers((current) => current.map((u) => u.id === body.user.id ? body.user : u));
+    showToast("User deactivated");
+  }
+
+  async function reactivateAdminUser(user: AdminManagedUser) {
+    if (isFixture) {
+      setAdminUsers((current) => current.map((u) => u.id === user.id ? { ...u, status: "active" as const, deactivatedAt: undefined } : u));
+      showToast("User reactivated");
+      return;
+    }
+    if (!sb) return;
+    const sessionResult = await sb.auth.getSession();
+    const token = sessionResult.data.session?.access_token;
+    if (!token) { showToast("Sign in again to manage users.", "error"); return; }
+    const response = await fetch("/api/admin/users?action=reactivate", {
+      method: "PATCH",
+      headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ id: user.id })
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) { showToast(body?.error ?? "Failed to reactivate user.", "error"); return; }
+    setAdminUsers((current) => current.map((u) => u.id === body.user.id ? body.user : u));
+    showToast("User reactivated");
+  }
+
+  async function deleteAdminUser(user: AdminManagedUser) {
+    if (isFixture) {
+      setAdminUsers((current) => current.filter((u) => u.id !== user.id));
+      showToast("User deleted");
+      return;
+    }
+    if (!sb) return;
+    const sessionResult = await sb.auth.getSession();
+    const token = sessionResult.data.session?.access_token;
+    if (!token) { showToast("Sign in again to manage users.", "error"); return; }
+    const response = await fetch(`/api/admin/users?id=${encodeURIComponent(user.id)}`, {
+      method: "DELETE",
+      headers: { Authorization: `Bearer ${token}` }
+    });
+    const body = await response.json().catch(() => null);
+    if (!response.ok) { showToast(body?.error ?? "Failed to delete user.", "error"); return; }
+    setAdminUsers((current) => current.filter((u) => u.id !== user.id));
+    showToast("User deleted");
+  }
+
   const months = useMemo(() => {
     const values = new Set<string>([fixtureMonth, ...Object.keys(appData.rippling)]);
     // include 24 months back through 12 months forward so every month is always selectable
@@ -1638,6 +1700,9 @@ export default function ScorecardsApp() {
               onInvite={inviteAdminUser}
               onUpdate={updateAdminUser}
               onResendInvite={resendAdminInvite}
+              onDeactivate={deactivateAdminUser}
+              onReactivate={reactivateAdminUser}
+              onDelete={deleteAdminUser}
               onViewAs={(user) => {
                 setViewAsProfile({ id: user.id, email: user.email, role: user.role, departments: user.departments, locations: user.locations, linkedEmployeeName: user.linkedEmployeeName });
                 setMode("landing");
@@ -2322,10 +2387,14 @@ function UsersScreen(props: {
   onInvite: (payload: AdminUserPayload) => Promise<boolean>;
   onUpdate: (payload: AdminUserPayload) => Promise<boolean>;
   onResendInvite: (user: AdminManagedUser) => void;
+  onDeactivate: (user: AdminManagedUser) => void;
+  onReactivate: (user: AdminManagedUser) => void;
+  onDelete: (user: AdminManagedUser) => void;
   onViewAs: (user: AdminManagedUser) => void;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [resendingId, setResendingId] = useState<string | null>(null);
+  const [confirmDelete, setConfirmDelete] = useState<AdminManagedUser | null>(null);
   const sortedUsers = [...props.users].sort((a, b) => a.email.localeCompare(b.email));
   const editingUser = editingId ? sortedUsers.find((u) => u.id === editingId) : undefined;
 
@@ -2396,7 +2465,7 @@ function UsersScreen(props: {
                   </TableCell>
                   <TableCell>
                     <Badge variant={user.status === "active" ? "success" : user.status === "invited" ? "secondary" : "outline"} className="font-medium">
-                      {user.status === "active" ? "Active" : user.status === "invited" ? "Invited" : "Unconfirmed"}
+                      {user.status === "active" ? "Active" : user.status === "invited" ? "Invited" : user.status === "deactivated" ? "Deactivated" : "Unconfirmed"}
                     </Badge>
                   </TableCell>
                   <TableCell className="text-muted-foreground">{roleLabel(user.role)}</TableCell>
@@ -2419,6 +2488,24 @@ function UsersScreen(props: {
                           {resendingId === user.id ? "Sending…" : "Resend invite"}
                         </DropdownMenuItem>
                         <DropdownMenuItem onSelect={() => setEditingId(user.id)}>Edit user</DropdownMenuItem>
+                        <DropdownMenuSeparator />
+                        {user.status === "deactivated" ? (
+                          <DropdownMenuItem onSelect={() => props.onReactivate(user)}>Reactivate</DropdownMenuItem>
+                        ) : (
+                          <DropdownMenuItem
+                            disabled={user.id === props.currentUserId}
+                            onSelect={() => props.onDeactivate(user)}
+                          >
+                            Deactivate
+                          </DropdownMenuItem>
+                        )}
+                        <DropdownMenuItem
+                          disabled={user.id === props.currentUserId}
+                          className="text-destructive focus:text-destructive"
+                          onSelect={() => setConfirmDelete(user)}
+                        >
+                          Delete user
+                        </DropdownMenuItem>
                       </DropdownMenuContent>
                     </DropdownMenu>
                   </TableCell>
@@ -2460,6 +2547,28 @@ function UsersScreen(props: {
                 }}
               />
             )}
+          </div>
+        </SheetContent>
+      </Sheet>
+
+      {/* Delete confirmation sheet */}
+      <Sheet open={!!confirmDelete} onOpenChange={(o) => { if (!o) setConfirmDelete(null); }}>
+        <SheetContent side="bottom" className="pb-8">
+          <SheetHeader>
+            <SheetTitle>Delete {confirmDelete?.email}?</SheetTitle>
+            <SheetDescription>
+              This removes their login access permanently. Their submitted scorecards and their team&apos;s historical data are preserved. This cannot be undone — use <strong>Deactivate</strong> instead if you may need to restore access later.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="mt-4 flex gap-2">
+            <Button
+              size="sm"
+              className="bg-[#9B2C2C] text-white hover:bg-[#7f2020]"
+              onClick={() => { if (confirmDelete) { props.onDelete(confirmDelete); setConfirmDelete(null); } }}
+            >
+              Delete user
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setConfirmDelete(null)}>Cancel</Button>
           </div>
         </SheetContent>
       </Sheet>

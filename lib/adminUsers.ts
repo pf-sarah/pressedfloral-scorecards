@@ -28,7 +28,8 @@ export type AdminManagedUser = {
   supervisorId?: string;
   scorecardPeriodType?: "monthly" | "quarterly";
   hasProfile: boolean;
-  status: "active" | "invited" | "unconfirmed";
+  status: "active" | "invited" | "unconfirmed" | "deactivated";
+  deactivatedAt?: string;
   invitedAt?: string;
   confirmedAt?: string;
   lastSignInAt?: string;

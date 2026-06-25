@@ -79,6 +79,23 @@ export async function PATCH(request: NextRequest) {
   const admin = await requireAdmin(request);
   if (!admin.ok) return admin.response;
 
+  const action = request.nextUrl.searchParams.get("action");
+
+  // Deactivate / reactivate — ban or unban without touching profile data
+  if (action === "deactivate" || action === "reactivate") {
+    const body = await readJson(request) as Record<string, unknown> | null;
+    const targetId = typeof body?.id === "string" ? body.id : null;
+    if (!targetId) return jsonError("User id is required.", 400);
+    if (targetId === admin.callerId) return jsonError("You cannot deactivate your own account.", 400);
+
+    const banDuration = action === "deactivate" ? "876000h" : "none";
+    const updateResult = await admin.client.auth.admin.updateUserById(targetId, { ban_duration: banDuration });
+    if (updateResult.error) return jsonError(updateResult.error.message, 400);
+
+    const profileResult = await admin.client.from("manager_profiles").select("*").eq("id", targetId).maybeSingle();
+    return NextResponse.json({ user: mapManagedUser(updateResult.data.user, profileResult.data ?? undefined) });
+  }
+
   const payload = normalizeAdminUserPayload(await readJson(request), { requireId: true });
   if (!payload.ok) return jsonError(payload.error, 400);
   const targetId = payload.value.id!;
@@ -108,6 +125,22 @@ export async function PATCH(request: NextRequest) {
   if (profileResult.error) return jsonError(profileResult.error.message, 500);
 
   return NextResponse.json({ user: mapManagedUser(targetResult.data.user, profileResult.data) });
+}
+
+export async function DELETE(request: NextRequest) {
+  const admin = await requireAdmin(request);
+  if (!admin.ok) return admin.response;
+
+  const targetId = request.nextUrl.searchParams.get("id");
+  if (!targetId) return jsonError("User id is required.", 400);
+  if (targetId === admin.callerId) return jsonError("You cannot delete your own account.", 400);
+
+  // Delete auth user. Profile row intentionally kept as orphan so historical
+  // scorecard reviewer references remain intact.
+  const { error } = await admin.client.auth.admin.deleteUser(targetId);
+  if (error) return jsonError(error.message, 400);
+
+  return NextResponse.json({ id: targetId });
 }
 
 async function requireAdmin(request: NextRequest): Promise<AdminContext> {
@@ -162,11 +195,14 @@ function mapManagedUser(user: Record<string, any>, profileRow?: Record<string, a
   const profile = profileRow
     ? profileFromRow(email, profileRow)
     : { id: String(user.id), email, role: "user" as const, departments: [], locations: [] };
+  const bannedUntil = user.banned_until ? new Date(user.banned_until) : null;
+  const isDeactivated = bannedUntil !== null && bannedUntil > new Date();
   return {
     ...profile,
     email,
     hasProfile: !!profileRow,
-    status: user.last_sign_in_at || user.confirmed_at || user.email_confirmed_at ? "active" : user.invited_at ? "invited" : "unconfirmed",
+    status: isDeactivated ? "deactivated" : user.last_sign_in_at || user.confirmed_at || user.email_confirmed_at ? "active" : user.invited_at ? "invited" : "unconfirmed",
+    deactivatedAt: isDeactivated ? user.banned_until : undefined,
     invitedAt: user.invited_at || undefined,
     confirmedAt: user.confirmed_at || user.email_confirmed_at || undefined,
     lastSignInAt: user.last_sign_in_at || undefined,
