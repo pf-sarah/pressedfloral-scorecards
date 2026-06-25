@@ -2527,8 +2527,8 @@ function UserPermissionForm(props: {
           </DrawerField>
         )}
         <DrawerField label="Role" className="w-[160px]">
-          <Select value={draft.role} onValueChange={(v) => setRole(v as ProfileRole)}>
-            <SelectTrigger className="w-full" aria-label="User role"><SelectValue /></SelectTrigger>
+          <Select value={draft.role || undefined} onValueChange={(v) => setRole(v as ProfileRole)}>
+            <SelectTrigger className="w-full" aria-label="User role"><SelectValue placeholder="Select role…" /></SelectTrigger>
             <SelectContent>
               <SelectItem value="manager">Manager</SelectItem>
               <SelectItem value="user">User</SelectItem>
@@ -2625,9 +2625,9 @@ function userDraftFromUser(user?: AdminManagedUser): AdminUserPayload & { email:
   if (!user) {
     return {
       email: "",
-      role: "manager",
-      departments: ["Design"],
-      locations: ["Utah"],
+      role: "" as ProfileRole,
+      departments: [],
+      locations: [],
       linkedEmployeeName: "",
       allDepartments: false,
       allLocations: false,
