@@ -1896,9 +1896,31 @@ function PersonalScorecardPanel({
   const currentLabel = formatMonthLabel(curISO);
   const nextLabel = formatMonthLabel(nextISO);
 
-  // Navigation: all submitted months + current + next month
+  // Navigation: same 24-back to 12-forward window as the manager's month picker,
+  // filtered to months where this employee actually has content (submitted scorecard or
+  // Rippling entry) so the navigator stays compact. Current and next are always included.
   const submittedSet = new Set(scorecards.map((sc) => sc.scorecardMonth));
-  const allPeriods = new Set([...submittedSet, currentLabel, nextLabel]);
+
+  const ripplingMonthLabels = new Set<string>();
+  for (const [period, employees] of Object.entries(rippling)) {
+    if (employees.some((e) => e.name === employeeName)) {
+      ripplingMonthLabels.add(formatMonthLabel(period));
+    }
+  }
+
+  const windowLabels = new Set<string>();
+  for (let offset = -24; offset <= 12; offset++) {
+    const d = new Date(today.getFullYear(), today.getMonth() + offset, 1);
+    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
+    windowLabels.add(formatMonthLabel(iso));
+  }
+
+  const allPeriods = new Set([
+    ...[...submittedSet].filter((m) => windowLabels.has(m)),
+    ...[...ripplingMonthLabels].filter((m) => windowLabels.has(m)),
+    currentLabel,
+    nextLabel,
+  ]);
   const sortedPeriods = [...allPeriods].sort((a, b) => periodSortKey(a).localeCompare(periodSortKey(b)));
 
   const [idx, setIdx] = useState(() => {
