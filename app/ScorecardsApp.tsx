@@ -2939,7 +2939,10 @@ function GoalsScreen(props: {
 
   const goalHasTargets = (goal: Goal) => {
     const a = goal.periodType === "quarterly" ? quarterActuals : props.actuals;
-    return a[metaKey("target", goal)] != null && a[metaKey("min", goal)] != null;
+    // Per-month override takes precedence; fall back to goal defaults (goalValue/minValue).
+    // A goal is considered "set" as long as there is a non-zero target value from either source.
+    const target = a[metaKey("target", goal)] != null ? Number(a[metaKey("target", goal)]) : goal.goalValue;
+    return target > 0;
   };
 
   const isMonthlyInactive = (goal: Goal) => !!props.actuals["__monthly_inactive__" + actualKey(goal)];
@@ -4333,7 +4336,9 @@ function LiveScorecardCard({
 
   const liveScorecard = buildScorecard({ employee: activeEmployee, month: activeMonth, periodType: cardPeriodType, goals: currentGoals, submittedBy: currentUserEmail, payrollAvailable: activePayrollAvailable });
 
-  const hasNoTarget = currentGoals.some((g) => periodActuals[metaKey("target", g)] == null || periodActuals[metaKey("min", g)] == null);
+  // A goal is missing a target only when neither a per-month override nor the goal default provides
+  // a non-zero value. scTarget/scMin already incorporate the fallback to goalValue/minValue.
+  const hasNoTarget = currentGoals.some((g) => !g.scTarget);
   // A goal has an unset weight when it has no stored weight in Goals Bank and no manager override.
   const hasUnsetWeights = currentGoals.some((g) =>
     (g.weight == null || g.weight === 0) && weightOverrides[g.name] === undefined
@@ -4418,7 +4423,7 @@ function LiveScorecardCard({
               <TableBody className="[&_td]:px-2.5 [&_td]:py-2">
                 {currentGoals.map((goal) => {
                   const sc = liveScorecard.goals.find((g) => g.name === goal.name);
-                  const noTarget = periodActuals[metaKey("target", goal)] == null || periodActuals[metaKey("min", goal)] == null;
+                  const noTarget = !goal.scTarget;
                   const isInd = goal.goalTier === "individual";
                   return (
                     <TableRow key={goal.id}>
