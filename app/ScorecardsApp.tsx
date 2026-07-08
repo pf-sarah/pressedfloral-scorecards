@@ -4230,6 +4230,41 @@ function LiveScorecardCard({
     initSettings ? Object.fromEntries(Object.entries(initSettings.weightOverrides).map(([k, v]) => [k, String(v)])) : {}
   );
 
+  // Refs so the sync effect always reads latest values without stale closures
+  const empSettingsRef = useRef(empSettings);
+  empSettingsRef.current = empSettings;
+  const allGoalsRef = useRef(allGoals);
+  allGoalsRef.current = allGoals;
+  const cardPeriodTypeRef = useRef(cardPeriodType);
+  cardPeriodTypeRef.current = cardPeriodType;
+
+  // Stable string key — changes only when the actual set of base goal IDs changes.
+  // Avoids firing the sync effect on every parent render (baseGoals is a new array ref each time).
+  const baseGoalIdsString = useMemo(
+    () => baseGoals.map((g) => g.id).sort().join(","),
+    [baseGoals]
+  );
+
+  // Re-derive goalIds whenever the base goal list changes externally (goal added/edited/deleted
+  // in Goals & Actuals). Manager-driven changes (remove/add on a specific card) set goalIds
+  // directly and are persisted via scheduleSettingsSave — this effect will re-sync from the
+  // saved settings the next time baseGoals changes.
+  useEffect(() => {
+    const pt = cardPeriodTypeRef.current;
+    const s = empSettingsRef.current.find((st) => st.periodType === pt);
+    const base = baseGoals
+      .filter((g) => pt === "quarterly" ? g.periodType === "quarterly" : g.periodType !== "quarterly")
+      .map((g) => g.id);
+    if (!s) { setGoalIds(base); return; }
+    const excluded = new Set(s.excludedGoalIds);
+    const kept = base.filter((id) => !excluded.has(id));
+    const extras = s.addedGoalIds.filter(
+      (id) => !base.includes(id) && allGoalsRef.current.some((g) => g.id === id)
+    );
+    setGoalIds([...kept, ...extras]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [baseGoalIdsString]);
+
   // Debounced settings persistence — fires 600 ms after the last change
   const settingsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   function scheduleSettingsSave(newGoalIds: string[], newWeightOverrides: Record<string, string>, pt: "monthly" | "quarterly") {
