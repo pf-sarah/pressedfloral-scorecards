@@ -3223,7 +3223,7 @@ function GoalsScreen(props: {
           </TableBody>
         </Table>
         {(periodTab === "monthly" ? monthlyGoals : quarterlyGoals).length === 0 && <div className="no-goals-msg" style={{ display: "block" }}>No {periodTab} goals match the current filter</div>}
-        {!effectiveReadonly && props.month >= currentMonthVal && (
+        {!effectiveReadonly && (
           <div style={{ padding: "12px 16px" }}>
             <button className="add-goal-btn" onClick={() => props.onEdit({ ...emptyGoal, id: `goal-${Date.now()}`, periodType: periodTab, startMonth: props.month })}>+ Add {periodTab === "quarterly" ? "Quarterly" : "Monthly"} Goal to Bank</button>
           </div>
