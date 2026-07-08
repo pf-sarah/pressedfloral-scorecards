@@ -4307,7 +4307,7 @@ function LiveScorecardCard({
   const currentGoals: EditableGoal[] = (() => {
     const goals = goalIds
       .map((id) => allGoals.find((g) => g.id === id))
-      .filter((g): g is Goal => !!g);
+      .filter((g): g is Goal => !!g && goalActiveForMonth(g, isoMonth));
     const n = goals.length;
     return goals.map((g) => {
       // Weight comes from Goals Bank. Manager overrides take precedence.
