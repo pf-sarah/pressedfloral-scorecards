@@ -2911,18 +2911,20 @@ function GoalsScreen(props: {
   const now = new Date();
   const currentMonthVal = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
   let monthStatus = "";
-  let isGoalLocked = false;   // goals can't be edited (past > 21 days)
+  let isGoalLocked = false;   // goals can't be edited (past > 14 days)
   let isActualLocked = true;  // actuals can only be entered for past months within 21 days
   if (props.month) {
     if (props.month < currentMonthVal) {
       const [y, m] = props.month.split("-");
       const monthEnd = new Date(parseInt(y), parseInt(m), 0);
       const daysSince = Math.floor((now.getTime() - monthEnd.getTime()) / (1000 * 60 * 60 * 24));
-      isGoalLocked = daysSince > 21;
+      isGoalLocked = daysSince > 14;
       isActualLocked = daysSince > 21;
-      monthStatus = isGoalLocked
+      const goalsMsg = isGoalLocked ? "goals locked" : `goals editable for ${14 - daysSince} more day${14 - daysSince === 1 ? "" : "s"}`;
+      const actualsMsg = isActualLocked ? "actuals locked" : `actuals editable for ${21 - daysSince} more day${21 - daysSince === 1 ? "" : "s"}`;
+      monthStatus = isGoalLocked && isActualLocked
         ? "🔒 Past month — locked"
-        : `⚠️ Past month — actuals & goals editable for ${21 - daysSince} more days`;
+        : `⚠️ Past month — ${goalsMsg}, ${actualsMsg}`;
     } else if (props.month === currentMonthVal) {
       monthStatus = "● Current month — actuals entered after month ends";
     } else {
