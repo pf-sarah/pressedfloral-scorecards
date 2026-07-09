@@ -4390,6 +4390,7 @@ function LiveScorecardCard({
   );
   const totalWeight = Number(currentGoals.reduce((sum, g) => sum + g.scWeight, 0).toFixed(1));
   const weightsValid = currentGoals.length === 0 || (!hasUnsetWeights && totalWeight === 100);
+  const hasQuarterlyMismatch = cardPeriodType === "monthly" && currentGoals.some((g) => g.periodType === "quarterly");
   const availableToAdd = allGoals.filter((g) => {
     if (goalIds.includes(g.id)) return false;
     if (!isGoalApplicable(g)) return false;
@@ -4603,11 +4604,16 @@ function LiveScorecardCard({
                   : `Weights: ${totalWeight.toFixed(1)}%${!weightsValid ? " — must equal 100" : ""}`}
               </span>
             )}
+            {hasQuarterlyMismatch && (
+              <span className="text-[11.5px] font-semibold text-destructive">
+                Remove quarterly goals before submitting a monthly scorecard
+              </span>
+            )}
             <Button
               size="sm"
               className="ml-auto"
-              disabled={isCurrentMonth || isFutureMonth || hasNoTarget || currentGoals.length === 0 || !weightsValid}
-              title={isCurrentMonth || isFutureMonth ? "Scorecards can only be submitted for past months" : hasNoTarget ? "Set goal values and minimums first" : hasUnsetWeights ? "Assign goal weights in Goals & Actuals first" : !weightsValid ? "Weights must add up to 100%" : undefined}
+              disabled={isCurrentMonth || isFutureMonth || hasNoTarget || currentGoals.length === 0 || !weightsValid || hasQuarterlyMismatch}
+              title={isCurrentMonth || isFutureMonth ? "Scorecards can only be submitted for past months" : hasNoTarget ? "Set goal values and minimums first" : hasUnsetWeights ? "Assign goal weights in Goals & Actuals first" : !weightsValid ? "Weights must add up to 100%" : hasQuarterlyMismatch ? "Remove quarterly goals before submitting a monthly scorecard" : undefined}
               onClick={() => { onSubmit(liveScorecard); setLastSubmitted(liveScorecard); }}
             >
               Submit scorecard
