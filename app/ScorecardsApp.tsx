@@ -3838,6 +3838,18 @@ function ScorecardsScreen(props: {
     });
   })();
 
+  // In quarterly mode, derive unique quarters from relevantMonths (ordered newest-first).
+  // Each quarter is represented by its first ISO month (what selectedMonths stores).
+  const relevantQuarters: string[] = (() => {
+    const seen = new Set<string>();
+    const result: string[] = [];
+    for (const m of [...relevantMonths].sort().reverse()) {
+      const firstOfQ = quarterToIsoMonth(quarterKeyForMonth(m));
+      if (!seen.has(firstOfQ)) { seen.add(firstOfQ); result.push(firstOfQ); }
+    }
+    return result;
+  })();
+
   // Display months for multi-month mode:
   //   "All months" (0 selected) → only months with rippling data or submitted scorecards (avoid showing 36 empty months)
   //   Specific months selected → exactly those months, descending
@@ -3851,17 +3863,25 @@ function ScorecardsScreen(props: {
       )
     : [];
 
-  const monthPickerLabel = props.selectedMonths.length === 0
-    ? "All months"
+  const periodPickerLabel = props.selectedMonths.length === 0
+    ? globalPeriodType === "quarterly" ? "All quarters" : "All months"
     : props.selectedMonths.length === 1
-    ? formatMonthLabel(props.selectedMonths[0])
-    : `${props.selectedMonths.length} months selected`;
+      ? globalPeriodType === "quarterly"
+        ? quarterKeyForMonth(props.selectedMonths[0])
+        : formatMonthLabel(props.selectedMonths[0])
+      : globalPeriodType === "quarterly"
+        ? `${props.selectedMonths.length} quarters selected`
+        : `${props.selectedMonths.length} months selected`;
 
   return (
     <div className="screen active">
       <section style={{ padding: 0 }} className="overflow-hidden">
         <div className="flex flex-wrap items-center gap-2 p-2.5">
-          <Tabs value={globalPeriodType} onValueChange={(v) => setGlobalPeriodType(v as "monthly" | "quarterly")}>
+          <Tabs value={globalPeriodType} onValueChange={(v) => {
+            setGlobalPeriodType(v as "monthly" | "quarterly");
+            props.onMonths([]);
+            setFilterEmployees([]);
+          }}>
             <TabsList className="h-8">
               <TabsTrigger value="monthly" className="px-3 text-[12px] data-[state=active]:bg-card data-[state=active]:text-foreground">Monthly</TabsTrigger>
               <TabsTrigger value="quarterly" className="px-3 text-[12px] data-[state=active]:bg-card data-[state=active]:text-foreground">Quarterly</TabsTrigger>
@@ -3870,7 +3890,7 @@ function ScorecardsScreen(props: {
 
           <DropdownMenu>
             <DropdownMenuTrigger className="flex h-8 w-auto min-w-[9rem] items-center justify-between gap-2 rounded-md border border-input bg-transparent px-3 text-[12px] text-foreground shadow-xs transition-[color,box-shadow] outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 data-[state=open]:border-ring">
-              <span className="truncate">{monthPickerLabel}</span>
+              <span className="truncate">{periodPickerLabel}</span>
               <ChevronDown className="size-4 shrink-0 text-muted-foreground opacity-50" />
             </DropdownMenuTrigger>
             <DropdownMenuContent align="start" className="max-h-[320px] overflow-y-auto">
@@ -3879,23 +3899,44 @@ function ScorecardsScreen(props: {
                 onCheckedChange={() => { props.onMonths([]); setFilterEmployees([]); }}
                 onSelect={(e) => e.preventDefault()}
                 className="text-[13px] font-medium"
-              >All months</DropdownMenuCheckboxItem>
+              >{globalPeriodType === "quarterly" ? "All quarters" : "All months"}</DropdownMenuCheckboxItem>
               <DropdownMenuSeparator />
-              {relevantMonths.map((m) => (
-                <DropdownMenuCheckboxItem
-                  key={m}
-                  checked={props.selectedMonths.includes(m)}
-                  onCheckedChange={(checked) => {
-                    const next = checked
-                      ? [...props.selectedMonths, m].sort().reverse()
-                      : props.selectedMonths.filter((x) => x !== m);
-                    props.onMonths(next);
-                    setFilterEmployees([]);
-                  }}
-                  onSelect={(e) => e.preventDefault()}
-                  className="text-[13px]"
-                >{formatMonthLabel(m)}</DropdownMenuCheckboxItem>
-              ))}
+              {globalPeriodType === "quarterly"
+                ? relevantQuarters.map((firstMonth) => {
+                    const qLabel = quarterKeyForMonth(firstMonth);
+                    const isChecked = props.selectedMonths.includes(firstMonth);
+                    return (
+                      <DropdownMenuCheckboxItem
+                        key={firstMonth}
+                        checked={isChecked}
+                        onCheckedChange={(checked) => {
+                          const next = checked
+                            ? [...props.selectedMonths, firstMonth].sort().reverse()
+                            : props.selectedMonths.filter((x) => x !== firstMonth);
+                          props.onMonths(next);
+                          setFilterEmployees([]);
+                        }}
+                        onSelect={(e) => e.preventDefault()}
+                        className="text-[13px]"
+                      >{qLabel}</DropdownMenuCheckboxItem>
+                    );
+                  })
+                : relevantMonths.map((m) => (
+                    <DropdownMenuCheckboxItem
+                      key={m}
+                      checked={props.selectedMonths.includes(m)}
+                      onCheckedChange={(checked) => {
+                        const next = checked
+                          ? [...props.selectedMonths, m].sort().reverse()
+                          : props.selectedMonths.filter((x) => x !== m);
+                        props.onMonths(next);
+                        setFilterEmployees([]);
+                      }}
+                      onSelect={(e) => e.preventDefault()}
+                      className="text-[13px]"
+                    >{formatMonthLabel(m)}</DropdownMenuCheckboxItem>
+                  ))
+              }
             </DropdownMenuContent>
           </DropdownMenu>
 
@@ -4033,7 +4074,7 @@ function ScorecardsScreen(props: {
                 : [
                     filterLocations.length > 0 && filterLocations.length < teamLocations.length ? filterLocations.join(", ") : "",
                     filterDepts.length > 0 && filterDepts.length < teamDepts.length ? filterDepts.join(", ") : "",
-                  ].filter(Boolean).join(" · ") || monthPickerLabel.toLowerCase()}
+                  ].filter(Boolean).join(" · ") || periodPickerLabel.toLowerCase()}
             </span>
           </div>
           <div className="scorecard-list" style={{ padding: 0 }}>
