@@ -2912,23 +2912,32 @@ function GoalsScreen(props: {
   const currentMonthVal = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
   let monthStatus = "";
   let isGoalLocked = false;   // goals can't be edited (past > 14 days)
-  let isActualLocked = true;  // actuals can only be entered for past months within 21 days
+  let isActualLocked = true;  // actuals can only be entered for past periods within 21 days
+
   if (props.month) {
-    if (props.month < currentMonthVal) {
-      const [y, m] = props.month.split("-");
-      const monthEnd = new Date(parseInt(y), parseInt(m), 0);
-      const daysSince = Math.floor((now.getTime() - monthEnd.getTime()) / (1000 * 60 * 60 * 24));
+    // For the quarterly tab, lock/unlock based on the END of the quarter (last month),
+    // not the first month that bankMonth points to. Q2 ends June 30, not April 30.
+    const [py, pm] = props.month.split("-").map(Number);
+    const lockingISO = (periodTab === "quarterly" && py && pm)
+      ? `${py}-${String(Math.ceil(pm / 3) * 3).padStart(2, "0")}`
+      : props.month;
+    const periodLabel = periodTab === "quarterly" ? "quarter" : "month";
+
+    if (lockingISO < currentMonthVal) {
+      const [ly, lm] = lockingISO.split("-").map(Number);
+      const periodEnd = new Date(ly, lm, 0);
+      const daysSince = Math.floor((now.getTime() - periodEnd.getTime()) / (1000 * 60 * 60 * 24));
       isGoalLocked = daysSince > 14;
       isActualLocked = daysSince > 21;
       const goalsMsg = isGoalLocked ? "goals locked" : `goals editable for ${14 - daysSince} more day${14 - daysSince === 1 ? "" : "s"}`;
       const actualsMsg = isActualLocked ? "actuals locked" : `actuals editable for ${21 - daysSince} more day${21 - daysSince === 1 ? "" : "s"}`;
       monthStatus = isGoalLocked && isActualLocked
-        ? "🔒 Past month — locked"
-        : `⚠️ Past month — ${goalsMsg}, ${actualsMsg}`;
-    } else if (props.month === currentMonthVal) {
-      monthStatus = "● Current month — actuals entered after month ends";
+        ? `🔒 Past ${periodLabel} — locked`
+        : `⚠️ Past ${periodLabel} — ${goalsMsg}, ${actualsMsg}`;
     } else {
-      monthStatus = "○ Future month — plan goals ahead";
+      monthStatus = lockingISO === currentMonthVal
+        ? `● Current ${periodLabel} — actuals entered after ${periodLabel} ends`
+        : `○ Future ${periodLabel} — plan goals ahead`;
     }
   }
   const effectiveReadonly = props.readonly || isGoalLocked;
@@ -3135,7 +3144,7 @@ function GoalsScreen(props: {
           <div style={{ width: "120px" }} />
         </div>
 
-        {monthStatus && periodTab === "monthly" && (
+        {monthStatus && (
           <div className="border-t border-border bg-muted/30 px-5 py-1.5 text-[11.5px] text-muted-foreground">{monthStatus}</div>
         )}
       </section>
