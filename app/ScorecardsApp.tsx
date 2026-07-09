@@ -3822,13 +3822,12 @@ function ScorecardsScreen(props: {
     if (filterDepts.length > 0 && !filterDepts.includes(e.department)) return false;
     if (filterLocations.length > 0 && !filterLocations.includes(e.location)) return false;
     if (singleMonthMode && isDeactivatedForMonth(props.allActuals, e.name, selectedMonth)) return false;
-    // If this employee has a forced period type, only show them on their designated tab
+    // If this employee has an explicit period type set, only show them on that tab
     const forcedPeriod = props.employeePeriodTypes?.[e.name];
     if (forcedPeriod) return forcedPeriod === globalPeriodType;
-    // Otherwise apply the standard goal-based filter (goalsForEmployee already gates on goalActiveForMonth)
-    if (globalPeriodType === "quarterly") return goalsForEmployee(e).some((g) => g.periodType === "quarterly");
-    if (globalPeriodType === "monthly") return goalsForEmployee(e).some((g) => g.periodType !== "quarterly");
-    return true;
+    // Employees without an explicit designation are treated as monthly-only
+    if (globalPeriodType === "quarterly") return false;
+    return goalsForEmployee(e).some((g) => g.periodType !== "quarterly");
   });
 
   // Employees deactivated for the selected month — shown separately with a Reactivate option
