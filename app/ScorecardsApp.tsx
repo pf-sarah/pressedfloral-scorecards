@@ -2087,17 +2087,18 @@ function PersonalScorecardPanel({
 
       {/* Goals table */}
       {displayGoals.length > 0 ? (
-        <Table className="text-[12px]">
+        <div className="overflow-x-auto">
+        <Table className="text-[12px] min-w-[640px]">
           <TableHeader className="bg-muted/40 [&_th]:h-9 [&_th]:px-2.5 [&_th]:text-[10px] [&_th]:font-medium [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
             <TableRow className="hover:bg-transparent">
-              <TableHead>Type</TableHead>
+              <TableHead className="w-[72px]">Type</TableHead>
               <TableHead>Goal Name</TableHead>
-              <TableHead className="text-right">Goal</TableHead>
-              <TableHead className="text-right">Min</TableHead>
-              <TableHead className="text-right">Actual</TableHead>
-              <TableHead className="text-right">Weight</TableHead>
-              <TableHead className="text-right">Achieve</TableHead>
-              <TableHead className="text-right">Bonus</TableHead>
+              <TableHead className="w-[72px] text-right">Goal</TableHead>
+              <TableHead className="w-[72px] text-right">Min</TableHead>
+              <TableHead className="w-[72px] text-right">Actual</TableHead>
+              <TableHead className="w-[68px] text-right">Weight</TableHead>
+              <TableHead className="w-[80px] text-right">Achieve</TableHead>
+              <TableHead className="w-[90px] text-right">Bonus</TableHead>
             </TableRow>
           </TableHeader>
           <TableBody className="[&_td]:px-2.5 [&_td]:py-1.5">
@@ -2126,6 +2127,7 @@ function PersonalScorecardPanel({
             ))}
           </TableBody>
         </Table>
+        </div>
       ) : (
         <div className="px-4 py-6 text-center text-[12.5px] text-muted-foreground">
           No goals assigned for this period yet.
@@ -4469,17 +4471,18 @@ function LiveScorecardCard({
           )}
 
           {currentGoals.length > 0 ? (
-            <Table className="border-t border-border text-[12px]">
+            <div className="overflow-x-auto">
+            <Table className="border-t border-border text-[12px] min-w-[720px]">
               <TableHeader className="bg-muted/40 [&_th]:h-8 [&_th]:px-2.5 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
                 <TableRow className="hover:bg-transparent">
-                  <TableHead>Type</TableHead>
+                  <TableHead className="w-[72px]">Type</TableHead>
                   <TableHead>Goal Name</TableHead>
-                  <TableHead className="text-center">Goal</TableHead>
-                  <TableHead className="text-center">Min</TableHead>
-                  <TableHead className="text-center">Actual</TableHead>
-                  <TableHead className="text-center">Weight</TableHead>
-                  <TableHead className="text-center">Achieve</TableHead>
-                  <TableHead className="text-right">Est. Bonus</TableHead>
+                  <TableHead className="w-[72px] text-center">Goal</TableHead>
+                  <TableHead className="w-[72px] text-center">Min</TableHead>
+                  <TableHead className="w-[88px] text-center">Actual</TableHead>
+                  <TableHead className="w-[68px] text-center">Weight</TableHead>
+                  <TableHead className="w-[80px] text-center">Achieve</TableHead>
+                  <TableHead className="w-[90px] text-right">Est. Bonus</TableHead>
                   <TableHead className="w-10" />
                 </TableRow>
               </TableHeader>
@@ -4545,6 +4548,7 @@ function LiveScorecardCard({
                 })}
               </TableBody>
             </Table>
+            </div>
           ) : (
             <div className="border-t border-border px-4 py-4 text-center text-[12.5px] text-muted-foreground">
               {cardPeriodType === "quarterly" ? `No quarterly goals assigned for ${employee.name}.` : "No goals assigned for this employee and month."}

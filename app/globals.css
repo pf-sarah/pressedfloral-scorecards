@@ -80,7 +80,7 @@
        Legacy #sidebar / .nav-item / #app-main rules removed. ── */
     .header-left h1 { font-size: 16px; font-weight: 600; color: var(--text); }
     .header-left p { font-size: 11px; color: var(--text-muted); margin-top: 2px; font-family: var(--mono); }
-    main { max-width: 900px; margin: 0 auto; padding: 28px 32px 60px; }
+    main { max-width: 1200px; margin: 0 auto; padding: 28px 32px 60px; }
 
     /* ── Cards ── */
     section { background: var(--surface); border: 1.5px solid var(--border); border-radius: var(--radius); padding: 22px; margin-bottom: 14px; }
