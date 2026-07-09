@@ -313,8 +313,6 @@ export default function ScorecardsApp() {
 
   // Rippling uploads always target the previous (completed) month
 
-  const [ripplingPreview, setRipplingPreview] = useState<Employee[]>([]);
-
   const [historyFilters, setHistoryFilters] = useState<HistoryFilters>({
     period: fixturePeriod,
     search: "",
@@ -1420,30 +1418,6 @@ export default function ScorecardsApp() {
     showToast("Rippling data saved");
   }
 
-
-  async function saveRippling() {
-    if (!ripplingPreview.length) {
-      showToast("Upload a CSV before saving", "error");
-      return;
-    }
-    if (!isFixture && sb) {
-      const deleteResult = await sb.from("rippling_employees").delete().eq("period", workMonth);
-      if (deleteResult.error) {
-        showSupabaseError(deleteResult.error, "Existing Rippling data could not be cleared.");
-        return;
-      }
-      const insertResult = await sb.from("rippling_employees").insert(ripplingPreview.map((employee) => employeeToRow(workMonth, employee)));
-      if (insertResult.error) {
-        showSupabaseError(insertResult.error, "Rippling data could not be saved.");
-        return;
-      }
-    }
-    setAppData((current) => ({ ...current, rippling: { ...current.rippling, [workMonth]: ripplingPreview } }));
-    persistRippling(workMonth, ripplingPreview);
-    setRipplingPreview([]);
-    showToast("Rippling data saved");
-  }
-
   async function submitScorecardDirect(scorecard: Scorecard) {
     // Look up the submitting manager's supervisor to determine review routing
     const submittingProfile = profile; // the currently logged-in manager
@@ -1703,14 +1677,16 @@ export default function ScorecardsApp() {
           )}
           {mode === "rippling" && (
             <RipplingScreen
-              month={workMonth}
-              preview={ripplingPreview}
+              defaultMonth={workMonth}
               saved={appData.rippling}
-              onPreview={setRipplingPreview}
-              onSave={saveRippling}
-              onClear={() => {
-                setAppData((current) => ({ ...current, rippling: {} }));
-                showToast("Rippling data cleared");
+              onSaveForMonth={saveRipplingForMonth}
+              onClearMonth={(month) => {
+                setAppData((current) => {
+                  const next = { ...current.rippling };
+                  delete next[month];
+                  return { ...current, rippling: next };
+                });
+                showToast("Rippling data cleared for " + formatMonthLabel(month));
               }}
             />
           )}
@@ -5367,77 +5343,161 @@ function ReportLineChart({
 }
 
 function RipplingScreen(props: {
-  month: string;
-  preview: Employee[];
+  defaultMonth: string;
   saved: Record<string, Employee[]>;
-  onPreview: (employees: Employee[]) => void;
-  onSave: () => void;
-  onClear: () => void;
+  onSaveForMonth: (month: string, employees: Employee[]) => void;
+  onClearMonth: (month: string) => void;
 }) {
+  const [uploadMonth, setUploadMonth] = useState(props.defaultMonth);
+  const [preview, setPreview] = useState<Employee[]>([]);
+  const [previewFileName, setPreviewFileName] = useState("");
+  const [expandedMonth, setExpandedMonth] = useState<string | null>(null);
+
   async function handleFile(file: File | undefined) {
     if (!file) return;
-    props.onPreview(parseRipplingEmployees(await file.text()));
+    setPreview(parseRipplingEmployees(await file.text()));
+    setPreviewFileName(file.name);
   }
 
-  const savedEmployees = props.saved[props.month] || [];
+  function handleSave() {
+    if (!preview.length) return;
+    props.onSaveForMonth(uploadMonth, preview);
+    setPreview([]);
+    setPreviewFileName("");
+  }
+
+  function handleDownload(month: string, employees: Employee[]) {
+    const rows = employees.map((e) => [
+      e.name, e.role ?? "", e.department ?? "", e.location ?? "",
+      e.payType ?? "", e.annualPay ?? "", e.hourlyRate ?? "", e.hoursWorked ?? "", e.grossEarnings ?? "",
+    ]);
+    const csv = toCsv([["Name", "Role", "Department", "Location", "Pay Type", "Annual Pay", "Hourly Rate", "Hours Worked", "Gross Earnings"], ...rows]);
+    downloadCsv(csv, `Rippling_${month}.csv`);
+  }
+
+  // Month picker: last 36 months + next 2
+  const monthOptions: string[] = [];
+  const now = new Date();
+  for (let i = -35; i <= 2; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+    monthOptions.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  monthOptions.reverse();
+
+  const sortedSavedMonths = Object.keys(props.saved).sort().reverse();
+
   return (
     <div className="screen active">
+      {/* Upload section */}
       <section>
         <div className="mb-3 text-[11px] font-semibold uppercase tracking-wider text-primary">Upload Rippling CSV</div>
-        <div className="mb-3 rounded-md border border-border bg-muted/40 px-3 py-2 text-[12.5px] text-muted-foreground">
-          Uploading employee data for <strong className="font-semibold text-foreground">{formatMonthLabel(props.month)}</strong>. Export the previous month's completed payroll from Rippling and drop it below.
+        <div className="mb-3 flex items-center gap-2">
+          <span className="text-[12.5px] text-muted-foreground">Month:</span>
+          <Select value={uploadMonth} onValueChange={setUploadMonth}>
+            <SelectTrigger className="h-8 w-44 text-[12.5px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {monthOptions.map((m) => (
+                <SelectItem key={m} value={m} className="text-[12.5px]">{formatMonthLabel(m)}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          {props.saved[uploadMonth] && (
+            <span className="text-[11.5px] text-amber-600 font-medium">⚠ Data already uploaded — saving will replace it</span>
+          )}
         </div>
         <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border bg-muted/20 px-6 py-10 text-center tracking-normal transition-colors [&_span]:normal-case hover:border-primary/40 hover:bg-accent/40">
           <Upload className="size-7 text-muted-foreground" />
-          <span className="text-[14px] font-semibold text-foreground">Drop your Rippling CSV here</span>
+          {previewFileName
+            ? <span className="text-[14px] font-semibold text-foreground">{previewFileName}</span>
+            : <span className="text-[14px] font-semibold text-foreground">Drop your Rippling CSV here</span>}
           <span className="text-[12px] text-muted-foreground">or click to browse — Active_Employees_with_Hourly_and_Annual_Base_Pay.csv</span>
-          <input type="file" accept=".csv" hidden onChange={(event) => handleFile(event.target.files?.[0])} />
+          <input type="file" accept=".csv" hidden onChange={(e) => handleFile(e.target.files?.[0])} />
         </label>
+        {preview.length > 0 && (
+          <div className="mt-3 flex items-center justify-between gap-3 rounded-md border border-border bg-muted/30 px-3 py-2">
+            <span className="text-[12.5px] text-foreground">{preview.length} employees parsed from <span className="font-medium">{previewFileName}</span></span>
+            <div className="flex gap-2">
+              <Button variant="outline" size="sm" className="text-[12px]" onClick={() => { setPreview([]); setPreviewFileName(""); }}>Discard</Button>
+              <Button size="sm" onClick={handleSave}>Save for {formatMonthLabel(uploadMonth)}</Button>
+            </div>
+          </div>
+        )}
       </section>
-      {!!props.preview.length && <EmployeeTable title="Imported employees" employees={props.preview} action={<Button size="sm" onClick={props.onSave}>Save to app</Button>} />}
-      <EmployeeTable title="Saved employee data" employees={savedEmployees} action={savedEmployees.length ? <Button variant="outline" size="sm" className="text-[12px]" onClick={props.onClear}>Clear all</Button> : undefined} />
+
+      {/* Uploaded months list */}
+      <section style={{ padding: 0 }} className="overflow-hidden">
+        <div className="flex items-center justify-between gap-3 px-4 pb-2.5 pt-4">
+          <div className="text-[11px] font-semibold uppercase tracking-wider text-primary">Uploaded Data</div>
+          <span className="text-[11.5px] text-muted-foreground">{sortedSavedMonths.length} month{sortedSavedMonths.length !== 1 ? "s" : ""}</span>
+        </div>
+        {sortedSavedMonths.length === 0 ? (
+          <div className="px-4 pb-6 pt-2 text-center text-[13px] text-muted-foreground">No Rippling data uploaded yet</div>
+        ) : (
+          <div className="divide-y divide-border">
+            {sortedSavedMonths.map((month) => {
+              const employees = props.saved[month] || [];
+              const isOpen = expandedMonth === month;
+              return (
+                <div key={month}>
+                  <button
+                    type="button"
+                    className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40"
+                    onClick={() => setExpandedMonth(isOpen ? null : month)}
+                  >
+                    <ChevronRight className={`size-4 shrink-0 text-muted-foreground transition-transform ${isOpen ? "rotate-90" : ""}`} />
+                    <span className="flex-1">
+                      <span className="block text-[13.5px] font-medium text-foreground">{formatMonthLabel(month)}</span>
+                      <span className="block text-[11.5px] text-muted-foreground">{employees.length} employee{employees.length !== 1 ? "s" : ""}</span>
+                    </span>
+                    <div className="flex items-center gap-1" onClick={(e) => e.stopPropagation()}>
+                      <Button variant="ghost" size="sm" className="h-7 px-2 text-[11.5px] text-muted-foreground" onClick={() => handleDownload(month, employees)}>
+                        <Download className="mr-1 size-3.5" />Download CSV
+                      </Button>
+                      <Button variant="ghost" size="sm" className="h-7 px-2 text-[11.5px] text-destructive hover:text-destructive" onClick={() => props.onClearMonth(month)}>
+                        Remove
+                      </Button>
+                    </div>
+                  </button>
+                  {isOpen && (
+                    <div className="border-t border-border">
+                      <Table className="text-[12.5px]">
+                        <TableHeader className="bg-muted/40 [&_th]:h-9 [&_th]:px-4 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
+                          <TableRow className="hover:bg-transparent">
+                            <TableHead>Name</TableHead>
+                            <TableHead>Role</TableHead>
+                            <TableHead>Department</TableHead>
+                            <TableHead>Location</TableHead>
+                            <TableHead className="text-right">Pay</TableHead>
+                            <TableHead className="text-right">Hours</TableHead>
+                          </TableRow>
+                        </TableHeader>
+                        <TableBody className="[&_td]:px-4 [&_td]:py-2.5">
+                          {employees.map((e) => (
+                            <TableRow key={e.id || e.name}>
+                              <TableCell className="font-medium text-foreground">{e.name}</TableCell>
+                              <TableCell className="text-muted-foreground">{e.role}</TableCell>
+                              <TableCell className="text-muted-foreground">{e.department}</TableCell>
+                              <TableCell className="text-muted-foreground">{e.location}</TableCell>
+                              <TableCell className="text-right tabular-nums">{e.payType === "salary" ? formatCurrency(e.annualPay || 0) : formatCurrency(e.hourlyRate || 0)}</TableCell>
+                              <TableCell className="text-right tabular-nums">{e.hoursWorked || "—"}</TableCell>
+                            </TableRow>
+                          ))}
+                        </TableBody>
+                      </Table>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </section>
     </div>
   );
 }
 
-function EmployeeTable({ title, employees, action }: { title: string; employees: Employee[]; action?: React.ReactNode }) {
-  return (
-    <section style={{ padding: 0 }} className="overflow-hidden">
-      <div className="flex items-center justify-between gap-3 px-4 pb-2.5 pt-4">
-        <div className="text-[11px] font-semibold uppercase tracking-wider text-primary">{title}</div>
-        {action}
-      </div>
-      {employees.length === 0 ? (
-        <div className="px-4 pb-6 pt-2 text-center text-[13px] text-muted-foreground">No saved employees for this month</div>
-      ) : (
-        <Table className="text-[12.5px]">
-          <TableHeader className="bg-muted/40 [&_th]:h-9 [&_th]:px-4 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
-            <TableRow className="hover:bg-transparent">
-              <TableHead>Name</TableHead>
-              <TableHead>Role</TableHead>
-              <TableHead>Department</TableHead>
-              <TableHead>Location</TableHead>
-              <TableHead className="text-right">Pay</TableHead>
-              <TableHead className="text-right">Hours</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody className="[&_td]:px-4 [&_td]:py-2.5">
-            {employees.map((employee) => (
-              <TableRow key={employee.id || employee.name}>
-                <TableCell className="font-medium text-foreground">{employee.name}</TableCell>
-                <TableCell className="text-muted-foreground">{employee.role}</TableCell>
-                <TableCell className="text-muted-foreground">{employee.department}</TableCell>
-                <TableCell className="text-muted-foreground">{employee.location}</TableCell>
-                <TableCell className="text-right tabular-nums">{employee.payType === "salary" ? formatCurrency(employee.annualPay || 0) : formatCurrency(employee.hourlyRate || 0)}</TableCell>
-                <TableCell className="text-right tabular-nums">{employee.hoursWorked || "—"}</TableCell>
-              </TableRow>
-            ))}
-          </TableBody>
-        </Table>
-      )}
-    </section>
-  );
-}
 
 function TodoGroupCard({ title, meta, done, total, showCompleted, onToggleCompleted, children }: {
   title: string;
