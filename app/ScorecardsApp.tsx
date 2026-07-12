@@ -292,6 +292,8 @@ export default function ScorecardsApp() {
   const [authEmail, setAuthEmail] = useState("");
   const [authPassword, setAuthPassword] = useState("");
   const [authError, setAuthError] = useState("");
+  const [authNotice, setAuthNotice] = useState("");
+  const [resetLoading, setResetLoading] = useState(false);
   const [sb, setSb] = useState<SupabaseClient | null>(null);
   const [appData, setAppData] = useState<AppData>(() => cloneData(fixtureData));
   const [toast, setToast] = useState<{ message: string; type?: "success" | "error" } | null>(null);
@@ -635,6 +637,7 @@ export default function ScorecardsApp() {
 
   async function signIn() {
     setAuthError("");
+    setAuthNotice("");
     if (!authEmail || !authPassword) {
       setAuthError("Enter email and password");
       return;
@@ -649,6 +652,29 @@ export default function ScorecardsApp() {
       return;
     }
     setAuthPassword("");
+  }
+
+  async function forgotPassword() {
+    setAuthError("");
+    setAuthNotice("");
+    if (!authEmail) {
+      setAuthError('Enter your email, then click "Forgot password?"');
+      return;
+    }
+    if (!sb) {
+      setAuthError("Connection error. Reload the page and try again.");
+      return;
+    }
+    setResetLoading(true);
+    const result = await sb.auth.resetPasswordForEmail(authEmail, {
+      redirectTo: `${window.location.origin}/accept-invite`
+    });
+    setResetLoading(false);
+    if (result.error) {
+      setAuthError(result.error.message);
+      return;
+    }
+    setAuthNotice(`If an account exists for ${authEmail}, we've sent a password reset link.`);
   }
 
   async function signOut() {
@@ -1506,10 +1532,13 @@ export default function ScorecardsApp() {
         email={authEmail}
         password={authPassword}
         error={authError}
+        notice={authNotice}
+        resetLoading={resetLoading}
         fixtureMode={isFixture}
         onEmail={setAuthEmail}
         onPassword={setAuthPassword}
         onSignIn={signIn}
+        onForgotPassword={forgotPassword}
       />
     );
   }
@@ -1787,10 +1816,13 @@ function AuthScreen(props: {
   email: string;
   password: string;
   error: string;
+  notice: string;
+  resetLoading: boolean;
   fixtureMode: boolean;
   onEmail: (value: string) => void;
   onPassword: (value: string) => void;
   onSignIn: () => void;
+  onForgotPassword: () => void;
 }) {
   return (
     <div className="flex min-h-screen w-full items-center justify-center bg-background p-4">
@@ -1810,6 +1842,11 @@ function AuthScreen(props: {
               {props.error}
             </div>
           )}
+          {props.notice && (
+            <div className="rounded-md border border-[var(--sage-dark)]/20 bg-[var(--sage-dark)]/10 px-3 py-2 text-[12.5px] text-[var(--sage-dark)]">
+              {props.notice}
+            </div>
+          )}
           <div className="space-y-1.5">
             <Label htmlFor="auth-email">Email</Label>
             <Input
@@ -1821,7 +1858,17 @@ function AuthScreen(props: {
             />
           </div>
           <div className="space-y-1.5">
-            <Label htmlFor="auth-password">Password</Label>
+            <div className="flex items-center justify-between">
+              <Label htmlFor="auth-password">Password</Label>
+              <button
+                type="button"
+                className="text-[12px] font-medium text-primary hover:underline disabled:cursor-not-allowed disabled:opacity-60"
+                onClick={props.onForgotPassword}
+                disabled={props.resetLoading}
+              >
+                {props.resetLoading ? "Sending…" : "Forgot password?"}
+              </button>
+            </div>
             <Input
               id="auth-password"
               type="password"
@@ -2868,23 +2915,17 @@ function GoalsScreen(props: {
   const [actualEditId, setActualEditId] = useState<string | null>(null);
   const [periodTab, setPeriodTab] = useState<"monthly" | "quarterly">("monthly");
   const [assigningGoal, setAssigningGoal] = useState<Goal | null>(null);
+  const [confirmDeactivate, setConfirmDeactivate] = useState<Goal | null>(null);
   const [assignEmployeeNames, setAssignEmployeeNames] = useState<string[]>([]);
 
-  // Employees eligible for the current assignment (period-type validated)
+  // Company goals are opt-in overlays assigned individually — an employee's existing
+  // monthly/quarterly department goals shouldn't gate whether they can also receive one
+  // (e.g. a director with only monthly department goals must still be assignable to a
+  // quarterly company goal).
   const assignEligibleEmployees = useMemo(() => {
     if (!assigningGoal) return [];
-    const periodType: "monthly" | "quarterly" = assigningGoal.periodType === "quarterly" ? "quarterly" : "monthly";
-    return (props.teamEmployees || []).filter((emp) => {
-      if (!props.allGoals || props.allGoals.length === 0) return true;
-      const empGoals = props.allGoals.filter((g) => {
-        if (g.goalTier === "company") return false;
-        if (g.goalTier === "department") return g.department === emp.department && (!g.location || g.location === emp.location);
-        return (g.employeeName === emp.name || g.role === emp.role) && g.department === emp.department;
-      });
-      if (empGoals.length === 0) return true; // no goals at all — compatible with any period
-      return empGoals.some((g) => g.periodType === periodType);
-    }).sort((a, b) => a.name.localeCompare(b.name));
-  }, [assigningGoal, props.teamEmployees, props.allGoals]);
+    return [...(props.teamEmployees || [])].sort((a, b) => a.name.localeCompare(b.name));
+  }, [assigningGoal, props.teamEmployees]);
 
   const now = new Date();
   const currentMonthVal = now.getFullYear() + "-" + String(now.getMonth() + 1).padStart(2, "0");
@@ -3028,7 +3069,7 @@ function GoalsScreen(props: {
                       Add to individual scorecard
                     </DropdownMenuItem>
                   )}
-                  <DropdownMenuItem onClick={() => props.onToggle(goal)}>
+                  <DropdownMenuItem onClick={() => activeInMonth ? setConfirmDeactivate(goal) : props.onToggle(goal)}>
                     {activeInMonth ? "Deactivate goal" : "Reactivate goal"}
                   </DropdownMenuItem>
                   {activeInMonth && (
@@ -3329,6 +3370,28 @@ function GoalsScreen(props: {
                 : "Assign Goal"}
             </Button>
           </SheetFooter>
+        </SheetContent>
+      </Sheet>
+
+      {/* Deactivate confirmation sheet */}
+      <Sheet open={!!confirmDeactivate} onOpenChange={(o) => { if (!o) setConfirmDeactivate(null); }}>
+        <SheetContent side="bottom" className="pb-8">
+          <SheetHeader>
+            <SheetTitle>Deactivate &ldquo;{confirmDeactivate?.name}&rdquo;?</SheetTitle>
+            <SheetDescription>
+              This goal will stop appearing on scorecards from <strong>{formatMonthLabel(props.month)}</strong> forward. Past months are unaffected, and you can reactivate it later from the goal bank.
+            </SheetDescription>
+          </SheetHeader>
+          <div className="mt-4 flex gap-2">
+            <Button
+              size="sm"
+              className="bg-[#9B2C2C] text-white hover:bg-[#7f2020]"
+              onClick={() => { if (confirmDeactivate) { props.onToggle(confirmDeactivate); setConfirmDeactivate(null); } }}
+            >
+              Deactivate goal
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => setConfirmDeactivate(null)}>Cancel</Button>
+          </div>
         </SheetContent>
       </Sheet>
     </div>
