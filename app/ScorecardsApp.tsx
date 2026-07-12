@@ -3225,9 +3225,9 @@ function GoalsScreen(props: {
             <col />
             <col style={{ width: "42px" }} />
             <col style={{ width: "68px" }} />
-            <col style={{ width: "52px" }} />
-            <col style={{ width: "46px" }} />
-            <col style={{ width: "72px" }} />
+            <col style={{ width: "92px" }} />
+            <col style={{ width: "90px" }} />
+            <col style={{ width: "92px" }} />
             <col style={{ width: "66px" }} />
             <col style={{ width: "46px" }} />
           </colgroup>
