@@ -1223,19 +1223,21 @@ export default function ScorecardsApp() {
       createdAt: new Date().toISOString(),
     };
     if (!isFixture && sb) {
-      const { data, error } = await sb.from("goal_assignments").insert({
-        goal_id: goalId,
-        employee_name: employeeName,
-        start_month: month,
-        end_month: null,
-        created_by: currentUserEmail,
-        created_at: newAssignment.createdAt,
-      }).select("id").single();
-      if (error) {
-        showToast("Failed to save assignment. Please try again.");
+      const { data: { session } } = await sb.auth.getSession();
+      const token = session?.access_token;
+      if (!token) { showToast("Session expired — please sign in again.", "error"); return; }
+      const res = await fetch("/api/goal-assignments", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ goalId, employeeName, startMonth: month, createdBy: currentUserEmail, createdAt: newAssignment.createdAt }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast("Failed to save assignment: " + (err.error ?? res.statusText), "error");
         return;
       }
-      newAssignment.id = String(data.id);
+      const resData = await res.json();
+      newAssignment.id = String(resData.id);
     }
     setAppData((current) => ({ ...current, goalAssignments: [...current.goalAssignments, newAssignment] }));
     showToast(`"${goal.name}" added to ${employeeName}'s scorecard from ${formatMonthLabel(month)} forward`);
@@ -1260,24 +1262,21 @@ export default function ScorecardsApp() {
     };
 
     if (!isFixture && sb) {
-      const { data, error } = await sb
-        .from("employee_scorecard_settings")
-        .upsert(
-          {
-            employee_name: employeeName,
-            period_type: periodType,
-            excluded_goal_ids: patch.excludedGoalIds,
-            added_goal_ids: patch.addedGoalIds,
-            weight_overrides: patch.weightOverrides,
-            updated_at: now,
-            updated_by: currentUserEmail,
-          },
-          { onConflict: "employee_name,period_type" }
-        )
-        .select("id")
-        .single();
-      if (error) { console.error("Failed to save scorecard settings", error); return; }
-      updated.id = String(data.id);
+      const { data: { session } } = await sb.auth.getSession();
+      const token = session?.access_token;
+      if (!token) { showToast("Session expired — please sign in again.", "error"); return; }
+      const res = await fetch("/api/scorecard-settings", {
+        method: "PUT",
+        headers: { "Content-Type": "application/json", Authorization: `Bearer ${token}` },
+        body: JSON.stringify({ employeeName, periodType, ...patch, updatedAt: now, updatedBy: currentUserEmail }),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        showToast("Could not save scorecard settings: " + (err.error ?? res.statusText), "error");
+        return;
+      }
+      const resData = await res.json();
+      updated.id = String(resData.id);
     }
 
     setAppData((current) => ({
