@@ -27,6 +27,7 @@ export type AdminManagedUser = {
   linkedEmployeeName?: string;
   supervisorId?: string;
   scorecardPeriodType?: "monthly" | "quarterly";
+  companyGoalsGrant?: boolean;
   hasProfile: boolean;
   status: "active" | "invited" | "unconfirmed" | "deactivated";
   deactivatedAt?: string;
@@ -45,6 +46,7 @@ export type AdminUserPayload = {
   linkedEmployeeName?: string;
   supervisorId?: string;
   scorecardPeriodType?: "monthly" | "quarterly";
+  companyGoalsGrant?: boolean;
   allDepartments?: boolean;
   allLocations?: boolean;
 };
@@ -91,6 +93,7 @@ export function normalizeAdminUserPayload(input: unknown, options: NormalizeOpti
   const linkedEmployeeName = normalizeOptionalString(source.linkedEmployeeName);
   const supervisorId = normalizeOptionalString(source.supervisorId);
   const scorecardPeriodType: "monthly" | "quarterly" = source.scorecardPeriodType === "quarterly" ? "quarterly" : "monthly";
+  const companyGoalsGrant = source.companyGoalsGrant === true;
 
   if (role === "admin") {
     return {
@@ -103,7 +106,7 @@ export function normalizeAdminUserPayload(input: unknown, options: NormalizeOpti
     if (!linkedEmployeeName) return { ok: false, error: "Choose the employee this viewer can access." };
     return {
       ok: true,
-      value: { id, email, role, departments: [], locations: [], linkedEmployeeName, allDepartments: true, allLocations: true, scorecardPeriodType }
+      value: { id, email, role, departments: [], locations: [], linkedEmployeeName, allDepartments: true, allLocations: true, scorecardPeriodType, companyGoalsGrant }
     };
   }
 
@@ -125,6 +128,7 @@ export function normalizeAdminUserPayload(input: unknown, options: NormalizeOpti
       linkedEmployeeName,
       supervisorId: supervisorId || undefined,
       scorecardPeriodType,
+      companyGoalsGrant,
       allDepartments,
       allLocations
     }
@@ -139,17 +143,19 @@ export function adminProfileToRow(userId: string, payload: AdminUserPayload) {
     locations: payload.locations,
     linked_employee_name: payload.linkedEmployeeName || null,
     supervisor_id: payload.supervisorId || null,
-    scorecard_period_type: payload.scorecardPeriodType || "monthly"
+    scorecard_period_type: payload.scorecardPeriodType || "monthly",
+    company_goals_grant: payload.companyGoalsGrant === true
   };
 }
 
-export function scopeSummary(profile: Pick<ManagerProfile, "role" | "departments" | "locations" | "linkedEmployeeName">) {
+export function scopeSummary(profile: Pick<ManagerProfile, "role" | "departments" | "locations" | "linkedEmployeeName" | "companyGoalsGrant">) {
+  const companyGoals = profile.role !== "admin" && profile.companyGoalsGrant ? " · company goals" : "";
   if (profile.role === "admin") return "Full access";
-  if (profile.role === "user") return profile.linkedEmployeeName ? `Viewer for ${profile.linkedEmployeeName}` : "Viewer not linked";
+  if (profile.role === "user") return (profile.linkedEmployeeName ? `Viewer for ${profile.linkedEmployeeName}` : "Viewer not linked") + companyGoals;
   const departments = profile.departments.length ? profile.departments.join(", ") : "all departments";
   const locations = profile.locations.length ? profile.locations.join(", ") : "all locations";
   const linked = profile.linkedEmployeeName ? ` · ${profile.linkedEmployeeName}'s team` : "";
-  return `${departments} · ${locations}${linked}`;
+  return `${departments} · ${locations}${linked}${companyGoals}`;
 }
 
 function normalizeOptionalString(value: unknown) {

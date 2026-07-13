@@ -13,6 +13,7 @@ import {
 import { downloadCsv, parseRipplingEmployees, scorecardsToCsv, toCsv } from "../lib/csv";
 import { fixtureData, fixtureManager, fixtureMonth, fixturePeriod } from "../lib/fixtures";
 import { currentMonthValue, formatMonthLabel } from "../lib/periods";
+import { getReportingTree } from "../lib/reportingTree";
 import { baseEarnings, buildScorecard, calculateGoal, formatCurrency, formatNumber, type EditableGoal } from "../lib/score";
 import {
   hydrateFromLocalStorage,
@@ -230,24 +231,6 @@ function roleAtLeast(profile: ManagerProfile | null, minRole: "admin" | "manager
   return (ROLE_RANK[profile?.role ?? "user"] ?? 1) >= ROLE_RANK[minRole];
 }
 
-function getReportingTree(managerName: string, employees: Employee[]): Set<string> {
-  const result = new Set<string>();
-  const queue = [managerName];
-  const visited = new Set<string>();
-  while (queue.length) {
-    const current = queue.shift()!;
-    if (visited.has(current)) continue;
-    visited.add(current);
-    for (const emp of employees) {
-      if (emp.manager === current && !visited.has(emp.name)) {
-        result.add(emp.name);
-        queue.push(emp.name);
-      }
-    }
-  }
-  return result;
-}
-
 function scopedForProfile<T extends { department?: string; location?: string }>(items: T[], profile: ManagerProfile | null) {
   if (!profile || profile.role === "admin") return items;
   if (profile.role === "user") return items; // user filtering is done separately by employee name
@@ -317,10 +300,37 @@ export default function ScorecardsApp() {
   const [employeePeriodTypes, setEmployeePeriodTypes] = useState<Record<string, "monthly" | "quarterly">>({});
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
+  // Resolved via /api/managers/company-goal-access for the real logged-in profile.
+  // Only meaningful when adminUsers isn't loaded (i.e. not an admin session) — see resolveCompanyGoalAccess.
+  const [hasCompanyGoalAccess, setHasCompanyGoalAccess] = useState(false);
 
   // When viewing as another user, all display/scoping uses this instead of the real profile.
   // Write operations always use the real `profile` so data is never saved under the wrong user.
   const effectiveProfile = viewAsProfile ?? profile;
+
+  // Names of managers an admin has granted company-goal access to (cascades to their Rippling downline).
+  const companyGoalGrantedNames = useMemo(
+    () => new Set(adminUsers.filter((u) => u.companyGoalsGrant === true && u.linkedEmployeeName).map((u) => u.linkedEmployeeName as string)),
+    [adminUsers]
+  );
+
+  // Whether targetProfile (any profile, including an admin's "view as" target) can see/manage
+  // company-tier goals: admin, granted directly, or a descendant of a granted manager in the
+  // Rippling org chart. Falls back to the server-resolved flag for the real session when the
+  // full manager list (adminUsers, admin-only) hasn't been loaded.
+  function resolveCompanyGoalAccess(targetProfile: ManagerProfile | null): boolean {
+    if (!targetProfile) return false;
+    if (targetProfile.role === "admin") return true;
+    if (targetProfile.companyGoalsGrant) return true;
+    if (targetProfile.linkedEmployeeName && (adminUsers.length > 0 || companyGoalGrantedNames.size > 0)) {
+      const allEmployees = Object.values(appData.rippling).flat();
+      for (const managerName of companyGoalGrantedNames) {
+        if (getReportingTree(managerName, allEmployees).has(targetProfile.linkedEmployeeName)) return true;
+      }
+      return false;
+    }
+    return targetProfile.id === profile?.id ? hasCompanyGoalAccess : false;
+  }
 
   const [bankMonth, setBankMonth] = useState(currentMonthValue);
   const [bankFilters, setBankFilters] = useState({ types: ["company", "department", "individual"] as string[], location: "", departments: [...departments] as string[], sort: "goalTier", showInactive: false });
@@ -459,6 +469,7 @@ export default function ScorecardsApp() {
             locations: u.locations,
             linkedEmployeeName: u.linkedEmployeeName,
             supervisorId: u.supervisorId,
+            companyGoalsGrant: u.companyGoalsGrant,
           }))
       );
       return;
@@ -480,12 +491,31 @@ export default function ScorecardsApp() {
               locations: Array.isArray(row.locations) ? row.locations : [],
               linkedEmployeeName: typeof row.linked_employee_name === "string" && row.linked_employee_name.trim() ? row.linked_employee_name.trim() : undefined,
               supervisorId: typeof row.supervisor_id === "string" ? row.supervisor_id : undefined,
+              companyGoalsGrant: row.company_goals_grant === true,
             })));
           }
         })
         .catch(() => {});
     });
   }, [authenticated, effectiveProfile?.id, viewAsProfile, adminUsers, sb]);
+
+  // Resolved via /api/managers/company-goal-access — used as a fallback in resolveCompanyGoalAccess
+  // when the real logged-in session isn't an admin (so adminUsers/companyGoalGrantedNames are empty
+  // and inherited access can't be computed client-side).
+  useEffect(() => {
+    if (!authenticated || !profile?.id) return;
+    if (profile.role === "admin" || profile.companyGoalsGrant) { setHasCompanyGoalAccess(true); return; }
+    if (isFixture) { setHasCompanyGoalAccess(false); return; }
+    if (!sb) return;
+    sb.auth.getSession().then(({ data: { session } }) => {
+      const token = session?.access_token;
+      if (!token) return;
+      fetch("/api/managers/company-goal-access", { headers: { Authorization: `Bearer ${token}` } })
+        .then((r) => r.json())
+        .then((body) => { if (typeof body.access === "boolean") setHasCompanyGoalAccess(body.access); })
+        .catch(() => {});
+    });
+  }, [authenticated, profile?.id, profile?.role, profile?.companyGoalsGrant, isFixture, sb]);
 
   // Load employee period type preferences (which employees are on quarterly scorecards).
   // For admins, derive from adminUsers. For managers, call the lightweight API endpoint.
@@ -929,7 +959,7 @@ export default function ScorecardsApp() {
         scopedEmployeesForProfile(Object.values(appData.rippling).flat(), effectiveProfile, Object.values(appData.rippling).flat()).map((e) => e.name)
       );
       goals = goals.filter((g) => {
-        if (g.goalTier === "company") return false; // non-admins never see company goals
+        if (g.goalTier === "company") return resolveCompanyGoalAccess(effectiveProfile);
         if (g.goalTier === "individual" && g.employeeName) return teamNames.has(g.employeeName);
         // dept/individual-with-role: use dept/location scoping
         return scopedForProfile([g], effectiveProfile).length > 0;
@@ -1050,16 +1080,17 @@ export default function ScorecardsApp() {
   const missingActuals = useMemo(() => {
     const actuals = appData.actuals[formatMonthLabel(workMonth)] || {};
     const isAdmin = roleAtLeast(effectiveProfile, "admin");
+    const canSeeCompany = isAdmin || resolveCompanyGoalAccess(effectiveProfile);
     return appData.goals.filter((goal) =>
       goalActiveForMonth(goal, workMonth) &&
       (goal.goalTier === "company" || goal.goalTier === "department") &&
-      (isAdmin || goal.goalTier !== "company") &&
+      (canSeeCompany || goal.goalTier !== "company") &&
       scopedForProfile([goal], effectiveProfile).length > 0 &&
       actuals[metaKey("target", goal)] != null &&
       actuals[metaKey("min", goal)] != null &&
       actuals[actualKey(goal)] == null
     );
-  }, [appData.goals, appData.actuals, workMonth, effectiveProfile]);
+  }, [appData.goals, appData.actuals, appData.rippling, workMonth, effectiveProfile, adminUsers, companyGoalGrantedNames, hasCompanyGoalAccess]);
 
   const missingScorecards = useMemo(() => {
     const employees = appData.rippling[workMonth] || [];
@@ -1072,14 +1103,15 @@ export default function ScorecardsApp() {
     const currentLabel = formatMonthLabel(currentMonthVal);
     const currentActuals = { ...(appData.actuals[currentLabel] || {}), ...(appData.actuals[quarterKeyForMonth(currentMonthVal)] || {}) };
     const isAdmin = roleAtLeast(effectiveProfile, "admin");
+    const canSeeCompany = isAdmin || resolveCompanyGoalAccess(effectiveProfile);
     return appData.goals.filter((g) =>
       goalActiveForMonth(g, currentMonthVal) &&
-      (isAdmin ? true : g.goalTier !== "company") &&
+      (canSeeCompany ? true : g.goalTier !== "company") &&
       (g.goalTier === "company" || g.goalTier === "department") &&
       scopedForProfile([g], effectiveProfile).length > 0 &&
       currentActuals[metaKey("target", g)] == null
     );
-  }, [appData.goals, appData.actuals, effectiveProfile]);
+  }, [appData.goals, appData.actuals, appData.rippling, effectiveProfile, adminUsers, companyGoalGrantedNames, hasCompanyGoalAccess]);
 
   const missingNextTargets = useMemo(() => {
     const today = new Date();
@@ -1088,14 +1120,15 @@ export default function ScorecardsApp() {
     const nextLabel = formatMonthLabel(nextVal);
     const nextActuals = { ...(appData.actuals[nextLabel] || {}), ...(appData.actuals[quarterKeyForMonth(nextVal)] || {}) };
     const isAdmin = roleAtLeast(effectiveProfile, "admin");
+    const canSeeCompany = isAdmin || resolveCompanyGoalAccess(effectiveProfile);
     return appData.goals.filter((g) =>
       goalActiveForMonth(g, nextVal) &&
-      (isAdmin ? true : g.goalTier !== "company") &&
+      (canSeeCompany ? true : g.goalTier !== "company") &&
       (g.goalTier === "company" || g.goalTier === "department") &&
       scopedForProfile([g], effectiveProfile).length > 0 &&
       nextActuals[metaKey("target", g)] == null
     );
-  }, [appData.goals, appData.actuals, effectiveProfile]);
+  }, [appData.goals, appData.actuals, appData.rippling, effectiveProfile, adminUsers, companyGoalGrantedNames, hasCompanyGoalAccess]);
 
   const todos = useMemo(() => {
     const tasks: { label: string; detail: string; action: Screen }[] = [];
@@ -1667,6 +1700,7 @@ export default function ScorecardsApp() {
               onToggleMonth={toggleGoalForMonth}
               onAssignGoal={(goalId, employeeNames, startMonth) => employeeNames.forEach((name) => createGoalAssignment(goalId, name, startMonth))}
               isAdmin={effectiveProfile?.role === "admin"}
+              companyGoalAccess={resolveCompanyGoalAccess(effectiveProfile)}
               allowedDepartments={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.departments || [])}
               allowedLocations={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.locations || [])}
             />
@@ -1696,6 +1730,7 @@ export default function ScorecardsApp() {
                 onSaveGoal={saveGoal}
                 onSaveTargetPair={(goal, period, target, min) => saveMonthTargetPair(goal, period, target, min)}
                 isAdmin={effectiveProfile?.role === "admin"}
+                companyGoalAccess={resolveCompanyGoalAccess(effectiveProfile)}
                 allowedDepartments={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.departments || [])}
                 allowedLocations={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.locations || [])}
                 currentUserEmail={currentUserEmail}
@@ -1760,7 +1795,7 @@ export default function ScorecardsApp() {
               onReactivate={reactivateAdminUser}
               onDelete={deleteAdminUser}
               onViewAs={(user) => {
-                setViewAsProfile({ id: user.id, email: user.email, role: user.role, departments: user.departments, locations: user.locations, linkedEmployeeName: user.linkedEmployeeName });
+                setViewAsProfile({ id: user.id, email: user.email, role: user.role, departments: user.departments, locations: user.locations, linkedEmployeeName: user.linkedEmployeeName, companyGoalsGrant: user.companyGoalsGrant });
                 setMode("landing");
               }}
             />
@@ -1772,9 +1807,10 @@ export default function ScorecardsApp() {
               profile={effectiveProfile}
               hasRippling={!!appData.rippling[workMonth]?.length}
               missingActuals={missingActuals}
-              goals={appData.goals.filter((g) => g.active && (roleAtLeast(effectiveProfile, "admin") || g.goalTier !== "company") && scopedForProfile([g], effectiveProfile).length > 0)}
+              goals={appData.goals.filter((g) => g.active && (roleAtLeast(effectiveProfile, "admin") || resolveCompanyGoalAccess(effectiveProfile) || g.goalTier !== "company") && scopedForProfile([g], effectiveProfile).length > 0)}
               allActuals={appData.actuals}
               allGoals={appData.goals.filter((g) => g.active)}
+              companyGoalAccess={resolveCompanyGoalAccess(effectiveProfile)}
               subordinateProfiles={subordinateProfiles}
               rippling={appData.rippling}
               scorecards={appData.scorecards}
@@ -2738,7 +2774,8 @@ function UserPermissionForm(props: {
       supervisorId: (draft as AdminUserPayload & { supervisorId?: string }).supervisorId || undefined,
       allDepartments: !isManager || allDepts,
       allLocations: !isManager || allLocs,
-      scorecardPeriodType: (draft as AdminUserPayload).scorecardPeriodType ?? "monthly"
+      scorecardPeriodType: (draft as AdminUserPayload).scorecardPeriodType ?? "monthly",
+      companyGoalsGrant: draft.role !== "admin" && draft.companyGoalsGrant === true
     });
     if (saved && props.mode === "invite") setDraft(userDraftFromUser());
   }
@@ -2841,6 +2878,19 @@ function UserPermissionForm(props: {
         </div>
       )}
 
+      {(draft.role === "manager" || draft.role === "user") && (
+        <div className="flex items-center gap-2">
+          <Checkbox
+            id="user-company-goals-grant"
+            checked={draft.companyGoalsGrant === true}
+            onCheckedChange={(c) => setDraft({ ...draft, companyGoalsGrant: c === true })}
+          />
+          <Label htmlFor="user-company-goals-grant" className="cursor-pointer text-[13px] font-normal text-foreground">
+            Give this {draft.role}{draft.role === "manager" ? "’s team" : ""} visibility into company goals
+          </Label>
+        </div>
+      )}
+
       <div className="flex items-center gap-2">
         {props.onCancel && <Button variant="outline" size="sm" onClick={props.onCancel}>Cancel</Button>}
         <Button size="sm" onClick={handleSubmit}>{props.submitLabel}</Button>
@@ -2859,7 +2909,8 @@ function userDraftFromUser(user?: AdminManagedUser): AdminUserPayload & { email:
       linkedEmployeeName: "",
       allDepartments: false,
       allLocations: false,
-      scorecardPeriodType: "monthly" as const
+      scorecardPeriodType: "monthly" as const,
+      companyGoalsGrant: false
     };
   }
   const isManager = user.role === "manager";
@@ -2876,7 +2927,8 @@ function userDraftFromUser(user?: AdminManagedUser): AdminUserPayload & { email:
     supervisorId: user.supervisorId || "",
     allDepartments: allDepts,
     allLocations: allLocs,
-    scorecardPeriodType: user.scorecardPeriodType ?? "monthly"
+    scorecardPeriodType: user.scorecardPeriodType ?? "monthly",
+    companyGoalsGrant: user.companyGoalsGrant === true
   };
 }
 
@@ -2925,9 +2977,11 @@ function GoalsScreen(props: {
   onToggleMonth: (goal: Goal) => void;
   onAssignGoal?: (goalId: string, employeeNames: string[], startMonth: string) => void;
   isAdmin?: boolean;
+  companyGoalAccess?: boolean;
   allowedDepartments?: string[];
   allowedLocations?: string[];
 }) {
+  const canManageCompany = props.isAdmin || props.companyGoalAccess;
   const [actualEditId, setActualEditId] = useState<string | null>(null);
   const [periodTab, setPeriodTab] = useState<"monthly" | "quarterly">("monthly");
   const [assigningGoal, setAssigningGoal] = useState<Goal | null>(null);
@@ -3020,8 +3074,8 @@ function GoalsScreen(props: {
     const activeInMonth = goalActiveForMonth(goal, props.month);
     const on = goal.active && activeInMonth && !isMonthlyInactive(goal);
     const dimmed = !goal.active || !activeInMonth || isMonthlyInactive(goal);
-    const canEdit = !effectiveReadonly && (props.isAdmin || goal.goalTier !== "company");
-    const canActual = !actualsReadonly && (props.isAdmin || goal.goalTier !== "company");
+    const canEdit = !effectiveReadonly && (canManageCompany || goal.goalTier !== "company");
+    const canActual = !actualsReadonly && (canManageCompany || goal.goalTier !== "company");
     const hasTargets = goalHasTargets(goal);
     const targetVal = a[metaKey("target", goal)];
     const minVal = a[metaKey("min", goal)];
@@ -3081,7 +3135,7 @@ function GoalsScreen(props: {
                   ) : canActual ? (
                     <DropdownMenuItem disabled>Set goal first</DropdownMenuItem>
                   ) : null}
-                  {goal.goalTier === "company" && props.isAdmin && props.onAssignGoal && (
+                  {goal.goalTier === "company" && canManageCompany && props.onAssignGoal && (
                     <DropdownMenuItem onClick={() => { setAssigningGoal(goal); setAssignEmployeeNames([]); setAssignStartMonth(props.month); }}>
                       Add to individual scorecard
                     </DropdownMenuItem>
@@ -3192,12 +3246,12 @@ function GoalsScreen(props: {
             label="All types"
             triggerClassName="w-auto min-w-[7rem]"
             options={[
-              ...(props.isAdmin ? [{ value: "company", label: "Company" }] : []),
+              ...(canManageCompany ? [{ value: "company", label: "Company" }] : []),
               { value: "department", label: "Department" },
               { value: "individual", label: "Individual" }
             ]}
-            selected={props.filters.types.filter((t) => props.isAdmin || t !== "company")}
-            onChange={(types) => props.onFilters({ ...props.filters, types: props.isAdmin ? types : types.filter((t) => t !== "company") })}
+            selected={props.filters.types.filter((t) => canManageCompany || t !== "company")}
+            onChange={(types) => props.onFilters({ ...props.filters, types: canManageCompany ? types : types.filter((t) => t !== "company") })}
           />
           <Select value={props.filters.location || ALL_LOCATIONS} onValueChange={(v) => props.onFilters({ ...props.filters, location: v === ALL_LOCATIONS ? "" : v })}>
             <SelectTrigger size="sm" className="min-w-[8rem] text-[12px]"><SelectValue /></SelectTrigger>
@@ -3229,7 +3283,7 @@ function GoalsScreen(props: {
               <Checkbox id="goal-show-inactive" checked={props.filters.showInactive} onCheckedChange={(c) => props.onFilters({ ...props.filters, showInactive: c === true })} />
               <Label htmlFor="goal-show-inactive" className="cursor-pointer text-[12px] font-normal text-muted-foreground">Show inactive</Label>
             </div>
-            <Button variant="ghost" size="sm" className="text-[12px] font-normal text-muted-foreground" onClick={() => props.onFilters({ types: props.isAdmin ? ["company", "department", "individual"] : ["department", "individual"], location: "", departments: [...departments], sort: "goalTier", showInactive: false })}>Reset</Button>
+            <Button variant="ghost" size="sm" className="text-[12px] font-normal text-muted-foreground" onClick={() => props.onFilters({ types: canManageCompany ? ["company", "department", "individual"] : ["department", "individual"], location: "", departments: [...departments], sort: "goalTier", showInactive: false })}>Reset</Button>
           </div>
         </div>
       </section>
@@ -3283,6 +3337,7 @@ function GoalsScreen(props: {
               goal={props.editingGoal}
               actuals={mergedActuals}
               isAdmin={props.isAdmin}
+              companyGoalAccess={props.companyGoalAccess}
               allowedDepartments={props.allowedDepartments}
               allowedLocations={props.allowedLocations}
               teamEmployees={props.teamEmployees}
@@ -3522,7 +3577,8 @@ function DrawerField({ label, required, htmlFor, className, children }: {
   );
 }
 
-function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocations, teamEmployees, onSave, onSaveTargetPair, onCancel }: { goal: Goal; actuals: ActualsByKey; isAdmin?: boolean; allowedDepartments?: string[]; allowedLocations?: string[]; teamEmployees?: Employee[]; onSave: (goal: Goal) => Goal | null | void | Promise<Goal | null | void>; onSaveTargetPair: (goal: Goal, target: string, min: string) => void | Promise<void>; onCancel: () => void }) {
+function GoalEditor({ goal, actuals, isAdmin, companyGoalAccess, allowedDepartments, allowedLocations, teamEmployees, onSave, onSaveTargetPair, onCancel }: { goal: Goal; actuals: ActualsByKey; isAdmin?: boolean; companyGoalAccess?: boolean; allowedDepartments?: string[]; allowedLocations?: string[]; teamEmployees?: Employee[]; onSave: (goal: Goal) => Goal | null | void | Promise<Goal | null | void>; onSaveTargetPair: (goal: Goal, target: string, min: string) => void | Promise<void>; onCancel: () => void }) {
+  const canManageCompany = isAdmin || companyGoalAccess;
   const isNew = goal.name === "";
   const [draft, setDraft] = useState(goal);
   const [target, setTarget] = useState(actuals[metaKey("target", goal)] != null ? String(actuals[metaKey("target", goal)]) : String(goal.goalValue || ""));
@@ -3618,7 +3674,7 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
             <Select value={tierVal || undefined} onValueChange={(v) => { setTierVal(v); setRoleVal("__unset__"); setEmpVal("__unset__"); }}>
               <SelectTrigger className="w-full"><SelectValue placeholder="Select type…" /></SelectTrigger>
               <SelectContent>
-                {isAdmin && <SelectItem value="company">Company</SelectItem>}
+                {canManageCompany && <SelectItem value="company">Company</SelectItem>}
                 <SelectItem value="department">Department</SelectItem>
                 <SelectItem value="individual">Individual</SelectItem>
               </SelectContent>
@@ -3639,7 +3695,7 @@ function GoalEditor({ goal, actuals, isAdmin, allowedDepartments, allowedLocatio
             <Select value={deptVal === "__unset__" ? undefined : (deptVal === "" ? GOAL_ALL : deptVal)} onValueChange={(v) => { setDeptVal(v === GOAL_ALL ? "" : v); setRoleVal("__unset__"); setEmpVal("__unset__"); }}>
               <SelectTrigger className="w-full"><SelectValue placeholder="Select department…" /></SelectTrigger>
               <SelectContent>
-                {isAdmin && !isIndividual && <SelectItem value={GOAL_ALL}>All departments</SelectItem>}
+                {(isAdmin || (companyGoalAccess && tierVal === "company")) && !isIndividual && <SelectItem value={GOAL_ALL}>All departments</SelectItem>}
                 {visibleDepartments.map((d) => <SelectItem key={d} value={d}>{d}</SelectItem>)}
               </SelectContent>
             </Select>
@@ -3799,6 +3855,7 @@ function ScorecardsScreen(props: {
   onSaveGoal: (goal: Goal) => Promise<Goal | null>;
   onSaveTargetPair: (goal: Goal, period: string, target: string, min: string) => void;
   isAdmin?: boolean;
+  companyGoalAccess?: boolean;
   allowedDepartments?: string[];
   allowedLocations?: string[];
   currentUserEmail: string;
@@ -4130,6 +4187,7 @@ function ScorecardsScreen(props: {
                     onSaveTargetPair={props.onSaveTargetPair}
                     teamEmployees={teamEmployees}
                     isAdmin={props.isAdmin}
+                    companyGoalAccess={props.companyGoalAccess}
                     allowedDepartments={props.allowedDepartments}
                     allowedLocations={props.allowedLocations}
                     currentUserEmail={props.currentUserEmail}
@@ -4230,6 +4288,7 @@ function ScorecardsScreen(props: {
                         onSaveTargetPair={props.onSaveTargetPair}
                         teamEmployees={mTeam}
                         isAdmin={props.isAdmin}
+                        companyGoalAccess={props.companyGoalAccess}
                         allowedDepartments={props.allowedDepartments}
                         allowedLocations={props.allowedLocations}
                         currentUserEmail={props.currentUserEmail}
@@ -4290,7 +4349,7 @@ function GoalRowMenu({ goalName, currentWeight, onApplyWeight, onRemove }: {
 }
 
 function LiveScorecardCard({
-  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, forcePeriodType, payrollAvailable, empSettings, onSettingsChange, onSubmit, onDeleteGoal, onApprove, onReturn, onSaveGoal, onSaveTargetPair, teamEmployees, isAdmin, allowedDepartments, allowedLocations, currentUserEmail, currentUserProfileId
+  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, forcePeriodType, payrollAvailable, empSettings, onSettingsChange, onSubmit, onDeleteGoal, onApprove, onReturn, onSaveGoal, onSaveTargetPair, teamEmployees, isAdmin, companyGoalAccess, allowedDepartments, allowedLocations, currentUserEmail, currentUserProfileId
 }: {
   employee: Employee;
   isoMonth: string;
@@ -4313,6 +4372,7 @@ function LiveScorecardCard({
   onSaveTargetPair: (goal: Goal, period: string, target: string, min: string) => void;
   teamEmployees: Employee[];
   isAdmin?: boolean;
+  companyGoalAccess?: boolean;
   allowedDepartments?: string[];
   allowedLocations?: string[];
   currentUserEmail: string;
@@ -4720,6 +4780,7 @@ function LiveScorecardCard({
                     goal={creatingGoal}
                     actuals={periodActuals}
                     isAdmin={isAdmin}
+                    companyGoalAccess={companyGoalAccess}
                     allowedDepartments={allowedDepartments}
                     allowedLocations={allowedLocations}
                     teamEmployees={teamEmployees}
@@ -5750,6 +5811,7 @@ function TodosScreen({
   goals,
   allActuals,
   allGoals,
+  companyGoalAccess,
   subordinateProfiles,
   rippling,
   scorecards,
@@ -5769,6 +5831,7 @@ function TodosScreen({
   goals: Goal[];
   allActuals: Record<string, ActualsByKey>;
   allGoals: Goal[];
+  companyGoalAccess?: boolean;
   subordinateProfiles: ManagerProfile[];
   rippling: Record<string, Employee[]>;
   scorecards: Scorecard[];
@@ -5831,6 +5894,7 @@ function TodosScreen({
   const nextActuals = { ...(allActuals[nextMonthLabel] || {}), ...(allActuals[quarterKeyForMonth(nextMonthValue)] || {}) };
 
   const isAdmin = roleAtLeast(profile, "admin");
+  const canSeeCompany = isAdmin || companyGoalAccess;
   const ripplingDone = hasRippling && !ripplingParsed;
 
   // Goals that fall within a subordinate manager's scope belong in "My Managers", not "My Tasks".
@@ -5840,7 +5904,7 @@ function TodosScreen({
   // Base filter shared across all three sections: scope + tier + subordinate exclusion
   const baseGoalFilter = (g: Goal) =>
     !isSubordinateGoal(g) &&
-    (isAdmin ? true : g.goalTier !== "company") &&
+    (canSeeCompany ? true : g.goalTier !== "company") &&
     (g.goalTier === "company" || g.goalTier === "department");
 
   const currentQuarterLabel = quarterKeyForMonth(currentMonthValue);
@@ -6332,7 +6396,7 @@ function TodosScreen({
           {subordinateProfiles.map((subProfile) => {
             const displayName = subProfile.linkedEmployeeName || subProfile.email || "Manager";
             const subBaseFilter = (g: Goal) =>
-              g.active && (g.goalTier === "company" || g.goalTier === "department") && (isAdmin || g.goalTier !== "company");
+              g.active && (g.goalTier === "company" || g.goalTier === "department") && (canSeeCompany || g.goalTier !== "company");
             const subScopedGoals = scopedForProfile(allGoals, subProfile).filter(subBaseFilter);
 
             const subActualsBase = subScopedGoals.filter(
