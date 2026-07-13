@@ -1665,7 +1665,7 @@ export default function ScorecardsApp() {
               onDelete={(id) => deleteGoal(id, bankMonth)}
               onToggle={(goal) => toggleGoal(goal, bankMonth)}
               onToggleMonth={toggleGoalForMonth}
-              onAssignGoal={(goalId, employeeNames) => employeeNames.forEach((name) => createGoalAssignment(goalId, name, bankMonth))}
+              onAssignGoal={(goalId, employeeNames, startMonth) => employeeNames.forEach((name) => createGoalAssignment(goalId, name, startMonth))}
               isAdmin={effectiveProfile?.role === "admin"}
               allowedDepartments={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.departments || [])}
               allowedLocations={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.locations || [])}
@@ -2919,7 +2919,7 @@ function GoalsScreen(props: {
   onDelete: (id: string) => void;
   onToggle: (goal: Goal) => void;
   onToggleMonth: (goal: Goal) => void;
-  onAssignGoal?: (goalId: string, employeeNames: string[]) => void;
+  onAssignGoal?: (goalId: string, employeeNames: string[], startMonth: string) => void;
   isAdmin?: boolean;
   allowedDepartments?: string[];
   allowedLocations?: string[];
@@ -2929,6 +2929,7 @@ function GoalsScreen(props: {
   const [assigningGoal, setAssigningGoal] = useState<Goal | null>(null);
   const [confirmDeactivate, setConfirmDeactivate] = useState<Goal | null>(null);
   const [assignEmployeeNames, setAssignEmployeeNames] = useState<string[]>([]);
+  const [assignStartMonth, setAssignStartMonth] = useState(props.month);
 
   // Company goals are opt-in overlays assigned individually — an employee's existing
   // monthly/quarterly department goals shouldn't gate whether they can also receive one
@@ -3077,7 +3078,7 @@ function GoalsScreen(props: {
                     <DropdownMenuItem disabled>Set goal first</DropdownMenuItem>
                   ) : null}
                   {goal.goalTier === "company" && props.isAdmin && props.onAssignGoal && (
-                    <DropdownMenuItem onClick={() => { setAssigningGoal(goal); setAssignEmployeeNames([]); }}>
+                    <DropdownMenuItem onClick={() => { setAssigningGoal(goal); setAssignEmployeeNames([]); setAssignStartMonth(props.month); }}>
                       Add to individual scorecard
                     </DropdownMenuItem>
                   )}
@@ -3298,15 +3299,29 @@ function GoalsScreen(props: {
               {assigningGoal?.name}
               {" · "}
               <span className="capitalize">{assigningGoal?.periodType ?? "monthly"}</span>
-              {" · Starting "}
-              {formatMonthLabel(props.month)}
             </SheetDescription>
           </SheetHeader>
           <div className="flex-1 overflow-y-auto px-5 py-4 flex flex-col gap-4">
-            <p className="text-sm text-muted-foreground">
-              Select one or more employees. This goal will appear on their scorecards from{" "}
-              <strong>{formatMonthLabel(props.month)}</strong> forward and will not affect past months.
-            </p>
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs font-medium text-foreground">Starting from</Label>
+              <Select value={assignStartMonth} onValueChange={setAssignStartMonth}>
+                <SelectTrigger className="h-8 text-[12.5px]"><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  {(() => {
+                    const opts: string[] = [];
+                    const now = new Date();
+                    for (let i = -11; i <= 2; i++) {
+                      const d = new Date(now.getFullYear(), now.getMonth() + i, 1);
+                      opts.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+                    }
+                    return opts.reverse().map((m) => (
+                      <SelectItem key={m} value={m} className="text-[12.5px]">{formatMonthLabel(m)}</SelectItem>
+                    ));
+                  })()}
+                </SelectContent>
+              </Select>
+              <p className="text-[11.5px] text-muted-foreground">Goal will appear on scorecards from this month forward.</p>
+            </div>
             {assignEligibleEmployees.length > 0 ? (
               <div className="flex flex-col gap-2">
                 <div className="flex items-center justify-between">
@@ -3371,7 +3386,7 @@ function GoalsScreen(props: {
               disabled={assignEmployeeNames.length === 0}
               onClick={() => {
                 if (assigningGoal && assignEmployeeNames.length > 0 && props.onAssignGoal) {
-                  props.onAssignGoal(assigningGoal.id, assignEmployeeNames);
+                  props.onAssignGoal(assigningGoal.id, assignEmployeeNames, assignStartMonth);
                   setAssigningGoal(null);
                   setAssignEmployeeNames([]);
                 }
@@ -4347,11 +4362,14 @@ function LiveScorecardCard({
     [baseGoals]
   );
 
-  // Re-derive goalIds whenever the base goal list changes externally (goal added/edited/deleted
-  // in Goals & Actuals). Manager-driven changes (remove/add on a specific card) set goalIds
-  // directly and are persisted via scheduleSettingsSave — this effect will re-sync from the
-  // saved settings the next time baseGoals changes.
+  // Re-derive goalIds when the base goal list changes externally (goal added/deleted in Goals & Actuals).
+  // If there's a pending user-driven change (goal removed/added on this card), preserve it so
+  // the sync never clobbers an in-flight save.
   useEffect(() => {
+    if (pendingGoalIdsRef.current !== null) {
+      setGoalIds(pendingGoalIdsRef.current);
+      return;
+    }
     const pt = cardPeriodTypeRef.current;
     const s = empSettingsRef.current.find((st) => st.periodType === pt);
     const base = baseGoals
@@ -4367,20 +4385,45 @@ function LiveScorecardCard({
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [baseGoalIdsString]);
 
-  // Debounced settings persistence — fires 600 ms after the last change
+  // Tracks the user's intended goalIds immediately on every change.
+  // The sync effect checks this so it never clobbers a pending save that hasn't fired yet.
+  const pendingGoalIdsRef = useRef<string[] | null>(null);
+
+  // Re-derive goalIds whenever the base goal list changes externally (goal added/edited/deleted
+  // in Goals & Actuals). If there's a pending user-driven change in flight, preserve it instead
+  // of resetting to stale saved settings.
+  // (Replaces the useEffect above — keep only this one sync path.)
+
+  // Debounced settings persistence — debounce only for weight edits (typed fields).
+  // Goal add/remove calls onSettingsChange immediately via saveSettingsNow.
   const settingsDebounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  function buildSettingsPayload(newGoalIds: string[], newWeightOverrides: Record<string, string>, pt: "monthly" | "quarterly") {
+    const base = new Set(baseIdsForPeriod(pt));
+    const newSet = new Set(newGoalIds);
+    const excludedGoalIds = Array.from(base).filter((id) => !newSet.has(id));
+    const addedGoalIds = newGoalIds.filter((id) => !base.has(id));
+    const weightOverridesParsed: Record<string, number> = {};
+    for (const [k, v] of Object.entries(newWeightOverrides)) {
+      if (v !== "") weightOverridesParsed[k] = Number(v);
+    }
+    return { excludedGoalIds, addedGoalIds, weightOverrides: weightOverridesParsed };
+  }
+
+  function saveSettingsNow(newGoalIds: string[], newWeightOverrides: Record<string, string>, pt: "monthly" | "quarterly") {
+    if (settingsDebounceRef.current) clearTimeout(settingsDebounceRef.current);
+    pendingGoalIdsRef.current = newGoalIds;
+    onSettingsChange(pt, buildSettingsPayload(newGoalIds, newWeightOverrides, pt));
+    // Clear pending after a short delay (enough for any concurrent sync effect to read it)
+    setTimeout(() => { pendingGoalIdsRef.current = null; }, 2000);
+  }
+
   function scheduleSettingsSave(newGoalIds: string[], newWeightOverrides: Record<string, string>, pt: "monthly" | "quarterly") {
+    pendingGoalIdsRef.current = newGoalIds;
     if (settingsDebounceRef.current) clearTimeout(settingsDebounceRef.current);
     settingsDebounceRef.current = setTimeout(() => {
-      const base = new Set(baseIdsForPeriod(pt));
-      const newSet = new Set(newGoalIds);
-      const excludedGoalIds = Array.from(base).filter((id) => !newSet.has(id));
-      const addedGoalIds = newGoalIds.filter((id) => !base.has(id));
-      const weightOverridesParsed: Record<string, number> = {};
-      for (const [k, v] of Object.entries(newWeightOverrides)) {
-        if (v !== "") weightOverridesParsed[k] = Number(v);
-      }
-      onSettingsChange(pt, { excludedGoalIds, addedGoalIds, weightOverrides: weightOverridesParsed });
+      pendingGoalIdsRef.current = null;
+      onSettingsChange(pt, buildSettingsPayload(newGoalIds, newWeightOverrides, pt));
     }, 600);
   }
 
@@ -4614,7 +4657,7 @@ function LiveScorecardCard({
                           onRemove={() => {
                             const next = goalIds.filter((id) => id !== goal.id);
                             setGoalIds(next);
-                            scheduleSettingsSave(next, weightOverrides, cardPeriodType);
+                            saveSettingsNow(next, weightOverrides, cardPeriodType);
                           }}
                         />
                       </TableCell>
@@ -4656,7 +4699,7 @@ function LiveScorecardCard({
                   <DropdownMenuItem key={g.id} onSelect={() => {
                     const next = [...goalIds, g.id];
                     setGoalIds(next);
-                    scheduleSettingsSave(next, weightOverrides, cardPeriodType);
+                    saveSettingsNow(next, weightOverrides, cardPeriodType);
                   }} className="text-[12.5px]">
                     <span className="flex items-center gap-1.5">{g.name}<GoalScopeTags location={g.location} department={g.department} /></span>
                   </DropdownMenuItem>
@@ -4680,7 +4723,7 @@ function LiveScorecardCard({
                       if (saved) {
                         const next = [...goalIds, saved.id];
                         setGoalIds(next);
-                        scheduleSettingsSave(next, weightOverrides, cardPeriodType);
+                        saveSettingsNow(next, weightOverrides, cardPeriodType);
                       }
                       return saved ?? null;
                     }}
