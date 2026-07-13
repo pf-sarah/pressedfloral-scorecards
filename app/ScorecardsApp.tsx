@@ -112,6 +112,19 @@ const rolesByDepartment: Record<string, string[]> = {
   Resin: ["Resin Design Specialist", "Resin Team Manager", "Senior Resin Design Specialist"]
 };
 
+// De-duplicate settings rows: if the DB has multiple rows for the same
+// (employeeName, periodType) — caused by a missing unique constraint —
+// keep only the most recently updated one so goal removals don't reset.
+function dedupeSettings(rows: EmployeeScorecardSettings[]): EmployeeScorecardSettings[] {
+  const best = new Map<string, EmployeeScorecardSettings>();
+  for (const row of rows) {
+    const key = `${row.employeeName}|${row.periodType}`;
+    const existing = best.get(key);
+    if (!existing || (row.updatedAt ?? "") > (existing.updatedAt ?? "")) best.set(key, row);
+  }
+  return Array.from(best.values());
+}
+
 /** Is this goal visible and active for a given ISO month (YYYY-MM)? */
 function goalActiveForMonth(goal: Goal, month: string): boolean {
   if (goal.startMonth && goal.startMonth > month) return false;
@@ -592,7 +605,7 @@ export default function ScorecardsApp() {
       }
 
       const goalAssignments: GoalAssignment[] = (assignmentsResult.data || []).map(goalAssignmentFromRow);
-      const employeeScorecardSettings: EmployeeScorecardSettings[] = (settingsResult.data || []).map(employeeScorecardSettingsFromRow);
+      const employeeScorecardSettings: EmployeeScorecardSettings[] = dedupeSettings((settingsResult.data || []).map(employeeScorecardSettingsFromRow));
 
       setAppData((current) => ({ ...current, goals, scorecards, rippling, actuals: { ...current.actuals, ...actuals }, goalAssignments, employeeScorecardSettings }));
       return;
