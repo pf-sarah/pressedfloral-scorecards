@@ -2043,7 +2043,7 @@ function PersonalScorecardPanel({
       ...g,
       scTarget: periodActuals[metaKey("target", g)] != null ? Number(periodActuals[metaKey("target", g)]) : g.goalValue,
       scMin: periodActuals[metaKey("min", g)] != null ? Number(periodActuals[metaKey("min", g)]) : g.minValue,
-      scActual: g.goalTier === "individual" ? null : (periodActuals[actualKey(g)] != null ? Number(periodActuals[actualKey(g)]) : null),
+      scActual: periodActuals[actualKey(g)] != null ? Number(periodActuals[actualKey(g)]) : null,
       scWeight: weightOverrides[g.name] != null ? weightOverrides[g.name] : (g.weight ?? 0),
     }));
   }, [myEmployee, allGoals, periodActuals, isQuarterly, periodISO, empSettings, goalAssignments]);
@@ -4501,13 +4501,14 @@ function LiveScorecardCard({
       const scWeight = weightOverrides[g.name] !== undefined
         ? (weightOverrides[g.name] === "" ? 0 : Number(weightOverrides[g.name]))
         : defaultWeight;
+      const bankActual = periodActuals[actualKey(g)] != null ? Number(periodActuals[actualKey(g)]) : null;
       return {
         ...g,
         scTarget: periodActuals[metaKey("target", g)] != null ? Number(periodActuals[metaKey("target", g)]) : g.goalValue,
         scMin: periodActuals[metaKey("min", g)] != null ? Number(periodActuals[metaKey("min", g)]) : g.minValue,
         scActual: g.goalTier === "individual"
-          ? (indActuals[g.name] !== undefined ? (indActuals[g.name] === "" ? null : Number(indActuals[g.name])) : null)
-          : (periodActuals[actualKey(g)] != null ? Number(periodActuals[actualKey(g)]) : null),
+          ? (indActuals[g.name] !== undefined ? (indActuals[g.name] === "" ? null : Number(indActuals[g.name])) : bankActual)
+          : bankActual,
         scWeight
       };
     });
@@ -4626,7 +4627,7 @@ function LiveScorecardCard({
                           <Input
                             aria-label={`Actual for ${goal.name}`}
                             type="number"
-                            value={indActuals[goal.name] ?? ""}
+                            value={indActuals[goal.name] ?? (goal.scActual != null ? String(goal.scActual) : "")}
                             onChange={(e) => setIndActuals((prev) => ({ ...prev, [goal.name]: e.target.value }))}
                             className="h-7 w-[72px] text-center text-[12px] tabular-nums"
                           />
