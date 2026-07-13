@@ -22,7 +22,7 @@ export async function GET(request: NextRequest) {
   // Return profiles of managers who list this user as their supervisor
   const { data, error } = await client
     .from("manager_profiles")
-    .select("id, role, departments, locations, linked_employee_name, supervisor_id")
+    .select("id, role, departments, locations, linked_employee_name, supervisor_id, company_goals_grant")
     .eq("supervisor_id", user.id);
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

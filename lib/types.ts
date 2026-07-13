@@ -11,6 +11,7 @@ export type ManagerProfile = {
   linkedEmployeeName?: string;
   supervisorId?: string;   // profile id of this manager's supervisor
   scorecardPeriodType?: "monthly" | "quarterly";
+  companyGoalsGrant?: boolean; // grants this manager + their Rippling reporting tree company-goal read/write access
 };
 
 export type Goal = {
