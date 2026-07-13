@@ -671,7 +671,13 @@ export default function ScorecardsApp() {
       actuals[period] = actualsFromRows(rows);
     }
 
-    const goals = scopedForProfile((goalsResult.data || []).map(goalFromRow), loadedProfile);
+    const rawGoals = (goalsResult.data || []).map(goalFromRow);
+    // Company goals are org-wide and aren't scoped by the viewer's own department/location —
+    // access to them is governed separately by resolveCompanyGoalAccess downstream.
+    const goals = [
+      ...rawGoals.filter((g) => g.goalTier === "company"),
+      ...scopedForProfile(rawGoals.filter((g) => g.goalTier !== "company"), loadedProfile)
+    ];
     const scorecards = scopedScorecardsForProfile((scorecardsResult.data || []).map(scorecardFromRow), loadedProfile, allEmployees);
     const goalAssignments: GoalAssignment[] = (assignmentsResult.data || []).map(goalAssignmentFromRow);
     const employeeScorecardSettings: EmployeeScorecardSettings[] = (settingsResult.data || []).map(employeeScorecardSettingsFromRow);
