@@ -1776,6 +1776,10 @@ export default function ScorecardsApp() {
               allActuals={appData.actuals}
               allGoals={appData.goals.filter((g) => g.active)}
               subordinateProfiles={subordinateProfiles}
+              rippling={appData.rippling}
+              scorecards={appData.scorecards}
+              allEmployees={allRipplingEmployees}
+              onGoToScorecards={() => mountScreen("scorecard")}
               onSaveTarget={saveMonthTarget}
               onSaveCurrentTargetPair={(goal, target, min) => {
                 const today = new Date();
@@ -5707,6 +5711,26 @@ function TodoRow({ name, goalTier, location, department, saved, children }: {
   );
 }
 
+function TodoIndividualRow({ employee, goals, done, onGoToScorecards }: {
+  employee: Employee;
+  goals: Goal[];
+  done: boolean;
+  onGoToScorecards: () => void;
+}) {
+  return (
+    <div className={`flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-border py-2.5 last:border-b-0 ${done ? "opacity-55" : ""}`}>
+      {done ? <CheckCircle2 className="size-4 shrink-0 text-[var(--sage-dark)]" /> : <Circle className="size-4 shrink-0 text-[var(--text-faint)]" />}
+      <span className="text-[13px] font-medium text-foreground">{employee.name}</span>
+      <TierBadge tier="individual" />
+      <GoalScopeTags location={employee.location} department={employee.department} />
+      <span className="text-[12px] text-muted-foreground">{goals.map((g) => g.name).join(", ")}</span>
+      {!done && (
+        <Button size="sm" variant="outline" className="ml-auto h-8" onClick={onGoToScorecards}>Go to scorecard</Button>
+      )}
+    </div>
+  );
+}
+
 function TodoNumberField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <label className="flex flex-col gap-0.5">
@@ -5726,11 +5750,15 @@ function TodosScreen({
   allActuals,
   allGoals,
   subordinateProfiles,
+  rippling,
+  scorecards,
+  allEmployees,
   onSaveTarget,
   onSaveTargetPair,
   onSaveCurrentTargetPair,
   onSaveActual,
-  onRipplingUpload
+  onRipplingUpload,
+  onGoToScorecards
 }: {
   workMonth: string;
   bankMonth: string;
@@ -5741,15 +5769,21 @@ function TodosScreen({
   allActuals: Record<string, ActualsByKey>;
   allGoals: Goal[];
   subordinateProfiles: ManagerProfile[];
+  rippling: Record<string, Employee[]>;
+  scorecards: Scorecard[];
+  allEmployees: Employee[];
   onSaveTarget: (goal: Goal, period: string, type: "target" | "min", value: string) => void;
   onSaveTargetPair: (goal: Goal, target: string, min: string) => void;
   onSaveCurrentTargetPair: (goal: Goal, target: string, min: string) => void;
   onSaveActual: (goal: Goal, value: string) => void;
   onRipplingUpload: (employees: Employee[]) => void;
+  onGoToScorecards: () => void;
 }) {
   const [showCompletedSections, setShowCompletedSections] = useState(false);
   const [showCompletedAdmin, setShowCompletedAdmin] = useState(false);
   const [showCompletedAdminQ, setShowCompletedAdminQ] = useState(false);
+  const [showCompletedIndividual, setShowCompletedIndividual] = useState(false);
+  const [showCompletedIndividualQ, setShowCompletedIndividualQ] = useState(false);
   const [showCompletedTargets, setShowCompletedTargets] = useState(false);
   const [showCompletedTargetsQ, setShowCompletedTargetsQ] = useState(false);
   const [showCompletedCurrentTargets, setShowCompletedCurrentTargets] = useState(false);
@@ -5764,7 +5798,7 @@ function TodosScreen({
     setSelectedQuarters((prev) => { const s = new Set(prev); s.has(q) ? s.delete(q) : s.add(q); return s; });
   }
   const [assignFilter, setAssignFilter] = useState<"mine" | "managers">("mine");
-  type MgrKey = "admin" | "current" | "next" | "adminQ" | "currentQ" | "nextQ";
+  type MgrKey = "admin" | "current" | "next" | "adminQ" | "currentQ" | "nextQ" | "individual" | "individualQ";
   const [mgrShowCompleted, setMgrShowCompleted] = useState<Record<string, Record<MgrKey, boolean>>>({});
   const getMgrCompleted = (id: string, key: MgrKey) => mgrShowCompleted[id]?.[key] ?? false;
   const toggleMgrCompleted = (id: string, key: MgrKey) =>
@@ -5815,6 +5849,46 @@ function TodosScreen({
   const nextIsNewQuarter = nextQuarterLabel !== currentQuarterLabel;
   // Quarterly actuals only appear after the quarter has fully ended (current month is in a later quarter)
   const workQuarterEnded = workQuarterLabel !== currentQuarterLabel;
+
+  // Individual-goal actuals are entered live on each employee's scorecard card and are never
+  // persisted until that scorecard is submitted — there's no shared "actual" value to check the
+  // way there is for company/department goals. So the only signal we have pre-submission is
+  // "this employee has an active individual goal and no submitted scorecard yet for this period."
+  // Employees are scoped via the Rippling reporting tree (scopedEmployeesForProfile), not by
+  // department/location matching, so multi-level chains (e.g. Sarah → Hannah → Maycie) resolve
+  // correctly without touching the separate supervisorId hierarchy used for review routing.
+  const monthEmployeesForIndividual = rippling[workMonth] || [];
+
+  function individualGoalsFor(emp: Employee, periodType: "monthly" | "quarterly", month: string): Goal[] {
+    return allGoals.filter((g) =>
+      g.goalTier === "individual" &&
+      g.active &&
+      (periodType === "quarterly" ? g.periodType === "quarterly" : g.periodType !== "quarterly") &&
+      goalActiveForMonth(g, month) &&
+      (g.employeeName
+        ? g.employeeName === emp.name
+        : (!g.role || g.role === emp.role) && g.department === emp.department && (!g.location || g.location === emp.location))
+    );
+  }
+
+  type IndividualRow = { employee: Employee; goals: Goal[]; done: boolean };
+  function individualRowsFor(employees: Employee[], periodType: "monthly" | "quarterly", month: string, periodLabel: string): IndividualRow[] {
+    return employees
+      .map((employee) => ({ employee, goals: individualGoalsFor(employee, periodType, month) }))
+      .filter((row) => row.goals.length > 0)
+      .map((row) => ({ ...row, done: scorecards.some((sc) => sc.employeeName === row.employee.name && sc.scorecardMonth === periodLabel) }));
+  }
+
+  // An employee falls under "My managers" instead of "My tasks" if they're within the scope
+  // of one of the current profile's direct-report managers.
+  const isSubordinateEmployee = (emp: Employee) =>
+    subordinateProfiles.length > 0 && subordinateProfiles.some((sp) => scopedEmployeesForProfile([emp], sp, allEmployees).length > 0);
+
+  const ownIndividualEmployees = scopedEmployeesForProfile(monthEmployeesForIndividual, profile, allEmployees).filter((e) => !isSubordinateEmployee(e));
+  const monthlyIndividualRows = individualRowsFor(ownIndividualEmployees, "monthly", workMonth, workMonthLabel);
+  const quarterlyIndividualRows = workQuarterEnded ? individualRowsFor(ownIndividualEmployees, "quarterly", workMonth, workQuarterLabel) : [];
+  const monthlyIndividualDone = monthlyIndividualRows.filter((r) => r.done).length;
+  const quarterlyIndividualDone = quarterlyIndividualRows.filter((r) => r.done).length;
 
   // All company/dept goals with targets set for workMonth — split monthly vs quarterly
   const actualsGoalsBase = goals.filter((g) =>
@@ -5971,7 +6045,9 @@ function TodosScreen({
   const nextMonthlySectionDone = nextMonthlyGoals.length > 0 && nextMonthlyTargetDone === nextMonthlyGoals.length;
   const nextQTargetDone = nextQuarterlyGoals.filter((g) => nextActuals[metaKey("target", g)] != null).length;
   const nextQuarterlySectionDone = nextQuarterlyGoals.length > 0 && nextQTargetDone === nextQuarterlyGoals.length;
-  const anyMineSectionComplete = prevMonthlySectionDone || prevQuarterlySectionDone || nextMonthlySectionDone || nextQuarterlySectionDone;
+  const monthlyIndividualSectionDone = monthlyIndividualRows.length > 0 && monthlyIndividualDone === monthlyIndividualRows.length;
+  const quarterlyIndividualSectionDone = quarterlyIndividualRows.length > 0 && quarterlyIndividualDone === quarterlyIndividualRows.length;
+  const anyMineSectionComplete = prevMonthlySectionDone || prevQuarterlySectionDone || nextMonthlySectionDone || nextQuarterlySectionDone || monthlyIndividualSectionDone || quarterlyIndividualSectionDone;
 
   const nothingSelected = selectedMonths.size === 0 && selectedQuarters.size === 0;
   const showPrevSection = nothingSelected || selectedMonths.has("prev");
@@ -6099,6 +6175,46 @@ function TodosScreen({
                 <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All quarterly actuals complete</div>
               ) : (
                 visibleQuarterlyActualRows.map((row) => <React.Fragment key={row.key}>{row.node}</React.Fragment>)
+              )}
+            </TodoGroupCard>
+          )}
+          {showPrevSection && monthlyIndividualRows.length > 0 && (!monthlyIndividualSectionDone || showCompletedSections) && (
+            <TodoGroupCard
+              title={`Individual actuals · ${workMonthLabel}`}
+              meta={<>{monthlyIndividualDone}/{monthlyIndividualRows.length} done · Enter on each employee's scorecard · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
+              done={monthlyIndividualDone}
+              total={monthlyIndividualRows.length}
+              showCompleted={showCompletedIndividual}
+              onToggleCompleted={() => setShowCompletedIndividual((v) => !v)}
+            >
+              {monthlyIndividualRows.filter((r) => showCompletedIndividual || !r.done).length === 0 ? (
+                <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All individual actuals complete</div>
+              ) : (
+                monthlyIndividualRows
+                  .filter((r) => showCompletedIndividual || !r.done)
+                  .map((row) => (
+                    <TodoIndividualRow key={row.employee.id || row.employee.name} employee={row.employee} goals={row.goals} done={row.done} onGoToScorecards={onGoToScorecards} />
+                  ))
+              )}
+            </TodoGroupCard>
+          )}
+          {quarterlyIndividualRows.length > 0 && showQuarterlyCard(workQuarterLabel) && (!quarterlyIndividualSectionDone || showCompletedSections) && (
+            <TodoGroupCard
+              title={`Individual actuals · ${workQuarterLabel}`}
+              meta={<>{quarterlyIndividualDone}/{quarterlyIndividualRows.length} done · Enter on each employee's scorecard · Due {quarterlyActualsDue.label} <DaysBadge diffDays={quarterlyActualsDue.diffDays} /></>}
+              done={quarterlyIndividualDone}
+              total={quarterlyIndividualRows.length}
+              showCompleted={showCompletedIndividualQ}
+              onToggleCompleted={() => setShowCompletedIndividualQ((v) => !v)}
+            >
+              {quarterlyIndividualRows.filter((r) => showCompletedIndividualQ || !r.done).length === 0 ? (
+                <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All individual actuals complete</div>
+              ) : (
+                quarterlyIndividualRows
+                  .filter((r) => showCompletedIndividualQ || !r.done)
+                  .map((row) => (
+                    <TodoIndividualRow key={row.employee.id || row.employee.name} employee={row.employee} goals={row.goals} done={row.done} onGoToScorecards={onGoToScorecards} />
+                  ))
               )}
             </TodoGroupCard>
           )}
@@ -6243,8 +6359,18 @@ function TodosScreen({
             const subNextMonthlyDone = subNextMonthly.filter((g) => nextActuals[metaKey("target", g)] != null).length;
             const subNextQuarterlyDone = subNextQuarterly.filter((g) => nextActuals[metaKey("target", g)] != null).length;
 
+            // Individual-goal actuals for this manager's reporting tree (see note above on
+            // ownIndividualEmployees for why scope is employee-based, not dept/location-based).
+            const subIndividualEmployees = scopedEmployeesForProfile(monthEmployeesForIndividual, subProfile, allEmployees);
+            const subMonthlyIndividualRows = individualRowsFor(subIndividualEmployees, "monthly", workMonth, workMonthLabel);
+            const subQuarterlyIndividualRows = workQuarterEnded ? individualRowsFor(subIndividualEmployees, "quarterly", workMonth, workQuarterLabel) : [];
+            const subMonthlyIndividualDone = subMonthlyIndividualRows.filter((r) => r.done).length;
+            const subQuarterlyIndividualDone = subQuarterlyIndividualRows.filter((r) => r.done).length;
+
             const showAdminCompleted = getMgrCompleted(subProfile.id, "admin");
             const showAdminQCompleted = getMgrCompleted(subProfile.id, "adminQ");
+            const showIndividualCompleted = getMgrCompleted(subProfile.id, "individual");
+            const showIndividualQCompleted = getMgrCompleted(subProfile.id, "individualQ");
             const showCurrentCompleted = getMgrCompleted(subProfile.id, "current");
             const showCurrentQCompleted = getMgrCompleted(subProfile.id, "currentQ");
             const showNextCompleted = getMgrCompleted(subProfile.id, "next");
@@ -6252,6 +6378,8 @@ function TodosScreen({
 
             const subPrevMonthlySectionDone = subMonthlyActuals.length > 0 && subMonthlyActualsDone === subMonthlyActuals.length;
             const subPrevQuarterlySectionDone = subQuarterlyActuals.length > 0 && subQuarterlyActualsDone === subQuarterlyActuals.length;
+            const subMonthlyIndividualSectionDone = subMonthlyIndividualRows.length > 0 && subMonthlyIndividualDone === subMonthlyIndividualRows.length;
+            const subQuarterlyIndividualSectionDone = subQuarterlyIndividualRows.length > 0 && subQuarterlyIndividualDone === subQuarterlyIndividualRows.length;
             const subNextMonthlySectionDone = subNextMonthly.length > 0 && subNextMonthlyDone === subNextMonthly.length;
             const subNextQuarterlySectionDone = subNextQuarterly.length > 0 && subNextQuarterlyDone === subNextQuarterly.length;
 
@@ -6314,6 +6442,46 @@ function TodosScreen({
                             </TodoRow>
                           );
                         })
+                    )}
+                  </TodoGroupCard>
+                )}
+                {showPrevSection && subMonthlyIndividualRows.length > 0 && (!subMonthlyIndividualSectionDone || showCompletedSections) && (
+                  <TodoGroupCard
+                    title={`Individual actuals · ${workMonthLabel}`}
+                    meta={<>{subMonthlyIndividualDone}/{subMonthlyIndividualRows.length} done · Enter on each employee's scorecard · Due {adminDue.label} <DaysBadge diffDays={adminDue.diffDays} /></>}
+                    done={subMonthlyIndividualDone}
+                    total={subMonthlyIndividualRows.length}
+                    showCompleted={showIndividualCompleted}
+                    onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "individual")}
+                  >
+                    {subMonthlyIndividualRows.filter((r) => showIndividualCompleted || !r.done).length === 0 ? (
+                      <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All individual actuals complete</div>
+                    ) : (
+                      subMonthlyIndividualRows
+                        .filter((r) => showIndividualCompleted || !r.done)
+                        .map((row) => (
+                          <TodoIndividualRow key={row.employee.id || row.employee.name} employee={row.employee} goals={row.goals} done={row.done} onGoToScorecards={onGoToScorecards} />
+                        ))
+                    )}
+                  </TodoGroupCard>
+                )}
+                {subQuarterlyIndividualRows.length > 0 && showQuarterlyCard(workQuarterLabel) && (!subQuarterlyIndividualSectionDone || showCompletedSections) && (
+                  <TodoGroupCard
+                    title={`Individual actuals · ${workQuarterLabel}`}
+                    meta={<>{subQuarterlyIndividualDone}/{subQuarterlyIndividualRows.length} done · Enter on each employee's scorecard · Due {quarterlyActualsDue.label} <DaysBadge diffDays={quarterlyActualsDue.diffDays} /></>}
+                    done={subQuarterlyIndividualDone}
+                    total={subQuarterlyIndividualRows.length}
+                    showCompleted={showIndividualQCompleted}
+                    onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "individualQ")}
+                  >
+                    {subQuarterlyIndividualRows.filter((r) => showIndividualQCompleted || !r.done).length === 0 ? (
+                      <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All individual actuals complete</div>
+                    ) : (
+                      subQuarterlyIndividualRows
+                        .filter((r) => showIndividualQCompleted || !r.done)
+                        .map((row) => (
+                          <TodoIndividualRow key={row.employee.id || row.employee.name} employee={row.employee} goals={row.goals} done={row.done} onGoToScorecards={onGoToScorecards} />
+                        ))
                     )}
                   </TodoGroupCard>
                 )}
