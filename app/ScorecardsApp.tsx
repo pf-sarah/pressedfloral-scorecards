@@ -177,14 +177,19 @@ const fixtureManagedUsers: AdminManagedUser[] = [
   }
 ];
 
-function actualKey(goal: Pick<Goal, "goalTier" | "location" | "department" | "name">) {
-  return [goal.goalTier, goal.location || "", goal.department || "", goal.name].join("|");
+function actualKey(goal: Pick<Goal, "goalTier" | "location" | "department" | "name" | "role" | "employeeName">) {
+  // Individual-tier goals of the same name/department/location can be assigned per role or
+  // per employee (e.g. "Individual Ratio" for Senior/Design/Master Design Specialist) — fold
+  // that into the identity so siblings don't share one target/min/actual slot.
+  const who = goal.employeeName || goal.role;
+  const name = who ? `${goal.name}::${who}` : goal.name;
+  return [goal.goalTier, goal.location || "", goal.department || "", name].join("|");
 }
 
-function metaKey(type: "target" | "min", goal: Pick<Goal, "goalTier" | "location" | "department" | "name">) {
+function metaKey(type: "target" | "min", goal: Pick<Goal, "goalTier" | "location" | "department" | "name" | "role" | "employeeName">) {
   // Location is always included so that same-named goals in different locations
   // (e.g. Design-Utah vs Design-Georgia) have independent targets and minimums.
-  return `__${type}__${[goal.goalTier, goal.location || "", goal.department || "", goal.name].join("|")}`;
+  return `__${type}__${actualKey(goal)}`;
 }
 
 // Employee scorecard deactivation helpers — stored in actuals under a special sentinel period.
@@ -3075,7 +3080,11 @@ function GoalsScreen(props: {
     const on = goal.active && activeInMonth && !isMonthlyInactive(goal);
     const dimmed = !goal.active || !activeInMonth || isMonthlyInactive(goal);
     const canEdit = !effectiveReadonly && (canManageCompany || goal.goalTier !== "company");
-    const canActual = !actualsReadonly && (canManageCompany || goal.goalTier !== "company");
+    // A goal assigned to a position (role) rather than a specific employee can be held by
+    // several team members at once — there's no single "actual" to attribute to the role
+    // itself. Each employee's result is entered on their own scorecard instead.
+    const isSharedRoleGoal = goal.goalTier === "individual" && !!goal.role && !goal.employeeName;
+    const canActual = !actualsReadonly && !isSharedRoleGoal && (canManageCompany || goal.goalTier !== "company");
     const hasTargets = goalHasTargets(goal);
     const targetVal = a[metaKey("target", goal)];
     const minVal = a[metaKey("min", goal)];
@@ -3111,8 +3120,11 @@ function GoalsScreen(props: {
                 onKeyDown={(e) => { if (e.key === "Enter") (e.target as HTMLInputElement).blur(); if (e.key === "Escape") setActualEditId(null); }}
               />
             ) : (
-              <span title={!hasTargets ? "Set a goal and minimum first" : undefined} className={canActual && !hasTargets ? "text-[11px] text-[var(--text-faint)]" : undefined}>
-                {actualVal != null ? formatNumber(actualVal as number) : (canActual && !hasTargets ? "no goal" : dash)}
+              <span
+                title={isSharedRoleGoal ? "Entered per employee on their own scorecard" : (!hasTargets ? "Set a goal and minimum first" : undefined)}
+                className={isSharedRoleGoal || (canActual && !hasTargets) ? "text-[11px] text-[var(--text-faint)]" : undefined}
+              >
+                {isSharedRoleGoal ? "per employee" : (actualVal != null ? formatNumber(actualVal as number) : (canActual && !hasTargets ? "no goal" : dash))}
               </span>
             )}
           </TableCell>
