@@ -193,6 +193,11 @@ function metaKey(type: "target" | "min", goal: Pick<Goal, "goalTier" | "location
   return `__${type}__${actualKey(goal)}`;
 }
 
+// Employees who worked fewer than this many hours in the period don't need a scorecard —
+// they're excluded from "not submitted" counts/todos and shown as "Not Eligible" rather than
+// flagged as outstanding work. A manager can still submit one manually if there's an exception.
+const MIN_HOURS_FOR_SCORECARD = 40;
+
 // Employee scorecard deactivation helpers — stored in actuals under a special sentinel period.
 const DEACT_PERIOD = "__employee_settings__";
 function deactMonthKey(employeeName: string, isoMonth: string) { return `__inactive_month__|${isoMonth}|${employeeName}`; }
@@ -1106,7 +1111,10 @@ export default function ScorecardsApp() {
 
   const missingScorecards = useMemo(() => {
     const employees = appData.rippling[workMonth] || [];
-    return employees.filter((employee) => !appData.scorecards.some((sc) => sc.employeeName === employee.name && sc.scorecardMonth === formatMonthLabel(workMonth)));
+    return employees.filter((employee) =>
+      (employee.hoursWorked ?? MIN_HOURS_FOR_SCORECARD) >= MIN_HOURS_FOR_SCORECARD &&
+      !appData.scorecards.some((sc) => sc.employeeName === employee.name && sc.scorecardMonth === formatMonthLabel(workMonth))
+    );
   }, [appData.rippling, appData.scorecards, workMonth]);
 
   const missingCurrentTargets = useMemo(() => {
@@ -1172,7 +1180,10 @@ export default function ScorecardsApp() {
     const scopedScorecards = scopedScorecardsForProfile(appData.scorecards, effectiveProfile, allRipplingEmployees);
     const submittedThisMonth = scopedScorecards.filter((sc) => sc.scorecardMonth === workMonthLabel);
     const scopedEmployees = scopedEmployeesForProfile(appData.rippling[workMonth] || [], effectiveProfile, allRipplingEmployees);
-    const expected = scopedEmployees.length;
+    // Employees who worked under the minimum hours don't need a scorecard — exclude them from
+    // the expected/missing counts so a part-time month doesn't look like an outstanding task.
+    const eligibleScopedEmployees = scopedEmployees.filter((emp) => (emp.hoursWorked ?? MIN_HOURS_FOR_SCORECARD) >= MIN_HOURS_FOR_SCORECARD);
+    const expected = eligibleScopedEmployees.length;
     const submittedCount = submittedThisMonth.length;
     const totalBonus = submittedThisMonth.reduce((sum, sc) => sum + (sc.bonusAmount || 0), 0);
     const avgAchievement = submittedThisMonth.length
@@ -1182,7 +1193,7 @@ export default function ScorecardsApp() {
     const recent = [...scopedScorecards]
       .sort((a, b) => (b.submittedAt || "").localeCompare(a.submittedAt || ""))
       .slice(0, 5);
-    const missingScorecardsScoped = scopedEmployees.filter(
+    const missingScorecardsScoped = eligibleScopedEmployees.filter(
       (emp) => !submittedThisMonth.some((sc) => sc.employeeName === emp.name)
     );
 
@@ -4710,6 +4721,10 @@ function LiveScorecardCard({
         ) : null}
         {returnedScorecard ? (
           <Badge variant="secondary" className="shrink-0 font-medium" style={{ background: "#FEE2E2", color: "#991B1B", borderColor: "#FECACA" }}>Returned</Badge>
+        ) : employee.hoursWorked != null && employee.hoursWorked < MIN_HOURS_FOR_SCORECARD ? (
+          <Badge variant="secondary" title={`Worked ${employee.hoursWorked.toFixed(2)} hrs this period — below the ${MIN_HOURS_FOR_SCORECARD}-hour minimum, so no scorecard is required`} className="shrink-0 font-medium text-muted-foreground">
+            Not Eligible ({employee.hoursWorked.toFixed(1)} hrs)
+          </Badge>
         ) : (
           <Badge variant="secondary" title="This scorecard hasn't been submitted yet" className="shrink-0 font-medium">Not Submitted</Badge>
         )}
