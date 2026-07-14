@@ -4540,6 +4540,10 @@ function LiveScorecardCard({
   }, [isoMonth, employee, allRippling]);
 
   function isGoalApplicable(goal: Goal): boolean {
+    // A goal inactive for this specific month (e.g. startMonth in the future) would silently
+    // fail to appear once added — currentGoals filters by goalActiveForMonth too. Excluding it
+    // here keeps the "+ Add goal" list from offering goals that can't actually be added yet.
+    if (!goalActiveForMonth(goal, isoMonth)) return false;
     if (goal.goalTier === "company") return false;
     if (goal.goalTier === "department") return goal.department === employee.department && (!goal.location || goal.location === employee.location);
     // Individual: match by employeeName if set (new), else fall back to role match (legacy)
@@ -4558,10 +4562,15 @@ function LiveScorecardCard({
     setWeightOverrides(s ? Object.fromEntries(Object.entries(s.weightOverrides).map(([k, v]) => [k, String(v)])) : {});
   }
 
-  const displayedSubmitted = submittedScorecard || lastSubmitted;
+  // Returned scorecards fall through to the editable builder below instead of the read-only
+  // card, so the submitting manager can actually revise goals/actuals and resubmit. Once
+  // resubmitted (lastSubmitted set) or once the parent reflects a non-returned status, the
+  // read-only review card takes over again.
+  const displayedSubmitted = (submittedScorecard && submittedScorecard.reviewStatus !== "returned") ? submittedScorecard : lastSubmitted;
   if (displayedSubmitted) {
     return <ScorecardCard scorecard={displayedSubmitted} onDeleteGoal={onDeleteGoal} onApprove={onApprove} onReturn={onReturn} currentUserProfileId={currentUserProfileId} />;
   }
+  const returnedScorecard = !lastSubmitted && submittedScorecard?.reviewStatus === "returned" ? submittedScorecard : null;
 
   const activeEmployee = cardPeriodType === "quarterly" ? quarterlyEmployee : employee;
   const activeMonth = cardPeriodType === "quarterly" ? quarterKey : month;
@@ -4613,7 +4622,11 @@ function LiveScorecardCard({
   const hasQuarterlyMismatch = cardPeriodType === "monthly" && currentGoals.some((g) => g.periodType === "quarterly");
   const availableToAdd = allGoals.filter((g) => {
     if (goalIds.includes(g.id)) return false;
-    if (!isGoalApplicable(g)) return false;
+    // Company-tier goals are normally excluded from this list (they're assigned via Goals &
+    // Actuals, not picked per-employee) — but if one is already assigned to this employee
+    // (present in baseGoals) and got excluded from this scorecard, it needs a way back in.
+    const isExcludedAssignedCompanyGoal = g.goalTier === "company" && baseGoals.some((bg) => bg.id === g.id);
+    if (!isGoalApplicable(g) && !isExcludedAssignedCompanyGoal) return false;
     return cardPeriodType === "quarterly" ? g.periodType === "quarterly" : g.periodType !== "quarterly";
   });
   const achColor = liveScorecard.weightedAchievement >= 100 ? "#2D6B1A" : "var(--brick)";
@@ -4646,8 +4659,20 @@ function LiveScorecardCard({
             </span>
           </>
         ) : null}
-        <Badge variant="secondary" title="This scorecard hasn't been submitted yet" className="shrink-0 font-medium">Not Submitted</Badge>
+        {returnedScorecard ? (
+          <Badge variant="secondary" className="shrink-0 font-medium" style={{ background: "#FEE2E2", color: "#991B1B", borderColor: "#FECACA" }}>Returned</Badge>
+        ) : (
+          <Badge variant="secondary" title="This scorecard hasn't been submitted yet" className="shrink-0 font-medium">Not Submitted</Badge>
+        )}
       </button>
+
+      {returnedScorecard?.reviewNote && (
+        <div style={{ borderTop: "1px solid #FECACA", background: "#FEF2F2", padding: "8px 16px" }}>
+          <span style={{ fontSize: "11.5px", fontWeight: 600, color: "#991B1B" }}>Returned</span>
+          {returnedScorecard.reviewedBy && <span style={{ fontSize: "11.5px", color: "#991B1B" }}> by {returnedScorecard.reviewedBy}</span>}
+          <span style={{ fontSize: "11.5px", color: "#7F1D1D" }}>: {returnedScorecard.reviewNote}</span>
+        </div>
+      )}
 
       {open && (
         <>
