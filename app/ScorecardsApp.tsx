@@ -74,6 +74,7 @@ import {
   LayoutGrid,
   ListChecks,
   MoreHorizontal,
+  RotateCcw,
   Search,
   Sparkles,
   Target,
@@ -3913,6 +3914,7 @@ function ScorecardsScreen(props: {
   const [filterDepts, setFilterDepts] = useState<string[]>([]);
   const [filterLocations, setFilterLocations] = useState<string[]>([]);
   const [globalPeriodType, setGlobalPeriodType] = useState<"monthly" | "quarterly">("monthly");
+  const [hideCompleted, setHideCompleted] = useState(false);
 
   // Single-month mode = exactly one month selected → live draft cards
   // Multi/all mode = 0 or 2+ months → live draft cards per month, grouped by month
@@ -3997,6 +3999,10 @@ function ScorecardsScreen(props: {
     if (filterDepts.length > 0 && !filterDepts.includes(e.department)) return false;
     if (filterLocations.length > 0 && !filterLocations.includes(e.location)) return false;
     if (singleMonthMode && isDeactivatedForMonth(props.allActuals, e.name, selectedMonth)) return false;
+    if (hideCompleted) {
+      const sc = props.scorecards.find((s) => s.employeeName === e.name && s.scorecardMonth === periodLabel);
+      if (sc && (sc.reviewStatus === "approved" || !sc.reviewStatus)) return false;
+    }
     // If this employee has an explicit period type set, only show them on that tab
     const forcedPeriod = props.employeePeriodTypes?.[e.name];
     if (forcedPeriod) return forcedPeriod === globalPeriodType;
@@ -4169,6 +4175,11 @@ function ScorecardsScreen(props: {
             selected={filterEmployees}
             onChange={setFilterEmployees}
           />
+          <Separator orientation="vertical" className="mx-0.5 hidden h-5 sm:block" />
+          <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-[12px] text-muted-foreground" title="Hides scorecards that are Approved or Submitted with no reviewer — i.e. already finalized">
+            <Checkbox checked={hideCompleted} onCheckedChange={(v) => setHideCompleted(v === true)} />
+            Hide completed
+          </label>
         </div>
       </section>
 
@@ -4285,11 +4296,16 @@ function ScorecardsScreen(props: {
               const mRaw = (props.rippling[m]?.length ?? 0) > 0 ? props.rippling[m] : latestEmployees;
               const mTeam = scopedEmployeesForProfile(mRaw, props.profile, props.allEmployees);
               const mFiltered = mTeam
-                .filter((e) =>
-                  (filterEmployees.length === 0 || filterEmployees.includes(e.name)) &&
-                  (filterDepts.length === 0 || filterDepts.includes(e.department)) &&
-                  (filterLocations.length === 0 || filterLocations.includes(e.location))
-                )
+                .filter((e) => {
+                  if (filterEmployees.length > 0 && !filterEmployees.includes(e.name)) return false;
+                  if (filterDepts.length > 0 && !filterDepts.includes(e.department)) return false;
+                  if (filterLocations.length > 0 && !filterLocations.includes(e.location)) return false;
+                  if (hideCompleted) {
+                    const sc = props.scorecards.find((s) => s.employeeName === e.name && s.scorecardMonth === mLabel);
+                    if (sc && (sc.reviewStatus === "approved" || !sc.reviewStatus)) return false;
+                  }
+                  return true;
+                })
                 .sort((a, b) => a.name.localeCompare(b.name));
               const mEarningsUpload = props.rippling[m] || [];
               const mPayrollAvailable = mEarningsUpload.length > 0;
@@ -4989,16 +5005,56 @@ function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, onReopen,
           <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">Bonus</span>
           <span className="block text-[15px] font-semibold tabular-nums text-primary">{formatCurrency(scorecard.bonusAmount)}</span>
         </span>
-        {scorecard.reviewStatus === "pending_review" ? (
-          <Badge variant="secondary" className="shrink-0 font-medium" style={{ background: "#FEF3C7", color: "#92400E", borderColor: "#FDE68A" }}>Pending Review</Badge>
-        ) : scorecard.reviewStatus === "approved" ? (
-          <Badge variant="success" className="shrink-0 font-medium">Approved</Badge>
-        ) : scorecard.reviewStatus === "returned" ? (
-          <Badge variant="secondary" className="shrink-0 font-medium" style={{ background: "#FEE2E2", color: "#991B1B", borderColor: "#FECACA" }}>Returned</Badge>
-        ) : (
-          <Badge variant="success" className="shrink-0 font-medium">Submitted</Badge>
-        )}
+        <span className="flex shrink-0 items-center gap-1.5">
+          {scorecard.reviewStatus === "pending_review" ? (
+            <Badge variant="secondary" className="shrink-0 font-medium" style={{ background: "#FEF3C7", color: "#92400E", borderColor: "#FDE68A" }}>Pending Review</Badge>
+          ) : scorecard.reviewStatus === "approved" ? (
+            <Badge variant="success" className="shrink-0 font-medium">Approved</Badge>
+          ) : scorecard.reviewStatus === "returned" ? (
+            <Badge variant="secondary" className="shrink-0 font-medium" style={{ background: "#FEE2E2", color: "#991B1B", borderColor: "#FECACA" }}>Returned</Badge>
+          ) : (
+            <Badge variant="success" className="shrink-0 font-medium">Submitted</Badge>
+          )}
+          {(scorecard.reviewStatus === "approved" || !scorecard.reviewStatus) && isAdmin && onReopen && (
+            <button
+              type="button"
+              title={scorecard.reviewStatus === "approved" ? `Approved by ${scorecard.reviewedBy} · reopen to correct and recalculate` : "Reopen to correct and recalculate"}
+              onClick={(e) => { e.stopPropagation(); setReopening((v) => !v); }}
+              className="inline-flex shrink-0 items-center gap-1 rounded-full border border-[var(--brick)] px-2 py-0.5 text-[10.5px] font-semibold text-[var(--brick)] transition-colors hover:bg-[var(--brick)] hover:text-white"
+            >
+              <RotateCcw className="size-3" /> Reopen
+            </button>
+          )}
+        </span>
       </button>
+
+      {/* Reopen an approved/submitted card — admin-only escape hatch for correcting a scorecard
+          that's already done, e.g. a bonus miscalculation discovered after the fact. Sends it
+          back to "returned" status just like a normal Return, so it recalculates live from
+          current goal/Rippling data and goes through the normal resubmit (+ re-approve, if a
+          reviewer is configured) flow. Trigger lives in the header pill; this only renders the
+          confirm panel on demand, so it doesn't take up a permanent row. */}
+      {reopening && (scorecard.reviewStatus === "approved" || !scorecard.reviewStatus) && isAdmin && onReopen && (
+        <div style={{ borderTop: "1px solid var(--border)", background: "var(--muted)", padding: "10px 16px", display: "flex", flexDirection: "column", gap: "6px" }}>
+          <textarea
+            autoFocus
+            placeholder="Reason for reopening (optional)…"
+            value={reopenNote}
+            onChange={(e) => setReopenNote(e.target.value)}
+            style={{ width: "100%", fontSize: "12px", padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "6px", fontFamily: "var(--sans)", resize: "vertical", minHeight: "60px" }}
+          />
+          <div style={{ display: "flex", gap: "6px" }}>
+            <button
+              onClick={() => { onReopen(scorecard.id, reopenNote); setReopening(false); setReopenNote(""); }}
+              style={{ padding: "5px 14px", fontSize: "12px", fontWeight: 600, background: "var(--brick)", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer", fontFamily: "var(--sans)" }}
+            >Confirm Reopen</button>
+            <button
+              onClick={() => { setReopening(false); setReopenNote(""); }}
+              style={{ padding: "5px 14px", fontSize: "12px", fontWeight: 600, background: "none", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", cursor: "pointer", fontFamily: "var(--sans)" }}
+            >Cancel</button>
+          </div>
+        </div>
+      )}
 
       {/* Reviewer actions — only shown to the assigned reviewer */}
       {scorecard.reviewStatus === "pending_review" && currentUserProfileId && scorecard.reviewerId === currentUserProfileId && (
@@ -5033,47 +5089,6 @@ function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, onReopen,
                 >Confirm Return</button>
                 <button
                   onClick={() => { setReturning(false); setReturnNote(""); }}
-                  style={{ padding: "5px 14px", fontSize: "12px", fontWeight: 600, background: "none", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", cursor: "pointer", fontFamily: "var(--sans)" }}
-                >Cancel</button>
-              </div>
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* Reopen a finalized card — admin-only escape hatch for correcting a scorecard that's
-          already done (approved, or submitted with no review workflow configured), e.g. a
-          bonus miscalculation discovered after the fact. Sends it back to "returned" status
-          just like a normal Return, so it recalculates live from current goal/Rippling data
-          and goes through the normal resubmit (+ re-approve, if a reviewer is configured) flow. */}
-      {(scorecard.reviewStatus === "approved" || !scorecard.reviewStatus) && isAdmin && onReopen && (
-        <div style={{ borderTop: "1px solid var(--border)", background: "var(--muted)", padding: "10px 16px", display: "flex", flexDirection: "column", gap: "8px" }}>
-          {!reopening ? (
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <span style={{ fontSize: "12px", color: "var(--text-muted)", flex: 1 }}>
-                {scorecard.reviewStatus === "approved" ? `Approved by ${scorecard.reviewedBy} · reopen to correct and recalculate` : "Reopen to correct and recalculate"}
-              </span>
-              <button
-                onClick={() => setReopening(true)}
-                style={{ padding: "5px 14px", fontSize: "12px", fontWeight: 600, background: "none", color: "var(--brick)", border: "1.5px solid var(--brick)", borderRadius: "6px", cursor: "pointer", fontFamily: "var(--sans)" }}
-              >Reopen</button>
-            </div>
-          ) : (
-            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
-              <textarea
-                autoFocus
-                placeholder="Reason for reopening (optional)…"
-                value={reopenNote}
-                onChange={(e) => setReopenNote(e.target.value)}
-                style={{ width: "100%", fontSize: "12px", padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "6px", fontFamily: "var(--sans)", resize: "vertical", minHeight: "60px" }}
-              />
-              <div style={{ display: "flex", gap: "6px" }}>
-                <button
-                  onClick={() => { onReopen(scorecard.id, reopenNote); setReopening(false); setReopenNote(""); }}
-                  style={{ padding: "5px 14px", fontSize: "12px", fontWeight: 600, background: "var(--brick)", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer", fontFamily: "var(--sans)" }}
-                >Confirm Reopen</button>
-                <button
-                  onClick={() => { setReopening(false); setReopenNote(""); }}
                   style={{ padding: "5px 14px", fontSize: "12px", fontWeight: 600, background: "none", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", cursor: "pointer", fontFamily: "var(--sans)" }}
                 >Cancel</button>
               </div>
