@@ -5041,16 +5041,17 @@ function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, onReopen,
         </div>
       )}
 
-      {/* Reopen an approved card — admin-only escape hatch for correcting an already-approved
-          scorecard (e.g. a bonus miscalculation discovered after approval). Sends it back to
-          "returned" status just like a normal Return, so it recalculates live from current
-          goal/Rippling data and goes through the normal resubmit + re-approve flow. */}
-      {scorecard.reviewStatus === "approved" && isAdmin && onReopen && (
+      {/* Reopen a finalized card — admin-only escape hatch for correcting a scorecard that's
+          already done (approved, or submitted with no review workflow configured), e.g. a
+          bonus miscalculation discovered after the fact. Sends it back to "returned" status
+          just like a normal Return, so it recalculates live from current goal/Rippling data
+          and goes through the normal resubmit (+ re-approve, if a reviewer is configured) flow. */}
+      {(scorecard.reviewStatus === "approved" || !scorecard.reviewStatus) && isAdmin && onReopen && (
         <div style={{ borderTop: "1px solid var(--border)", background: "var(--muted)", padding: "10px 16px", display: "flex", flexDirection: "column", gap: "8px" }}>
           {!reopening ? (
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
               <span style={{ fontSize: "12px", color: "var(--text-muted)", flex: 1 }}>
-                Approved by {scorecard.reviewedBy} · reopen to correct and recalculate
+                {scorecard.reviewStatus === "approved" ? `Approved by ${scorecard.reviewedBy} · reopen to correct and recalculate` : "Reopen to correct and recalculate"}
               </span>
               <button
                 onClick={() => setReopening(true)}
