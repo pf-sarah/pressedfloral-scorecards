@@ -14,7 +14,7 @@ import { downloadCsv, parseRipplingEmployees, scorecardsToCsv, toCsv } from "../
 import { fixtureData, fixtureManager, fixtureMonth, fixturePeriod } from "../lib/fixtures";
 import { currentMonthValue, formatMonthLabel } from "../lib/periods";
 import { getReportingTree } from "../lib/reportingTree";
-import { baseEarnings, buildScorecard, calculateGoal, formatCurrency, formatNumber, type EditableGoal } from "../lib/score";
+import { baseEarnings, buildScorecard, calculateGoal, formatCurrency, formatNumber, sumQuarterlyEmployee, type EditableGoal } from "../lib/score";
 import {
   hydrateFromLocalStorage,
   persistActuals,
@@ -4523,25 +4523,24 @@ function LiveScorecardCard({
   const quarterKey = quarterKeyForMonth(isoMonth);
 
   // Sum earnings across all 3 months of the quarter from Rippling uploads.
-  // Salaried employees have no per-period grossEarnings in Rippling (only annualPay),
-  // so track whether an upload was found separately from whether it had a dollar figure —
-  // otherwise salaried staff always look like payroll was never uploaded.
-  const [quarterlyEmployee, quarterlyPayrollAvailable] = useMemo((): [Employee, boolean] => {
+  // sumQuarterlyEmployee prices each month by its own pay basis so mid-quarter role changes
+  // (hourly → salaried) blend correctly; the blended total rides in grossEarnings so
+  // baseEarnings uses it verbatim for the quarter.
+  const [quarterlyEmployee, quarterlyPayrollAvailable, quarterlyEstimatedMonths, quarterlyMissingMonths] = useMemo((): [Employee, boolean, string[], string[]] => {
     const [y, m] = isoMonth.split("-").map(Number);
-    if (!y || !m) return [employee, false];
+    if (!y || !m) return [employee, false, [], []];
     const q = Math.ceil(m / 3);
     const start = (q - 1) * 3 + 1;
     const qMonths = [0, 1, 2].map((i) => `${y}-${String(start + i).padStart(2, "0")}`);
-    let totalGross = 0;
-    let totalHours = 0;
-    let uploadFound = false;
-    for (const qm of qMonths) {
-      const src = (allRippling[qm] || []).find((e) => e.name === employee.name);
-      if (src) uploadFound = true;
-      if (src?.grossEarnings) totalGross += src.grossEarnings;
-      if (src?.hoursWorked) totalHours += src.hoursWorked;
-    }
-    return [{ ...employee, grossEarnings: totalGross > 0 ? totalGross : undefined, hoursWorked: totalHours > 0 ? totalHours : undefined }, uploadFound];
+    const { quarterlyEarnings, hoursWorked, uploadFound, estimatedMonths, missingMonths } = sumQuarterlyEmployee({
+      employeeName: employee.name,
+      qMonths,
+      ripplingByMonth: allRippling
+    });
+    // Only warn about missing months that are already over — payroll for the current or
+    // future months simply hasn't been uploaded yet, which isn't a data gap.
+    const pastMissing = uploadFound ? missingMonths.filter((mm) => mm < currentMonthValue()) : [];
+    return [{ ...employee, grossEarnings: quarterlyEarnings, hoursWorked }, uploadFound, estimatedMonths, pastMissing];
   }, [isoMonth, employee, allRippling]);
 
   function isGoalApplicable(goal: Goal): boolean {
@@ -4573,7 +4572,7 @@ function LiveScorecardCard({
   // read-only review card takes over again.
   const displayedSubmitted = (submittedScorecard && submittedScorecard.reviewStatus !== "returned") ? submittedScorecard : lastSubmitted;
   if (displayedSubmitted) {
-    return <ScorecardCard scorecard={displayedSubmitted} onDeleteGoal={onDeleteGoal} onApprove={onApprove} onReturn={onReturn} currentUserProfileId={currentUserProfileId} />;
+    return <ScorecardCard scorecard={displayedSubmitted} onDeleteGoal={onDeleteGoal} onApprove={onApprove} onReturn={onReturn} onReopen={onReturn} isAdmin={isAdmin} currentUserProfileId={currentUserProfileId} />;
   }
   const returnedScorecard = !lastSubmitted && submittedScorecard?.reviewStatus === "returned" ? submittedScorecard : null;
 
@@ -4699,6 +4698,28 @@ function LiveScorecardCard({
             <div className="flex items-start gap-2 border-t border-[#f0e0a0] bg-[#fffbf0] px-4 py-2 text-[11.5px] text-[#7a5c00]">
               <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
               <span>Some goals are missing a goal value or minimum for {activeMonth}. Set them in Goals &amp; Actuals before submitting.</span>
+            </div>
+          )}
+
+          {cardPeriodType === "quarterly" && quarterlyEstimatedMonths.length > 0 && (
+            <div className="flex items-start gap-2 border-t border-[#f0e0a0] bg-[#fffbf0] px-4 py-2 text-[11.5px] text-[#7a5c00]">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                No gross pay reported in the {quarterlyEstimatedMonths.map((m) => formatMonthLabel(m)).join(", ")} Rippling upload
+                for this employee — {quarterlyEstimatedMonths.length > 1 ? "those months were" : "that month was"} estimated from
+                hourly rate × hours, so quarterly earnings above are approximate.
+              </span>
+            </div>
+          )}
+
+          {cardPeriodType === "quarterly" && quarterlyMissingMonths.length > 0 && (
+            <div className="flex items-start gap-2 border-t border-[#f0e0a0] bg-[#fffbf0] px-4 py-2 text-[11.5px] text-[#7a5c00]">
+              <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+              <span>
+                This employee has no row in the {quarterlyMissingMonths.map((m) => formatMonthLabel(m)).join(", ")} Rippling
+                upload. If they worked {quarterlyMissingMonths.length > 1 ? "those months" : "that month"}, quarterly earnings
+                above are understated — re-upload the month&apos;s Rippling data to include them.
+              </span>
             </div>
           )}
 
@@ -4897,16 +4918,20 @@ function Metric({ label, value, highlight }: { label: string; value: string; hig
   return <div className="metric-card"><div className="mlabel">{label}</div><div className={`mval ${highlight ? "highlight" : ""}`}>{value}</div></div>;
 }
 
-function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, currentUserProfileId }: {
+function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, onReopen, isAdmin, currentUserProfileId }: {
   scorecard: Scorecard;
   onDeleteGoal: (value: { scorecardId: string; goalName: string }) => void;
   onApprove: (scorecardId: string) => void;
   onReturn: (scorecardId: string, note: string) => void;
+  onReopen?: (scorecardId: string, note: string) => void;
+  isAdmin?: boolean;
   currentUserProfileId?: string;
 }) {
   const [open, setOpen] = useState(false);
   const [returning, setReturning] = useState(false);
   const [returnNote, setReturnNote] = useState("");
+  const [reopening, setReopening] = useState(false);
+  const [reopenNote, setReopenNote] = useState("");
   const achColor = scorecard.weightedAchievement >= 100 ? "#2D6B1A" : "var(--brick)";
   const effectiveHourly = scorecard.hours && scorecard.hours > 0
     ? ((scorecard.baseEarnings + scorecard.bonusAmount) / scorecard.hours).toFixed(2)
@@ -4980,6 +5005,46 @@ function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, currentUs
                 >Confirm Return</button>
                 <button
                   onClick={() => { setReturning(false); setReturnNote(""); }}
+                  style={{ padding: "5px 14px", fontSize: "12px", fontWeight: 600, background: "none", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", cursor: "pointer", fontFamily: "var(--sans)" }}
+                >Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Reopen an approved card — admin-only escape hatch for correcting an already-approved
+          scorecard (e.g. a bonus miscalculation discovered after approval). Sends it back to
+          "returned" status just like a normal Return, so it recalculates live from current
+          goal/Rippling data and goes through the normal resubmit + re-approve flow. */}
+      {scorecard.reviewStatus === "approved" && isAdmin && onReopen && (
+        <div style={{ borderTop: "1px solid var(--border)", background: "var(--muted)", padding: "10px 16px", display: "flex", flexDirection: "column", gap: "8px" }}>
+          {!reopening ? (
+            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
+              <span style={{ fontSize: "12px", color: "var(--text-muted)", flex: 1 }}>
+                Approved by {scorecard.reviewedBy} · reopen to correct and recalculate
+              </span>
+              <button
+                onClick={() => setReopening(true)}
+                style={{ padding: "5px 14px", fontSize: "12px", fontWeight: 600, background: "none", color: "var(--brick)", border: "1.5px solid var(--brick)", borderRadius: "6px", cursor: "pointer", fontFamily: "var(--sans)" }}
+              >Reopen</button>
+            </div>
+          ) : (
+            <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+              <textarea
+                autoFocus
+                placeholder="Reason for reopening (optional)…"
+                value={reopenNote}
+                onChange={(e) => setReopenNote(e.target.value)}
+                style={{ width: "100%", fontSize: "12px", padding: "6px 8px", border: "1px solid var(--border)", borderRadius: "6px", fontFamily: "var(--sans)", resize: "vertical", minHeight: "60px" }}
+              />
+              <div style={{ display: "flex", gap: "6px" }}>
+                <button
+                  onClick={() => { onReopen(scorecard.id, reopenNote); setReopening(false); setReopenNote(""); }}
+                  style={{ padding: "5px 14px", fontSize: "12px", fontWeight: 600, background: "var(--brick)", color: "#fff", border: "none", borderRadius: "6px", cursor: "pointer", fontFamily: "var(--sans)" }}
+                >Confirm Reopen</button>
+                <button
+                  onClick={() => { setReopening(false); setReopenNote(""); }}
                   style={{ padding: "5px 14px", fontSize: "12px", fontWeight: 600, background: "none", color: "var(--text-muted)", border: "1px solid var(--border)", borderRadius: "6px", cursor: "pointer", fontFamily: "var(--sans)" }}
                 >Cancel</button>
               </div>

@@ -23,6 +23,57 @@ export function baseEarnings(input: {
   return (input.hourlyRate || 0) * (input.hours || 0);
 }
 
+/**
+ * Sums an employee's Rippling uploads across a quarter's three months, pricing each month
+ * independently by that month's own pay basis (via the monthly baseEarnings rules: actual
+ * grossEarnings when reported, otherwise annualPay/12 for salaried months, otherwise
+ * hourlyRate × hours). Months cannot share one pay type for the whole quarter — a mid-quarter
+ * role change (hourly → salaried or vice versa) means each month's row must speak for itself,
+ * and a stray partial gross figure from one month must never override the other months.
+ *
+ * Hourly months with no reported gross fall back to a rate × hours estimate and are returned
+ * in estimatedMonths so callers can flag the quarter total as approximate. Months where the
+ * employee has no upload row at all are returned in missingMonths — they contribute nothing,
+ * which is correct for a mid-quarter hire but an undercount if the upload simply skipped them,
+ * so callers should surface those too.
+ */
+export function sumQuarterlyEmployee(input: {
+  employeeName: string;
+  qMonths: string[];
+  ripplingByMonth: Record<string, Employee[]>;
+}): { quarterlyEarnings?: number; hoursWorked?: number; uploadFound: boolean; estimatedMonths: string[]; missingMonths: string[] } {
+  let totalEarnings = 0;
+  let totalHours = 0;
+  let uploadFound = false;
+  const estimatedMonths: string[] = [];
+  const missingMonths: string[] = [];
+  for (const qm of input.qMonths) {
+    const src = (input.ripplingByMonth[qm] || []).find((e) => e.name === input.employeeName);
+    if (!src) {
+      missingMonths.push(qm);
+      continue;
+    }
+    uploadFound = true;
+    totalEarnings += baseEarnings({
+      payType: src.payType,
+      hourlyRate: src.hourlyRate,
+      hours: src.hoursWorked,
+      annualPay: src.annualPay,
+      grossEarnings: src.grossEarnings,
+      periodType: "monthly"
+    });
+    if (src.hoursWorked) totalHours += src.hoursWorked;
+    if (src.payType === "hourly" && !(src.grossEarnings && src.grossEarnings > 0)) estimatedMonths.push(qm);
+  }
+  return {
+    quarterlyEarnings: totalEarnings > 0 ? totalEarnings : undefined,
+    hoursWorked: totalHours > 0 ? totalHours : undefined,
+    uploadFound,
+    estimatedMonths,
+    missingMonths
+  };
+}
+
 export function calculateGoal(input: {
   goal: Pick<Goal, "name" | "goalTier" | "location" | "department" | "role" | "lowerBetter" | "capped" | "capPct">;
   target: number;
