@@ -4522,21 +4522,26 @@ function LiveScorecardCard({
 
   const quarterKey = quarterKeyForMonth(isoMonth);
 
-  // Sum earnings across all 3 months of the quarter from Rippling uploads
-  const quarterlyEmployee = useMemo(() => {
+  // Sum earnings across all 3 months of the quarter from Rippling uploads.
+  // Salaried employees have no per-period grossEarnings in Rippling (only annualPay),
+  // so track whether an upload was found separately from whether it had a dollar figure —
+  // otherwise salaried staff always look like payroll was never uploaded.
+  const [quarterlyEmployee, quarterlyPayrollAvailable] = useMemo((): [Employee, boolean] => {
     const [y, m] = isoMonth.split("-").map(Number);
-    if (!y || !m) return employee;
+    if (!y || !m) return [employee, false];
     const q = Math.ceil(m / 3);
     const start = (q - 1) * 3 + 1;
     const qMonths = [0, 1, 2].map((i) => `${y}-${String(start + i).padStart(2, "0")}`);
     let totalGross = 0;
     let totalHours = 0;
+    let uploadFound = false;
     for (const qm of qMonths) {
       const src = (allRippling[qm] || []).find((e) => e.name === employee.name);
+      if (src) uploadFound = true;
       if (src?.grossEarnings) totalGross += src.grossEarnings;
       if (src?.hoursWorked) totalHours += src.hoursWorked;
     }
-    return { ...employee, grossEarnings: totalGross > 0 ? totalGross : undefined, hoursWorked: totalHours > 0 ? totalHours : undefined };
+    return [{ ...employee, grossEarnings: totalGross > 0 ? totalGross : undefined, hoursWorked: totalHours > 0 ? totalHours : undefined }, uploadFound];
   }, [isoMonth, employee, allRippling]);
 
   function isGoalApplicable(goal: Goal): boolean {
@@ -4601,11 +4606,12 @@ function LiveScorecardCard({
     });
   })();
 
-  // For quarterly cards, payrollAvailable is based on whether earnings were found across
-  // the quarter's months (quarterlyEmployee sums only months with actual uploads).
+  // For quarterly cards, payrollAvailable reflects whether a Rippling upload was found
+  // for this employee in any month of the quarter (not whether it had gross earnings —
+  // salaried employees fall back to annualPay and never have a gross figure).
   // For monthly cards, use the prop passed from the parent.
   const activePayrollAvailable = cardPeriodType === "quarterly"
-    ? ((quarterlyEmployee.grossEarnings ?? 0) > 0)
+    ? quarterlyPayrollAvailable
     : (payrollAvailable ?? false);
 
   const liveScorecard = buildScorecard({ employee: activeEmployee, month: activeMonth, periodType: cardPeriodType, goals: currentGoals, submittedBy: currentUserEmail, payrollAvailable: activePayrollAvailable });
