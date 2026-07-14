@@ -3884,7 +3884,7 @@ function ScorecardsScreen(props: {
   // Multi/all mode = 0 or 2+ months → live draft cards per month, grouped by month
   const singleMonthMode = props.selectedMonths.length === 1;
   const selectedMonth = singleMonthMode ? props.selectedMonths[0] : "";
-  const periodLabel = formatMonthLabel(selectedMonth);
+  const periodLabel = globalPeriodType === "quarterly" ? quarterKeyForMonth(selectedMonth) : formatMonthLabel(selectedMonth);
 
   // Deduplicated latest employees — fallback when selected month has no Rippling upload
   const latestEmployees = useMemo(() => {
@@ -4964,8 +4964,8 @@ function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, currentUs
         <>
           <div className="flex flex-wrap gap-6 border-t border-border bg-muted/30 px-4 py-2.5">
             {[
-              { label: "Monthly earnings", value: formatCurrency(scorecard.baseEarnings) },
-              scorecard.hours ? { label: "Hours worked", value: scorecard.hours.toFixed(2) } : null,
+              { label: scorecard.periodType === "quarterly" ? `Quarterly earnings · ${scorecard.scorecardMonth}` : "Monthly earnings", value: formatCurrency(scorecard.baseEarnings) },
+              scorecard.hours ? { label: `Hours worked${scorecard.periodType === "quarterly" ? " (qtr)" : ""}`, value: scorecard.hours.toFixed(2) } : null,
               scorecard.hourlyRate ? { label: "Hourly rate", value: formatCurrency(scorecard.hourlyRate) } : null,
               effectiveHourly ? { label: "Effective hourly", value: `$${effectiveHourly}` } : null,
               { label: "Bonus amount", value: formatCurrency(scorecard.bonusAmount), color: "var(--brick)" }
