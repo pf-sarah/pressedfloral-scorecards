@@ -1680,6 +1680,7 @@ export default function ScorecardsApp() {
                   scorecards={myOwnScorecards}
                   employeeName={effectiveProfile?.linkedEmployeeName || ""}
                   myEmployee={myEmployee}
+                  periodType={effectiveProfile?.scorecardPeriodType}
                   allGoals={appData.goals.filter((g) => g.active)}
                   allActuals={appData.actuals}
                   rippling={appData.rippling}
@@ -1806,7 +1807,7 @@ export default function ScorecardsApp() {
               onReactivate={reactivateAdminUser}
               onDelete={deleteAdminUser}
               onViewAs={(user) => {
-                setViewAsProfile({ id: user.id, email: user.email, role: user.role, departments: user.departments, locations: user.locations, linkedEmployeeName: user.linkedEmployeeName, companyGoalsGrant: user.companyGoalsGrant });
+                setViewAsProfile({ id: user.id, email: user.email, role: user.role, departments: user.departments, locations: user.locations, linkedEmployeeName: user.linkedEmployeeName, supervisorId: user.supervisorId, scorecardPeriodType: user.scorecardPeriodType, companyGoalsGrant: user.companyGoalsGrant });
                 setMode("landing");
               }}
             />
@@ -1949,11 +1950,12 @@ function AuthScreen(props: {
 }
 
 function PersonalScorecardPanel({
-  scorecards, employeeName, myEmployee, allGoals, allActuals, rippling, goalAssignments, empSettings
+  scorecards, employeeName, myEmployee, periodType, allGoals, allActuals, rippling, goalAssignments, empSettings
 }: {
   scorecards: Scorecard[];
   employeeName: string;
   myEmployee: Employee | null;
+  periodType?: "monthly" | "quarterly";
   allGoals: Goal[];
   allActuals: Record<string, ActualsByKey>;
   rippling: Record<string, Employee[]>;
@@ -1983,39 +1985,45 @@ function PersonalScorecardPanel({
   const nextLabel = formatMonthLabel(nextISO);
 
   // Navigation: same 24-back to 12-forward window as the manager's month picker,
-  // filtered to months where this employee actually has content (submitted scorecard or
+  // filtered to periods where this employee actually has content (submitted scorecard or
   // Rippling entry) so the navigator stays compact. Current and next are always included.
+  // Quarterly employees navigate by quarter ("Q2 2026") — the same period key their
+  // scorecards are submitted under; a month-label navigator can never surface those.
+  const quarterly = periodType === "quarterly";
   const submittedSet = new Set(scorecards.map((sc) => sc.scorecardMonth));
 
-  const ripplingMonthLabels = new Set<string>();
-  for (const [period, employees] of Object.entries(rippling)) {
-    if (employees.some((e) => e.name === employeeName)) {
-      ripplingMonthLabels.add(formatMonthLabel(period));
-    }
-  }
-
-  const windowLabels = new Set<string>();
+  const windowISOs = new Set<string>();
   for (let offset = -24; offset <= 12; offset++) {
     const d = new Date(today.getFullYear(), today.getMonth() + offset, 1);
-    const iso = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`;
-    windowLabels.add(formatMonthLabel(iso));
+    windowISOs.add(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
   }
 
+  // Periods from Rippling uploads containing this employee, as quarter or month labels
+  const ripplingPeriods = new Set<string>();
+  for (const [period, employees] of Object.entries(rippling)) {
+    if (!windowISOs.has(period)) continue;
+    if (!employees.some((e) => e.name === employeeName)) continue;
+    ripplingPeriods.add(quarterly ? quarterKeyForMonth(period) : formatMonthLabel(period));
+  }
+
+  const defaultPeriod = quarterly ? quarterKeyForMonth(curISO) : currentLabel;
   const allPeriods = new Set([
-    ...[...submittedSet].filter((m) => windowLabels.has(m)),
-    ...[...ripplingMonthLabels].filter((m) => windowLabels.has(m)),
-    currentLabel,
-    nextLabel,
+    // Submitted scorecards of either period type stay reachable (e.g. monthly history from
+    // before an employee moved to quarterly) — compare via their ISO anchor month.
+    ...[...submittedSet].filter((m) => windowISOs.has(periodToISO(m))),
+    ...ripplingPeriods,
+    defaultPeriod,
+    quarterly ? quarterKeyForMonth(nextISO) : nextLabel,
   ]);
   const sortedPeriods = [...allPeriods].sort((a, b) => periodSortKey(a).localeCompare(periodSortKey(b)));
 
   const [idx, setIdx] = useState(() => {
-    // Default to current month
-    const ci = sortedPeriods.indexOf(currentLabel);
+    // Default to the current month/quarter
+    const ci = sortedPeriods.indexOf(defaultPeriod);
     return ci >= 0 ? ci : sortedPeriods.length - 1;
   });
   const safeIdx = Math.min(Math.max(0, idx), sortedPeriods.length - 1);
-  const currentPeriod = sortedPeriods[safeIdx] || currentLabel;
+  const currentPeriod = sortedPeriods[safeIdx] || defaultPeriod;
 
   // Submitted scorecard for this period (if any)
   const submitted = scorecards.find((sc) => sc.scorecardMonth === currentPeriod) || null;
@@ -2032,13 +2040,24 @@ function PersonalScorecardPanel({
 
   // Employee with earnings for this period. rippling[periodISO] holds that month's payroll
   // (uploaded the following month). Always strip earnings when no upload exists so stale
-  // hours from a prior month don't bleed into the current period card.
+  // hours from a prior month don't bleed into the current period card. Quarterly periods
+  // blend all three months via sumQuarterlyEmployee, matching the manager's card.
   const [empWithEarnings, personalPayrollAvailable] = useMemo((): [Employee | null, boolean] => {
     if (!myEmployee || !periodISO) return [myEmployee, false];
+    if (isQuarterly) {
+      const [y, m] = periodISO.split("-").map(Number);
+      const qMonths = [0, 1, 2].map((i) => `${y}-${String(m + i).padStart(2, "0")}`);
+      const { quarterlyEarnings, hoursWorked, uploadFound } = sumQuarterlyEmployee({
+        employeeName: myEmployee.name,
+        qMonths,
+        ripplingByMonth: rippling
+      });
+      return [{ ...myEmployee, grossEarnings: quarterlyEarnings, hoursWorked }, uploadFound];
+    }
     const src = (rippling[periodISO] || []).find((e) => e.name === myEmployee.name);
     const emp = { ...myEmployee, grossEarnings: src?.grossEarnings, hoursWorked: src?.hoursWorked };
     return [emp, !!src];
-  }, [myEmployee, periodISO, rippling]);
+  }, [myEmployee, periodISO, isQuarterly, rippling]);
 
   // Goals for this employee — mirrors the exact state the manager sees in Team Scorecards.
   // Applies the same settings (excluded/added goals, weight overrides) and goal-assignment logic.
@@ -2152,10 +2171,19 @@ function PersonalScorecardPanel({
           variant={submitted ? "secondary" : "outline"}
           className={cn(
             "ml-1.5 font-medium",
-            submitted && "border-transparent bg-[#2D6B1A]/10 text-[#2D6B1A]"
+            submitted && (submitted.reviewStatus === "pending_review"
+              ? "border-transparent bg-[#FEF3C7] text-[#92400E]"
+              : submitted.reviewStatus === "returned"
+                ? "border-transparent bg-[#FEE2E2] text-[#991B1B]"
+                : "border-transparent bg-[#2D6B1A]/10 text-[#2D6B1A]")
           )}
         >
-          {submitted ? "Submitted" : "Pending"}
+          {submitted
+            ? (submitted.reviewStatus === "pending_review" ? "Pending Review"
+              : submitted.reviewStatus === "approved" ? "Approved"
+              : submitted.reviewStatus === "returned" ? "Returned"
+              : "Submitted")
+            : "Pending"}
         </Badge>
       </div>
 
