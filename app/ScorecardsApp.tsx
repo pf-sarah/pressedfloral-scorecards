@@ -308,6 +308,9 @@ export default function ScorecardsApp() {
   const [adminUsersLoading, setAdminUsersLoading] = useState(false);
   const [viewAsProfile, setViewAsProfile] = useState<ManagerProfile | null>(null);
   const [subordinateProfiles, setSubordinateProfiles] = useState<ManagerProfile[]>([]);
+  // Every profile id anywhere below the current user in the supervisor chain — lets a manager
+  // approve/return a scorecard assigned to a subordinate (at any depth) who's unavailable.
+  const [reviewChainIds, setReviewChainIds] = useState<Set<string>>(new Set());
   const [employeePeriodTypes, setEmployeePeriodTypes] = useState<Record<string, "monthly" | "quarterly">>({});
   const [maintenanceMode, setMaintenanceMode] = useState(false);
   const [maintenanceLoading, setMaintenanceLoading] = useState(false);
@@ -483,6 +486,15 @@ export default function ScorecardsApp() {
             companyGoalsGrant: u.companyGoalsGrant,
           }))
       );
+      // Walk the full reporting chain below viewAsProfile using the already-loaded adminUsers list.
+      const chain = new Set<string>();
+      let frontier = [viewAsProfile.id];
+      for (let depth = 0; depth < 10 && frontier.length > 0; depth++) {
+        const children = adminUsers.filter((u) => u.supervisorId && frontier.includes(u.supervisorId) && !chain.has(u.id)).map((u) => u.id);
+        children.forEach((id) => chain.add(id));
+        frontier = children;
+      }
+      setReviewChainIds(chain);
       return;
     }
     // Normal mode: fetch on login so badge count is accurate from the start.
@@ -504,6 +516,9 @@ export default function ScorecardsApp() {
               supervisorId: typeof row.supervisor_id === "string" ? row.supervisor_id : undefined,
               companyGoalsGrant: row.company_goals_grant === true,
             })));
+          }
+          if (Array.isArray(body.descendantIds)) {
+            setReviewChainIds(new Set(body.descendantIds.map((id: unknown) => String(id))));
           }
         })
         .catch(() => {});
@@ -1759,6 +1774,7 @@ export default function ScorecardsApp() {
                 allowedLocations={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.locations || [])}
                 currentUserEmail={currentUserEmail}
                 currentUserProfileId={effectiveProfile?.id}
+                reviewChainIds={reviewChainIds}
                 employeePeriodTypes={employeePeriodTypes}
                 onDeactivateEmployee={roleAtLeast(effectiveProfile, "manager") ? deactivateEmployee : undefined}
               />
@@ -3927,6 +3943,7 @@ function ScorecardsScreen(props: {
   allowedLocations?: string[];
   currentUserEmail: string;
   currentUserProfileId?: string;
+  reviewChainIds?: Set<string>;
   employeePeriodTypes?: Record<string, "monthly" | "quarterly">;
   onDeactivateEmployee?: (employeeName: string, isoMonth: string, mode: "month" | "from" | "reactivate") => void;
 }) {
@@ -4274,6 +4291,7 @@ function ScorecardsScreen(props: {
                     allowedLocations={props.allowedLocations}
                     currentUserEmail={props.currentUserEmail}
                     currentUserProfileId={props.currentUserProfileId}
+                    reviewChainIds={props.reviewChainIds}
                   />
                 </div>
               );
@@ -4380,6 +4398,7 @@ function ScorecardsScreen(props: {
                         allowedLocations={props.allowedLocations}
                         currentUserEmail={props.currentUserEmail}
                         currentUserProfileId={props.currentUserProfileId}
+                        reviewChainIds={props.reviewChainIds}
                       />
                     );
                   })}
@@ -4436,7 +4455,7 @@ function GoalRowMenu({ goalName, currentWeight, onApplyWeight, onRemove }: {
 }
 
 function LiveScorecardCard({
-  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, forcePeriodType, payrollAvailable, empSettings, onSettingsChange, onSubmit, onDeleteGoal, onApprove, onReturn, onSaveGoal, onSaveTargetPair, teamEmployees, isAdmin, companyGoalAccess, allowedDepartments, allowedLocations, currentUserEmail, currentUserProfileId
+  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, forcePeriodType, payrollAvailable, empSettings, onSettingsChange, onSubmit, onDeleteGoal, onApprove, onReturn, onSaveGoal, onSaveTargetPair, teamEmployees, isAdmin, companyGoalAccess, allowedDepartments, allowedLocations, currentUserEmail, currentUserProfileId, reviewChainIds
 }: {
   employee: Employee;
   isoMonth: string;
@@ -4464,6 +4483,7 @@ function LiveScorecardCard({
   allowedLocations?: string[];
   currentUserEmail: string;
   currentUserProfileId?: string;
+  reviewChainIds?: Set<string>;
 }) {
   // --- helpers for computing goalIds from settings + baseGoals ---
   function baseIdsForPeriod(pt: "monthly" | "quarterly"): string[] {
@@ -4641,7 +4661,7 @@ function LiveScorecardCard({
   // read-only review card takes over again.
   const displayedSubmitted = (submittedScorecard && submittedScorecard.reviewStatus !== "returned") ? submittedScorecard : lastSubmitted;
   if (displayedSubmitted) {
-    return <ScorecardCard scorecard={displayedSubmitted} onDeleteGoal={onDeleteGoal} onApprove={onApprove} onReturn={onReturn} onReopen={onReturn} isAdmin={isAdmin} currentUserProfileId={currentUserProfileId} />;
+    return <ScorecardCard scorecard={displayedSubmitted} onDeleteGoal={onDeleteGoal} onApprove={onApprove} onReturn={onReturn} onReopen={onReturn} isAdmin={isAdmin} currentUserProfileId={currentUserProfileId} reviewChainIds={reviewChainIds} />;
   }
   const returnedScorecard = !lastSubmitted && submittedScorecard?.reviewStatus === "returned" ? submittedScorecard : null;
 
@@ -4991,7 +5011,7 @@ function Metric({ label, value, highlight }: { label: string; value: string; hig
   return <div className="metric-card"><div className="mlabel">{label}</div><div className={`mval ${highlight ? "highlight" : ""}`}>{value}</div></div>;
 }
 
-function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, onReopen, isAdmin, currentUserProfileId }: {
+function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, onReopen, isAdmin, currentUserProfileId, reviewChainIds }: {
   scorecard: Scorecard;
   onDeleteGoal: (value: { scorecardId: string; goalName: string }) => void;
   onApprove: (scorecardId: string) => void;
@@ -4999,12 +5019,18 @@ function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, onReopen,
   onReopen?: (scorecardId: string, note: string) => void;
   isAdmin?: boolean;
   currentUserProfileId?: string;
+  reviewChainIds?: Set<string>;
 }) {
   const [open, setOpen] = useState(false);
   const [returning, setReturning] = useState(false);
   const [returnNote, setReturnNote] = useState("");
   const [reopening, setReopening] = useState(false);
   const [reopenNote, setReopenNote] = useState("");
+  // The assigned reviewer can always act; a manager above them in the chain can step in too
+  // (e.g. the assigned reviewer is OOO), since the DB-level RLS already scopes writes by
+  // department/location and doesn't otherwise enforce the specific reviewer_id.
+  const canReview = !!currentUserProfileId && !!scorecard.reviewerId &&
+    (scorecard.reviewerId === currentUserProfileId || !!reviewChainIds?.has(scorecard.reviewerId));
   const achColor = scorecard.weightedAchievement >= 100 ? "#2D6B1A" : "var(--brick)";
   const effectiveHourly = scorecard.hours && scorecard.hours > 0
     ? ((scorecard.baseEarnings + scorecard.bonusAmount) / scorecard.hours).toFixed(2)
@@ -5086,13 +5112,14 @@ function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, onReopen,
         </div>
       )}
 
-      {/* Reviewer actions — only shown to the assigned reviewer */}
-      {scorecard.reviewStatus === "pending_review" && currentUserProfileId && scorecard.reviewerId === currentUserProfileId && (
+      {/* Reviewer actions — shown to the assigned reviewer, or to a manager above them in the
+          chain (e.g. the assigned reviewer is OOO and can't act) */}
+      {scorecard.reviewStatus === "pending_review" && canReview && (
         <div style={{ borderTop: "1px solid var(--border)", background: "var(--muted)", padding: "10px 16px", display: "flex", flexDirection: "column", gap: "8px" }}>
           {!returning ? (
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
               <span style={{ fontSize: "12px", color: "var(--text-muted)", flex: 1 }}>
-                Submitted by {scorecard.submittedBy} · awaiting your review
+                Submitted by {scorecard.submittedBy} · {scorecard.reviewerId === currentUserProfileId ? "awaiting your review" : "awaiting review — approving on behalf of the assigned reviewer"}
               </span>
               <button
                 onClick={() => onApprove(scorecard.id)}
