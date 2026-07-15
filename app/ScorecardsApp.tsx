@@ -2092,12 +2092,17 @@ function PersonalScorecardPanel({
       return deptMatch && (!g.role || !myEmployee.role || g.role === myEmployee.role);
     });
 
-    // 2. Add company goals individually assigned to this employee for this month
+    // 2. Add company goals individually assigned to this employee for this month.
+    // A goal can have more than one assignment row covering the same month (e.g. a
+    // re-assignment that duplicated an existing one) — dedupe by goal id so it only
+    // shows up once regardless of how many assignment rows reference it.
+    const assignedCompanyGoalIds = new Set<string>();
     const assignedCompanyGoals = month
       ? goalAssignments
           .filter((a) => a.employeeName === myEmployee.name && goalActiveForMonth({ startMonth: a.startMonth, endMonth: a.endMonth } as Goal, month))
           .map((a) => allGoals.find((g) => g.id === a.goalId))
           .filter((g): g is Goal => !!g && g.goalTier === "company" && goalActiveForMonth(g, month))
+          .filter((g) => (assignedCompanyGoalIds.has(g.id) ? false : (assignedCompanyGoalIds.add(g.id), true)))
       : [];
     const baseIds = new Set(baseGoals.map((g) => g.id));
     const allBase = [...baseGoals, ...assignedCompanyGoals.filter((g) => !baseIds.has(g.id))];
@@ -3988,14 +3993,19 @@ function ScorecardsScreen(props: {
       return goal.role === employee.role && goal.department === employee.department && (!goal.location || goal.location === employee.location);
     });
 
-    // Company goals individually assigned to this employee that are active for this month
+    // Company goals individually assigned to this employee that are active for this month.
+    // A goal can have more than one assignment row covering the same month (e.g. a
+    // re-assignment that duplicated an existing one) — dedupe by goal id so it only
+    // shows up once regardless of how many assignment rows reference it.
+    const assignedCompanyGoalIds = new Set<string>();
     const assignedCompanyGoals = props.goalAssignments
       .filter((a) =>
         a.employeeName === employee.name &&
         goalActiveForMonth({ startMonth: a.startMonth, endMonth: a.endMonth } as Goal, month)
       )
       .map((a) => props.allGoals.find((g) => g.id === a.goalId))
-      .filter((g): g is Goal => !!g && g.goalTier === "company" && goalActiveForMonth(g, month));
+      .filter((g): g is Goal => !!g && g.goalTier === "company" && goalActiveForMonth(g, month))
+      .filter((g) => (assignedCompanyGoalIds.has(g.id) ? false : (assignedCompanyGoalIds.add(g.id), true)));
 
     // Deduplicate — avoid adding a goal already present via regular matching (unlikely for company goals but safe)
     const alreadyIncluded = new Set(regularGoals.map((g) => g.id));
