@@ -3073,9 +3073,13 @@ function GoalsScreen(props: {
       const [ly, lm] = lockingISO.split("-").map(Number);
       const periodEnd = new Date(ly, lm, 0);
       const daysSince = Math.floor((now.getTime() - periodEnd.getTime()) / (1000 * 60 * 60 * 24));
-      isGoalLocked = daysSince > 14;
+      isGoalLocked = daysSince > 14 && !props.isAdmin;
       isActualLocked = daysSince > 21;
-      const goalsMsg = isGoalLocked ? "goals locked" : `goals editable for ${14 - daysSince} more day${14 - daysSince === 1 ? "" : "s"}`;
+      const goalsMsg = isGoalLocked
+        ? "goals locked"
+        : daysSince > 14
+          ? "goals editable (admin override)"
+          : `goals editable for ${14 - daysSince} more day${14 - daysSince === 1 ? "" : "s"}`;
       const actualsMsg = isActualLocked ? "actuals locked" : `actuals editable for ${21 - daysSince} more day${21 - daysSince === 1 ? "" : "s"}`;
       monthStatus = isGoalLocked && isActualLocked
         ? `🔒 Past ${periodLabel} — locked`
