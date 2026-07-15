@@ -5011,11 +5011,13 @@ function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, onReopen,
     : null;
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card">
-      <button
-        type="button"
+      <div
+        role="button"
+        tabIndex={0}
         data-testid={`scorecard-card-${scorecard.id}`}
         onClick={() => setOpen(!open)}
-        className="flex w-full items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40"
+        onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); setOpen(!open); } }}
+        className="flex w-full cursor-pointer items-center gap-3 px-4 py-3 text-left transition-colors hover:bg-muted/40"
       >
         <ChevronRight className={`size-4 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-90" : ""}`} />
         <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-secondary text-[11px] font-semibold text-foreground">{dashInitials(scorecard.employeeName)}</span>
@@ -5054,7 +5056,7 @@ function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, onReopen,
             </button>
           )}
         </span>
-      </button>
+      </div>
 
       {/* Reopen an approved/submitted card — admin-only escape hatch for correcting a scorecard
           that's already done, e.g. a bonus miscalculation discovered after the fact. Sends it
