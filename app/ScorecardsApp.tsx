@@ -4995,7 +4995,6 @@ function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, onReopen,
   const effectiveHourly = scorecard.hours && scorecard.hours > 0
     ? ((scorecard.baseEarnings + scorecard.bonusAmount) / scorecard.hours).toFixed(2)
     : null;
-  const weight = scorecard.goals.length ? (100 / scorecard.goals.length).toFixed(1) : "0";
   return (
     <div className="overflow-hidden rounded-lg border border-border bg-card">
       <button
@@ -5160,7 +5159,7 @@ function ScorecardCard({ scorecard, onDeleteGoal, onApprove, onReturn, onReopen,
                   </TableCell>
                   <TableCell className="text-center tabular-nums">{goal.target ?? "—"}</TableCell>
                   <TableCell className="text-center tabular-nums">{goal.min ?? "—"}</TableCell>
-                  <TableCell className="text-center tabular-nums">{weight}%</TableCell>
+                  <TableCell className="text-center tabular-nums">{goal.weight.toFixed(1)}%</TableCell>
                   <TableCell className="text-center tabular-nums">{goal.actual ?? "—"}</TableCell>
                   <TableCell className="text-center font-semibold tabular-nums" style={{ color: goal.metMin ? (goal.achievement >= 100 ? "#2D6B1A" : "var(--brick)") : "#9B2C2C" }}>
                     {goal.metMin ? `${goal.achievement.toFixed(1)}%` : "Below min"}
