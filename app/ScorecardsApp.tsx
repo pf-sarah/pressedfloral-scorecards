@@ -1394,6 +1394,25 @@ export default function ScorecardsApp() {
     showToast(isCurrentlyInactive ? "Goal activated for this month" : "Goal deactivated for this month");
   }
 
+  async function saveProrateDay(employeeName: string, isoMonth: string, day: number | null) {
+    const period = formatMonthLabel(isoMonth);
+    const key = `__prorate_day__|${employeeName}`;
+    const nextActuals = { ...(appData.actuals[period] || {}), [key]: day };
+    if (!isFixture && sb) {
+      const result = await sb.from("actuals").upsert({
+        period,
+        goal_tier: "__meta__",
+        location: null,
+        department: null,
+        goal_name: key,
+        actual_value: day,
+      }, { onConflict: "period,goal_tier,location,department,goal_name" });
+      if (result.error) { showSupabaseError(result.error, "Proration date could not be saved."); return; }
+    }
+    setAppData((prev) => ({ ...prev, actuals: { ...prev.actuals, [period]: nextActuals } }));
+    persistActuals(period, nextActuals);
+  }
+
   async function saveActual(goal: Goal, value: string, periodOverride?: string) {
     const period = periodOverride ?? formatMonthLabel(bankMonth);
     const key = actualKey(goal);
@@ -1753,6 +1772,7 @@ export default function ScorecardsApp() {
                 onScorecardSettingsChange={saveEmployeeScorecardSettings}
                 onSaveGoal={saveGoal}
                 onSaveTargetPair={(goal, period, target, min) => saveMonthTargetPair(goal, period, target, min)}
+                onSaveProrate={saveProrateDay}
                 isAdmin={effectiveProfile?.role === "admin"}
                 companyGoalAccess={resolveCompanyGoalAccess(effectiveProfile)}
                 allowedDepartments={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.departments || [])}
@@ -3921,6 +3941,7 @@ function ScorecardsScreen(props: {
   onScorecardSettingsChange: (employeeName: string, periodType: "monthly" | "quarterly", patch: { excludedGoalIds: string[]; addedGoalIds: string[]; weightOverrides: Record<string, number> }) => void;
   onSaveGoal: (goal: Goal) => Promise<Goal | null>;
   onSaveTargetPair: (goal: Goal, period: string, target: string, min: string) => void;
+  onSaveProrate: (employeeName: string, isoMonth: string, day: number | null) => void;
   isAdmin?: boolean;
   companyGoalAccess?: boolean;
   allowedDepartments?: string[];
@@ -4267,6 +4288,7 @@ function ScorecardsScreen(props: {
                     onReturn={props.onReturnScorecard}
                     onSaveGoal={props.onSaveGoal}
                     onSaveTargetPair={props.onSaveTargetPair}
+                    onSaveProrate={props.onSaveProrate}
                     teamEmployees={teamEmployees}
                     isAdmin={props.isAdmin}
                     companyGoalAccess={props.companyGoalAccess}
@@ -4373,6 +4395,7 @@ function ScorecardsScreen(props: {
                         onReturn={props.onReturnScorecard}
                         onSaveGoal={props.onSaveGoal}
                         onSaveTargetPair={props.onSaveTargetPair}
+                        onSaveProrate={props.onSaveProrate}
                         teamEmployees={mTeam}
                         isAdmin={props.isAdmin}
                         companyGoalAccess={props.companyGoalAccess}
@@ -4436,7 +4459,7 @@ function GoalRowMenu({ goalName, currentWeight, onApplyWeight, onRemove }: {
 }
 
 function LiveScorecardCard({
-  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, forcePeriodType, payrollAvailable, empSettings, onSettingsChange, onSubmit, onDeleteGoal, onApprove, onReturn, onSaveGoal, onSaveTargetPair, teamEmployees, isAdmin, companyGoalAccess, allowedDepartments, allowedLocations, currentUserEmail, currentUserProfileId
+  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, forcePeriodType, payrollAvailable, empSettings, onSettingsChange, onSubmit, onDeleteGoal, onApprove, onReturn, onSaveGoal, onSaveTargetPair, onSaveProrate, teamEmployees, isAdmin, companyGoalAccess, allowedDepartments, allowedLocations, currentUserEmail, currentUserProfileId
 }: {
   employee: Employee;
   isoMonth: string;
@@ -4457,6 +4480,7 @@ function LiveScorecardCard({
   onReturn: (scorecardId: string, note: string) => void;
   onSaveGoal: (goal: Goal) => Promise<Goal | null>;
   onSaveTargetPair: (goal: Goal, period: string, target: string, min: string) => void;
+  onSaveProrate: (employeeName: string, isoMonth: string, day: number | null) => void;
   teamEmployees: Employee[];
   isAdmin?: boolean;
   companyGoalAccess?: boolean;
@@ -4490,6 +4514,17 @@ function LiveScorecardCard({
   const [open, setOpen] = useState(false);
   const [creatingGoal, setCreatingGoal] = useState<Goal | null>(null);
   const effectivePeriodType = forcePeriodType ?? globalPeriodType;
+
+  // Proration: optional last-day date input, stored as day-of-month in actuals
+  const prorateDayKey = `__prorate_day__|${employee.name}`;
+  const storedProrateDay = periodActuals[prorateDayKey];
+  const [lastDayInput, setLastDayInput] = useState<string>(() => {
+    if (storedProrateDay != null) {
+      const d = String(Math.round(storedProrateDay)).padStart(2, "0");
+      return `${isoMonth}-${d}`;
+    }
+    return "";
+  });
   const [cardPeriodType, setCardPeriodType] = useState<"monthly" | "quarterly">(effectivePeriodType);
   const initSettings = settingsForPeriod(effectivePeriodType);
   const [goalIds, setGoalIds] = useState<string[]>(() => computeGoalIds(globalPeriodType, initSettings));
@@ -4684,6 +4719,14 @@ function LiveScorecardCard({
 
   const liveScorecard = buildScorecard({ employee: activeEmployee, month: activeMonth, periodType: cardPeriodType, goals: currentGoals, submittedBy: currentUserEmail, payrollAvailable: activePayrollAvailable });
 
+  // Proration factor — 1 unless a last day is set
+  const [py, pm] = isoMonth.split("-").map(Number);
+  const totalDaysInMonth = (py && pm) ? new Date(py, pm, 0).getDate() : 30;
+  const lastDayDate = lastDayInput ? new Date(lastDayInput + "T12:00:00") : null;
+  const proratedDays = lastDayDate ? lastDayDate.getDate() : null;
+  const prorationFactor = proratedDays != null ? proratedDays / totalDaysInMonth : 1;
+  const proratedBonus = liveScorecard.bonusAmount * prorationFactor;
+
   // A goal is missing a target only when neither a per-month override nor the goal default provides
   // a non-zero value. scTarget/scMin already incorporate the fallback to goalValue/minValue.
   const hasNoTarget = currentGoals.some((g) => !g.scTarget);
@@ -4726,9 +4769,11 @@ function LiveScorecardCard({
                 : <span className="block text-[13px] font-medium text-muted-foreground">Pending</span>}
             </span>
             <span className="min-w-[5rem] text-right">
-              <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">Est. Bonus</span>
+              <span className="block text-[10px] uppercase tracking-wide text-muted-foreground">
+                Est. Bonus{prorationFactor < 1 ? ` (${(prorationFactor * 100).toFixed(0)}%)` : ""}
+              </span>
               {hasAnyActual
-                ? <span className="block text-[15px] font-semibold tabular-nums text-primary">{formatCurrency(liveScorecard.bonusAmount)}</span>
+                ? <span className="block text-[15px] font-semibold tabular-nums text-primary">{formatCurrency(proratedBonus)}</span>
                 : <span className="block text-[13px] font-medium text-muted-foreground">Pending</span>}
             </span>
           </>
@@ -4754,7 +4799,7 @@ function LiveScorecardCard({
 
       {open && (
         <>
-          <div className="flex flex-wrap gap-6 border-t border-border bg-muted/30 px-4 py-2.5">
+          <div className="flex flex-wrap items-end gap-6 border-t border-border bg-muted/30 px-4 py-2.5">
             <div>
               <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">{cardPeriodType === "quarterly" ? `Quarterly earnings · ${quarterKey}` : "Base earnings"}</div>
               <div className="text-[13px] font-semibold tabular-nums">{formatCurrency(liveScorecard.baseEarnings)}</div>
@@ -4765,6 +4810,30 @@ function LiveScorecardCard({
                 <div className="text-[13px] font-semibold tabular-nums">{activeEmployee.hoursWorked.toFixed(2)}</div>
               </div>
             ) : null}
+            <div onClick={(e) => e.stopPropagation()}>
+              <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Last day (optional)</div>
+              <Input
+                type="date"
+                value={lastDayInput}
+                min={`${isoMonth}-01`}
+                max={`${isoMonth}-${String(totalDaysInMonth).padStart(2, "0")}`}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  setLastDayInput(val);
+                  const day = val ? new Date(val + "T12:00:00").getDate() : null;
+                  onSaveProrate(employee.name, isoMonth, day);
+                }}
+                className="h-7 w-[140px] text-[12px]"
+              />
+            </div>
+            {prorationFactor < 1 && (
+              <div>
+                <div className="text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Proration</div>
+                <div className="text-[13px] font-semibold tabular-nums text-primary">
+                  {proratedDays}/{totalDaysInMonth} days · {(prorationFactor * 100).toFixed(1)}% · {formatCurrency(proratedBonus)}
+                </div>
+              </div>
+            )}
           </div>
 
           {hasNoTarget && (
@@ -4962,7 +5031,13 @@ function LiveScorecardCard({
               className="ml-auto"
               disabled={isCurrentMonth || isFutureMonth || hasNoTarget || currentGoals.length === 0 || !weightsValid || hasQuarterlyMismatch}
               title={isCurrentMonth || isFutureMonth ? "Scorecards can only be submitted for past months" : hasNoTarget ? "Set goal values and minimums first" : hasUnsetWeights ? "Assign goal weights in Goals & Actuals first" : !weightsValid ? "Weights must add up to 100%" : hasQuarterlyMismatch ? "Remove quarterly goals before submitting a monthly scorecard" : undefined}
-              onClick={() => { onSubmit(liveScorecard); setLastSubmitted(liveScorecard); }}
+              onClick={() => {
+                const submitScorecard = prorationFactor < 1
+                  ? { ...liveScorecard, bonusAmount: Math.round(proratedBonus * 100) / 100 }
+                  : liveScorecard;
+                onSubmit(submitScorecard);
+                setLastSubmitted(submitScorecard);
+              }}
             >
               Submit scorecard
             </Button>
