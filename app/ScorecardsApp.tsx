@@ -14,6 +14,7 @@ import { downloadCsv, parseRipplingEmployees, scorecardsToCsv, toCsv } from "../
 import { fixtureData, fixtureManager, fixtureMonth, fixturePeriod } from "../lib/fixtures";
 import { currentMonthValue, formatMonthLabel } from "../lib/periods";
 import { getReportingTree } from "../lib/reportingTree";
+import { computeScorecardCompletion, type ScorecardCompletion, type ScorecardCompletionStatus } from "../lib/scorecardCompletion";
 import { baseEarnings, buildScorecard, calculateGoal, formatCurrency, formatNumber, sumQuarterlyEmployee, type EditableGoal } from "../lib/score";
 import {
   hydrateFromLocalStorage,
@@ -1891,6 +1892,9 @@ export default function ScorecardsApp() {
               rippling={appData.rippling}
               scorecards={appData.scorecards}
               allEmployees={allRipplingEmployees}
+              goalAssignments={appData.goalAssignments}
+              employeeScorecardSettings={appData.employeeScorecardSettings}
+              employeePeriodTypes={employeePeriodTypes}
               onGoToScorecards={() => mountScreen("scorecard")}
               onSaveTarget={saveMonthTarget}
               onSaveCurrentTargetPair={(goal, target, min) => {
@@ -3989,6 +3993,8 @@ function ScorecardsScreen(props: {
   const [filterLocations, setFilterLocations] = useState<string[]>([]);
   const [globalPeriodType, setGlobalPeriodType] = useState<"monthly" | "quarterly">("monthly");
   const [hideCompleted, setHideCompleted] = useState(false);
+  const [viewMode, setViewMode] = useState<"cards" | "progress">("cards");
+  const [progressStatusFilter, setProgressStatusFilter] = useState<ScorecardCompletionStatus[]>([]);
 
   // Single-month mode = exactly one month selected → live draft cards
   // Multi/all mode = 0 or 2+ months → live draft cards per month, grouped by month
@@ -4159,6 +4165,14 @@ function ScorecardsScreen(props: {
 
   return (
     <div className="screen active">
+      <section style={{ background: "transparent", border: "none", boxShadow: "none", padding: 0, marginBottom: 8 }}>
+        <Tabs value={viewMode} onValueChange={(v) => setViewMode(v as "cards" | "progress")}>
+          <TabsList className="h-8">
+            <TabsTrigger value="cards" className="px-3 text-[12px] data-[state=active]:bg-card data-[state=active]:text-foreground">Cards</TabsTrigger>
+            <TabsTrigger value="progress" data-testid="scorecard-progress-view" className="px-3 text-[12px] data-[state=active]:bg-card data-[state=active]:text-foreground">Progress</TabsTrigger>
+          </TabsList>
+        </Tabs>
+      </section>
       <section style={{ padding: 0 }} className="overflow-hidden">
         <div className="flex flex-wrap items-center gap-2 p-2.5">
           <Tabs value={globalPeriodType} onValueChange={(v) => {
@@ -4254,6 +4268,16 @@ function ScorecardsScreen(props: {
             selected={filterEmployees}
             onChange={setFilterEmployees}
           />
+          {viewMode === "progress" && (
+            <MultiSelectDropdown
+              label="All statuses"
+              emptyLabel="All statuses"
+              triggerClassName="w-auto min-w-[10rem]"
+              options={PROGRESS_STATUS_ORDER.map((s) => ({ value: s, label: PROGRESS_STATUS_BADGE[s].label }))}
+              selected={progressStatusFilter}
+              onChange={(v) => setProgressStatusFilter(v as ScorecardCompletionStatus[])}
+            />
+          )}
           <Separator orientation="vertical" className="mx-0.5 hidden h-5 sm:block" />
           <label className="flex shrink-0 cursor-pointer items-center gap-1.5 text-[12px] text-muted-foreground" title="Hides scorecards that are Approved or Submitted with no reviewer — i.e. already finalized">
             <Checkbox checked={hideCompleted} onCheckedChange={(v) => setHideCompleted(v === true)} />
@@ -4262,7 +4286,27 @@ function ScorecardsScreen(props: {
         </div>
       </section>
 
-      {singleMonthMode ? (
+      {viewMode === "progress" ? (
+        singleMonthMode ? (
+          <ScorecardProgressTable
+            employees={filteredEmployees}
+            periodLabel={periodLabel}
+            isoMonth={selectedMonth}
+            periodType={globalPeriodType}
+            scorecards={props.scorecards}
+            allGoals={props.allGoals}
+            goalAssignments={props.goalAssignments}
+            periodActuals={periodActuals}
+            employeeScorecardSettings={props.employeeScorecardSettings}
+            hideCompleted={hideCompleted}
+            statusFilter={progressStatusFilter}
+          />
+        ) : (
+          <div className="no-goals-msg" style={{ display: "block" }}>
+            Select a single {globalPeriodType === "quarterly" ? "quarter" : "month"} above to see completion progress.
+          </div>
+        )
+      ) : singleMonthMode ? (
         <section style={{ background: "transparent", border: "none", boxShadow: "none", padding: 0 }}>
           <div className="flex flex-wrap items-baseline gap-x-2 gap-y-0.5 px-0.5 pb-3 pt-1">
             <h2 className="text-[13px] font-semibold text-foreground">{filteredEmployees.length} team member{filteredEmployees.length !== 1 ? "s" : ""}</h2>
@@ -4446,6 +4490,139 @@ function ScorecardsScreen(props: {
             })}
           </div>
         </section>
+      )}
+    </div>
+  );
+}
+
+const PROGRESS_STATUS_BADGE: Record<ScorecardCompletionStatus, { label: string; className?: string; style?: React.CSSProperties }> = {
+  no_scorecard_required: { label: "Not eligible", className: "text-muted-foreground" },
+  not_started: { label: "Not started" },
+  in_progress: { label: "In progress", style: { background: "#FEF3C7", color: "#92400E", borderColor: "#FDE68A" } },
+  ready: { label: "Ready to submit", style: { background: "#DCFCE7", color: "#166534", borderColor: "#BBF7D0" } },
+  pending_review: { label: "Pending Review", style: { background: "#FEF3C7", color: "#92400E", borderColor: "#FDE68A" } },
+  approved: { label: "Approved", style: { background: "#DCFCE7", color: "#166534", borderColor: "#BBF7D0" } },
+  returned: { label: "Returned", style: { background: "#FEE2E2", color: "#991B1B", borderColor: "#FECACA" } },
+};
+
+const PROGRESS_STATUS_ORDER: ScorecardCompletionStatus[] = [
+  "not_started", "in_progress", "ready", "pending_review", "approved", "returned", "no_scorecard_required"
+];
+
+function ProgressStatusBadge({ status }: { status: ScorecardCompletionStatus }) {
+  const { label, className, style } = PROGRESS_STATUS_BADGE[status];
+  return <Badge variant="secondary" className={`shrink-0 font-medium ${className || ""}`} style={style}>{label}</Badge>;
+}
+
+// Rollup view of scorecard completion across every employee in a manager's scope (any depth of
+// their reporting tree, via scopedEmployeesForProfile) for the currently selected single period.
+// Read-only — reuses computeScorecardCompletion (lib/scorecardCompletion.ts) instead of mounting
+// a LiveScorecardCard per employee.
+function ScorecardProgressTable({
+  employees, periodLabel, isoMonth, periodType, scorecards, allGoals, goalAssignments, periodActuals, employeeScorecardSettings, hideCompleted, statusFilter
+}: {
+  employees: Employee[];
+  periodLabel: string;
+  isoMonth: string;
+  periodType: "monthly" | "quarterly";
+  scorecards: Scorecard[];
+  allGoals: Goal[];
+  goalAssignments: GoalAssignment[];
+  periodActuals: ActualsByKey;
+  employeeScorecardSettings: EmployeeScorecardSettings[];
+  hideCompleted: boolean;
+  statusFilter: ScorecardCompletionStatus[];
+}) {
+  const rows = useMemo(() => {
+    return employees.map((employee) => {
+      const submittedScorecard = scorecards.find((sc) => sc.employeeName === employee.name && sc.scorecardMonth === periodLabel);
+      const completion = computeScorecardCompletion({
+        employee, isoMonth, periodType, allGoals, goalAssignments, actuals: periodActuals, employeeScorecardSettings, submittedScorecard
+      });
+      return { employee, completion };
+    });
+  }, [employees, periodLabel, isoMonth, periodType, scorecards, allGoals, goalAssignments, periodActuals, employeeScorecardSettings]);
+
+  const counts = rows.reduce((acc, r) => {
+    acc[r.completion.status] = (acc[r.completion.status] || 0) + 1;
+    return acc;
+  }, {} as Record<ScorecardCompletionStatus, number>);
+
+  // "Expected" excludes employees who fell below the minimum-hours threshold this period —
+  // same population the Dashboard's Submitted KPI counts against.
+  const eligibleCount = rows.length - (counts.no_scorecard_required || 0);
+  const doneCount = (counts.approved || 0) + (counts.pending_review || 0) + (counts.returned || 0);
+  const donePct = eligibleCount > 0 ? Math.round((doneCount / eligibleCount) * 100) : 0;
+
+  const visibleRows = rows
+    .filter((r) => !hideCompleted || (r.completion.status !== "approved" && r.completion.status !== "no_scorecard_required"))
+    .filter((r) => statusFilter.length === 0 || statusFilter.includes(r.completion.status));
+
+  // Grouped by immediate supervisor so a manager auditing a multi-level tree can see at a glance
+  // which branch is behind, mirroring the month-grouping headers used in the Cards view above.
+  const groups = useMemo(() => {
+    const byManager = new Map<string, typeof visibleRows>();
+    for (const row of visibleRows) {
+      const key = row.employee.manager || "No manager on file";
+      if (!byManager.has(key)) byManager.set(key, []);
+      byManager.get(key)!.push(row);
+    }
+    return Array.from(byManager.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([manager, groupRows]) => [manager, [...groupRows].sort((a, b) => a.employee.name.localeCompare(b.employee.name))] as const);
+  }, [visibleRows]);
+
+  return (
+    <div className="flex flex-col gap-3">
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
+        <KpiTile label="Submitted" value={`${doneCount}/${eligibleCount}`} sub={periodLabel}>
+          <Progress value={donePct} className="mt-2.5" />
+        </KpiTile>
+        <KpiTile label="Not started" value={counts.not_started || 0} sub="no goals attached" />
+        <KpiTile label="In progress" value={counts.in_progress || 0} sub="weights don't total 100%" />
+        <KpiTile label="Ready to submit" value={counts.ready || 0} sub="100% weighted, unsubmitted" />
+      </div>
+
+      {groups.length === 0 ? (
+        <div className="no-goals-msg" style={{ display: "block" }}>No employees match the current filter.</div>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
+          <div className="overflow-x-auto">
+            <Table className="text-[12px] min-w-[720px]">
+              <TableHeader className="bg-muted/40 [&_th]:h-8 [&_th]:px-2.5 [&_th]:text-[10px] [&_th]:font-semibold [&_th]:uppercase [&_th]:tracking-wide [&_th]:text-muted-foreground">
+                <TableRow className="hover:bg-transparent">
+                  <TableHead>Employee</TableHead>
+                  <TableHead>Department</TableHead>
+                  <TableHead>Location</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Weight</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody className="[&_td]:px-2.5 [&_td]:py-2">
+                {groups.map(([manager, groupRows]) => (
+                  <React.Fragment key={manager}>
+                    <TableRow className="hover:bg-transparent">
+                      <TableCell colSpan={5} className="bg-muted/20 py-1.5 text-[10px] font-semibold uppercase tracking-wide text-muted-foreground">
+                        Reports to {manager} ({groupRows.length})
+                      </TableCell>
+                    </TableRow>
+                    {groupRows.map(({ employee, completion }) => (
+                      <TableRow key={employee.id || employee.name}>
+                        <TableCell className="font-medium text-foreground">{employee.name}</TableCell>
+                        <TableCell className="text-muted-foreground">{employee.department}</TableCell>
+                        <TableCell className="text-muted-foreground">{employee.location}</TableCell>
+                        <TableCell><ProgressStatusBadge status={completion.status} /></TableCell>
+                        <TableCell className="text-right tabular-nums">
+                          {completion.goalCount === 0 ? <span className="text-[var(--text-faint)]">—</span> : `${completion.totalWeight}% / 100%`}
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </React.Fragment>
+                ))}
+              </TableBody>
+            </Table>
+          </div>
+        </div>
       )}
     </div>
   );
@@ -6099,6 +6276,30 @@ function TodoIndividualRow({ employee, goals, done, onGoToScorecards }: {
   );
 }
 
+// Row for the "scorecard readiness" to-do — whether an employee's scorecard has goals
+// attached and weighted to 100%, independent of whether it's been submitted yet.
+function TodoScorecardReadinessRow({ employee, completion, onGoToScorecards }: {
+  employee: Employee;
+  completion: ScorecardCompletion;
+  onGoToScorecards: () => void;
+}) {
+  const done = completion.status !== "not_started" && completion.status !== "in_progress";
+  return (
+    <div className={`flex flex-wrap items-center gap-x-2 gap-y-1.5 border-b border-border py-2.5 last:border-b-0 ${done ? "opacity-55" : ""}`}>
+      {done ? <CheckCircle2 className="size-4 shrink-0 text-[var(--sage-dark)]" /> : <Circle className="size-4 shrink-0 text-[var(--text-faint)]" />}
+      <span className="text-[13px] font-medium text-foreground">{employee.name}</span>
+      <GoalScopeTags location={employee.location} department={employee.department} />
+      <ProgressStatusBadge status={completion.status} />
+      <span className="text-[12px] text-muted-foreground tabular-nums">
+        {completion.goalCount === 0 ? "No goals attached" : `${completion.totalWeight}% / 100% weighted`}
+      </span>
+      {!done && (
+        <Button size="sm" variant="outline" className="ml-auto h-8" onClick={onGoToScorecards}>Go to scorecard</Button>
+      )}
+    </div>
+  );
+}
+
 function TodoNumberField({ label, value, onChange }: { label: string; value: string; onChange: (value: string) => void }) {
   return (
     <label className="flex flex-col gap-0.5">
@@ -6122,6 +6323,9 @@ function TodosScreen({
   rippling,
   scorecards,
   allEmployees,
+  goalAssignments,
+  employeeScorecardSettings,
+  employeePeriodTypes,
   onSaveTarget,
   onSaveTargetPair,
   onSaveCurrentTargetPair,
@@ -6142,6 +6346,9 @@ function TodosScreen({
   rippling: Record<string, Employee[]>;
   scorecards: Scorecard[];
   allEmployees: Employee[];
+  goalAssignments: GoalAssignment[];
+  employeeScorecardSettings: EmployeeScorecardSettings[];
+  employeePeriodTypes: Record<string, "monthly" | "quarterly">;
   onSaveTarget: (goal: Goal, period: string, type: "target" | "min", value: string) => void;
   onSaveTargetPair: (goal: Goal, target: string, min: string) => void;
   onSaveCurrentTargetPair: (goal: Goal, target: string, min: string) => void;
@@ -6158,6 +6365,8 @@ function TodosScreen({
   const [showCompletedTargetsQ, setShowCompletedTargetsQ] = useState(false);
   const [showCompletedCurrentTargets, setShowCompletedCurrentTargets] = useState(false);
   const [showCompletedCurrentTargetsQ, setShowCompletedCurrentTargetsQ] = useState(false);
+  const [showCompletedReadiness, setShowCompletedReadiness] = useState(false);
+  const [showCompletedReadinessQ, setShowCompletedReadinessQ] = useState(false);
   type MonthKey = "prev" | "current" | "next";
   const [selectedMonths, setSelectedMonths] = useState<Set<MonthKey>>(new Set());
   const [selectedQuarters, setSelectedQuarters] = useState<Set<string>>(new Set());
@@ -6168,7 +6377,7 @@ function TodosScreen({
     setSelectedQuarters((prev) => { const s = new Set(prev); s.has(q) ? s.delete(q) : s.add(q); return s; });
   }
   const [assignFilter, setAssignFilter] = useState<"mine" | "managers">("mine");
-  type MgrKey = "admin" | "current" | "next" | "adminQ" | "currentQ" | "nextQ" | "individual" | "individualQ";
+  type MgrKey = "admin" | "current" | "next" | "adminQ" | "currentQ" | "nextQ" | "individual" | "individualQ" | "scorecardReady" | "scorecardReadyQ";
   const [mgrShowCompleted, setMgrShowCompleted] = useState<Record<string, Record<MgrKey, boolean>>>({});
   const getMgrCompleted = (id: string, key: MgrKey) => mgrShowCompleted[id]?.[key] ?? false;
   const toggleMgrCompleted = (id: string, key: MgrKey) =>
@@ -6260,6 +6469,35 @@ function TodosScreen({
   const quarterlyIndividualRows = workQuarterEnded ? individualRowsFor(ownIndividualEmployees, "quarterly", workMonth, workQuarterLabel) : [];
   const monthlyIndividualDone = monthlyIndividualRows.filter((r) => r.done).length;
   const quarterlyIndividualDone = quarterlyIndividualRows.filter((r) => r.done).length;
+
+  // Scorecard readiness — a scorecard is due "ready" (goals attached, weighted to 100%) on the
+  // 1st of the period it's for, independent of submission (which can only happen once the period
+  // is over). Reuses computeScorecardCompletion (lib/scorecardCompletion.ts), the same engine
+  // behind the Team Scorecards Progress view, so status here always matches that view.
+  function readinessPeriodTypeFor(employee: Employee): "monthly" | "quarterly" {
+    return employeePeriodTypes[employee.name] === "quarterly" ? "quarterly" : "monthly";
+  }
+  type ReadinessRow = { employee: Employee; completion: ScorecardCompletion };
+  function scorecardReadinessRowsFor(employeesList: Employee[], periodType: "monthly" | "quarterly", isoMonth: string, periodLabel: string): ReadinessRow[] {
+    return employeesList
+      .map((employee) => {
+        const submittedScorecard = scorecards.find((sc) => sc.employeeName === employee.name && sc.scorecardMonth === periodLabel);
+        const completion = computeScorecardCompletion({
+          employee, isoMonth, periodType, allGoals, goalAssignments, actuals: currentActuals, employeeScorecardSettings, submittedScorecard
+        });
+        return { employee, completion };
+      })
+      .filter((row) => row.completion.status !== "no_scorecard_required");
+  }
+  const monthlyReadinessRows = scorecardReadinessRowsFor(
+    ownIndividualEmployees.filter((e) => readinessPeriodTypeFor(e) === "monthly"), "monthly", currentMonthValue, currentMonthLabel
+  );
+  const quarterlyReadinessRows = scorecardReadinessRowsFor(
+    ownIndividualEmployees.filter((e) => readinessPeriodTypeFor(e) === "quarterly"), "quarterly", currentMonthValue, currentQuarterLabel
+  );
+  const readinessDone = (r: ReadinessRow) => r.completion.status !== "not_started" && r.completion.status !== "in_progress";
+  const monthlyReadinessDone = monthlyReadinessRows.filter(readinessDone).length;
+  const quarterlyReadinessDone = quarterlyReadinessRows.filter(readinessDone).length;
 
   // All company/dept goals with targets set for workMonth — split monthly vs quarterly
   const actualsGoalsBase = goals.filter((g) =>
@@ -6418,7 +6656,9 @@ function TodosScreen({
   const nextQuarterlySectionDone = nextQuarterlyGoals.length > 0 && nextQTargetDone === nextQuarterlyGoals.length;
   const monthlyIndividualSectionDone = monthlyIndividualRows.length > 0 && monthlyIndividualDone === monthlyIndividualRows.length;
   const quarterlyIndividualSectionDone = quarterlyIndividualRows.length > 0 && quarterlyIndividualDone === quarterlyIndividualRows.length;
-  const anyMineSectionComplete = prevMonthlySectionDone || prevQuarterlySectionDone || nextMonthlySectionDone || nextQuarterlySectionDone || monthlyIndividualSectionDone || quarterlyIndividualSectionDone;
+  const monthlyReadinessSectionDone = monthlyReadinessRows.length > 0 && monthlyReadinessDone === monthlyReadinessRows.length;
+  const quarterlyReadinessSectionDone = quarterlyReadinessRows.length > 0 && quarterlyReadinessDone === quarterlyReadinessRows.length;
+  const anyMineSectionComplete = prevMonthlySectionDone || prevQuarterlySectionDone || nextMonthlySectionDone || nextQuarterlySectionDone || monthlyIndividualSectionDone || quarterlyIndividualSectionDone || monthlyReadinessSectionDone || quarterlyReadinessSectionDone;
 
   const nothingSelected = selectedMonths.size === 0 && selectedQuarters.size === 0;
   const showPrevSection = nothingSelected || selectedMonths.has("prev");
@@ -6643,6 +6883,47 @@ function TodosScreen({
             </TodoGroupCard>
           )}
 
+          {showCurrentSection && monthlyReadinessRows.length > 0 && (!monthlyReadinessSectionDone || showCompletedSections) && (
+            <TodoGroupCard
+              title={`Team scorecards ready · ${currentMonthLabel}`}
+              meta={<>{monthlyReadinessDone}/{monthlyReadinessRows.length} ready · Goals added, weighted to 100% · Due {currentTargetDue.label} <DaysBadge diffDays={currentTargetDue.diffDays} /></>}
+              done={monthlyReadinessDone}
+              total={monthlyReadinessRows.length}
+              showCompleted={showCompletedReadiness}
+              onToggleCompleted={() => setShowCompletedReadiness((v) => !v)}
+            >
+              {monthlyReadinessRows.filter((r) => showCompletedReadiness || !readinessDone(r)).length === 0 ? (
+                <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All team scorecards ready</div>
+              ) : (
+                monthlyReadinessRows
+                  .filter((r) => showCompletedReadiness || !readinessDone(r))
+                  .map((row) => (
+                    <TodoScorecardReadinessRow key={row.employee.id || row.employee.name} employee={row.employee} completion={row.completion} onGoToScorecards={onGoToScorecards} />
+                  ))
+              )}
+            </TodoGroupCard>
+          )}
+          {quarterlyReadinessRows.length > 0 && showQuarterlyCard(currentQuarterLabel) && (!quarterlyReadinessSectionDone || showCompletedSections) && (
+            <TodoGroupCard
+              title={`Team scorecards ready · ${currentQuarterLabel}`}
+              meta={<>{quarterlyReadinessDone}/{quarterlyReadinessRows.length} ready · Goals added, weighted to 100% · Due {currentQuarterTargetDue.label} <DaysBadge diffDays={currentQuarterTargetDue.diffDays} /></>}
+              done={quarterlyReadinessDone}
+              total={quarterlyReadinessRows.length}
+              showCompleted={showCompletedReadinessQ}
+              onToggleCompleted={() => setShowCompletedReadinessQ((v) => !v)}
+            >
+              {quarterlyReadinessRows.filter((r) => showCompletedReadinessQ || !readinessDone(r)).length === 0 ? (
+                <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All team scorecards ready</div>
+              ) : (
+                quarterlyReadinessRows
+                  .filter((r) => showCompletedReadinessQ || !readinessDone(r))
+                  .map((row) => (
+                    <TodoScorecardReadinessRow key={row.employee.id || row.employee.name} employee={row.employee} completion={row.completion} onGoToScorecards={onGoToScorecards} />
+                  ))
+              )}
+            </TodoGroupCard>
+          )}
+
           {showNextSection && nextMonthlyGoals.length > 0 && (!nextMonthlySectionDone || showCompletedSections) && (
             <TodoGroupCard
               title={`${nextMonthLabel} monthly goals`}
@@ -6738,6 +7019,16 @@ function TodosScreen({
             const subMonthlyIndividualDone = subMonthlyIndividualRows.filter((r) => r.done).length;
             const subQuarterlyIndividualDone = subQuarterlyIndividualRows.filter((r) => r.done).length;
 
+            // Scorecard readiness for this manager's reporting tree — same engine as "mine" above.
+            const subMonthlyReadinessRows = scorecardReadinessRowsFor(
+              subIndividualEmployees.filter((e) => readinessPeriodTypeFor(e) === "monthly"), "monthly", currentMonthValue, currentMonthLabel
+            );
+            const subQuarterlyReadinessRows = scorecardReadinessRowsFor(
+              subIndividualEmployees.filter((e) => readinessPeriodTypeFor(e) === "quarterly"), "quarterly", currentMonthValue, currentQuarterLabel
+            );
+            const subMonthlyReadinessDone = subMonthlyReadinessRows.filter(readinessDone).length;
+            const subQuarterlyReadinessDone = subQuarterlyReadinessRows.filter(readinessDone).length;
+
             const showAdminCompleted = getMgrCompleted(subProfile.id, "admin");
             const showAdminQCompleted = getMgrCompleted(subProfile.id, "adminQ");
             const showIndividualCompleted = getMgrCompleted(subProfile.id, "individual");
@@ -6746,11 +7037,15 @@ function TodosScreen({
             const showCurrentQCompleted = getMgrCompleted(subProfile.id, "currentQ");
             const showNextCompleted = getMgrCompleted(subProfile.id, "next");
             const showNextQCompleted = getMgrCompleted(subProfile.id, "nextQ");
+            const showReadinessCompleted = getMgrCompleted(subProfile.id, "scorecardReady");
+            const showReadinessQCompleted = getMgrCompleted(subProfile.id, "scorecardReadyQ");
 
             const subPrevMonthlySectionDone = subMonthlyActuals.length > 0 && subMonthlyActualsDone === subMonthlyActuals.length;
             const subPrevQuarterlySectionDone = subQuarterlyActuals.length > 0 && subQuarterlyActualsDone === subQuarterlyActuals.length;
             const subMonthlyIndividualSectionDone = subMonthlyIndividualRows.length > 0 && subMonthlyIndividualDone === subMonthlyIndividualRows.length;
             const subQuarterlyIndividualSectionDone = subQuarterlyIndividualRows.length > 0 && subQuarterlyIndividualDone === subQuarterlyIndividualRows.length;
+            const subMonthlyReadinessSectionDone = subMonthlyReadinessRows.length > 0 && subMonthlyReadinessDone === subMonthlyReadinessRows.length;
+            const subQuarterlyReadinessSectionDone = subQuarterlyReadinessRows.length > 0 && subQuarterlyReadinessDone === subQuarterlyReadinessRows.length;
             const subNextMonthlySectionDone = subNextMonthly.length > 0 && subNextMonthlyDone === subNextMonthly.length;
             const subNextQuarterlySectionDone = subNextQuarterly.length > 0 && subNextQuarterlyDone === subNextQuarterly.length;
 
@@ -6907,6 +7202,47 @@ function TodosScreen({
                           </TodoRow>
                         );
                       })}
+                  </TodoGroupCard>
+                )}
+
+                {showCurrentSection && subMonthlyReadinessRows.length > 0 && (!subMonthlyReadinessSectionDone || showCompletedSections) && (
+                  <TodoGroupCard
+                    title={`Team scorecards ready · ${currentMonthLabel}`}
+                    meta={<>{subMonthlyReadinessDone}/{subMonthlyReadinessRows.length} ready · Goals added, weighted to 100% · Due {currentTargetDue.label} <DaysBadge diffDays={currentTargetDue.diffDays} /></>}
+                    done={subMonthlyReadinessDone}
+                    total={subMonthlyReadinessRows.length}
+                    showCompleted={showReadinessCompleted}
+                    onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "scorecardReady")}
+                  >
+                    {subMonthlyReadinessRows.filter((r) => showReadinessCompleted || !readinessDone(r)).length === 0 ? (
+                      <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All team scorecards ready</div>
+                    ) : (
+                      subMonthlyReadinessRows
+                        .filter((r) => showReadinessCompleted || !readinessDone(r))
+                        .map((row) => (
+                          <TodoScorecardReadinessRow key={row.employee.id || row.employee.name} employee={row.employee} completion={row.completion} onGoToScorecards={onGoToScorecards} />
+                        ))
+                    )}
+                  </TodoGroupCard>
+                )}
+                {subQuarterlyReadinessRows.length > 0 && showQuarterlyCard(currentQuarterLabel) && (!subQuarterlyReadinessSectionDone || showCompletedSections) && (
+                  <TodoGroupCard
+                    title={`Team scorecards ready · ${currentQuarterLabel}`}
+                    meta={<>{subQuarterlyReadinessDone}/{subQuarterlyReadinessRows.length} ready · Goals added, weighted to 100% · Due {currentQuarterTargetDue.label} <DaysBadge diffDays={currentQuarterTargetDue.diffDays} /></>}
+                    done={subQuarterlyReadinessDone}
+                    total={subQuarterlyReadinessRows.length}
+                    showCompleted={showReadinessQCompleted}
+                    onToggleCompleted={() => toggleMgrCompleted(subProfile.id, "scorecardReadyQ")}
+                  >
+                    {subQuarterlyReadinessRows.filter((r) => showReadinessQCompleted || !readinessDone(r)).length === 0 ? (
+                      <div className="flex items-center gap-2 py-3 text-[13px] text-muted-foreground"><CheckCircle2 className="size-4 text-[var(--sage-dark)]" /> All team scorecards ready</div>
+                    ) : (
+                      subQuarterlyReadinessRows
+                        .filter((r) => showReadinessQCompleted || !readinessDone(r))
+                        .map((row) => (
+                          <TodoScorecardReadinessRow key={row.employee.id || row.employee.name} employee={row.employee} completion={row.completion} onGoToScorecards={onGoToScorecards} />
+                        ))
+                    )}
                   </TodoGroupCard>
                 )}
 
