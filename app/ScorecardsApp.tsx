@@ -615,6 +615,22 @@ export default function ScorecardsApp() {
     await loadSupabaseData(client, loadedProfile);
   }
 
+  // PostgREST caps unpaginated selects at 1000 rows. The actuals table already exceeds that,
+  // so a plain .select("*") silently drops rows (which ones is undefined without an ORDER BY) —
+  // page through in batches so no actuals get lost as the table keeps growing.
+  async function fetchAllRows(client: SupabaseClient, table: string, pageSize = 1000) {
+    const rows: Record<string, any>[] = [];
+    let from = 0;
+    for (;;) {
+      const { data, error } = await client.from(table).select("*").range(from, from + pageSize - 1);
+      if (error) return { data: rows, error };
+      rows.push(...(data || []));
+      if (!data || data.length < pageSize) break;
+      from += pageSize;
+    }
+    return { data: rows, error: null as null };
+  }
+
   async function loadSupabaseData(client: SupabaseClient, loadedProfile: ManagerProfile) {
     const isUser = loadedProfile.role === "user";
 
@@ -627,7 +643,7 @@ export default function ScorecardsApp() {
       const [scResult, goalsResult, actualsResult, ripplingResult, assignmentsResult, settingsResult] = await Promise.all([
         scQuery,
         client.from("goals_bank").select("*").order("goal_tier").order("department").order("name"),
-        client.from("actuals").select("*"),
+        fetchAllRows(client, "actuals"),
         linkedName
           ? client.from("rippling_employees").select("*").eq("full_name", linkedName).order("period", { ascending: false })
           : client.from("rippling_employees").select("*").order("period", { ascending: false }),
@@ -671,7 +687,7 @@ export default function ScorecardsApp() {
       client.from("goals_bank").select("*").order("goal_tier").order("department").order("name"),
       client.from("scorecards").select("*").order("scorecard_month", { ascending: false }).order("employee_name"),
       client.from("rippling_employees").select("*").order("period", { ascending: false }),
-      client.from("actuals").select("*"),
+      fetchAllRows(client, "actuals"),
       client.from("goal_assignments").select("*").order("created_at", { ascending: false }),
       client.from("employee_scorecard_settings").select("*")
     ]);
