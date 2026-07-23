@@ -13,3 +13,4 @@ playwright-report
 *.tsbuildinfo
 .claude
 supabase/.temp
+.vercel

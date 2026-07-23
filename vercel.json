@@ -3,6 +3,10 @@
     {
       "path": "/api/cron/daily-todos",
       "schedule": "0 14 * * *"
+    },
+    {
+      "path": "/api/cron/sync-pf-kpis",
+      "schedule": "0 14 3 * *"
     }
   ]
 }
