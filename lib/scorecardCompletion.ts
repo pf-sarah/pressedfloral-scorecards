@@ -26,7 +26,7 @@ function goalActiveForMonth(goal: Pick<Goal, "startMonth" | "endMonth">, month: 
   return true;
 }
 
-function actualKey(goal: Pick<Goal, "goalTier" | "location" | "department" | "name" | "role" | "employeeName">) {
+export function actualKey(goal: Pick<Goal, "goalTier" | "location" | "department" | "name" | "role" | "employeeName">) {
   const who = goal.employeeName || goal.role;
   const name = who ? `${goal.name}::${who}` : goal.name;
   return [goal.goalTier, goal.location || "", goal.department || "", name].join("|");

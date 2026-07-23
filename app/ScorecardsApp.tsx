@@ -75,6 +75,7 @@ import {
   LayoutGrid,
   ListChecks,
   MoreHorizontal,
+  RefreshCw,
   RotateCcw,
   Search,
   Sparkles,
@@ -90,6 +91,12 @@ import {
 
 type Screen = "landing" | "setup" | "scorecard" | "history" | "rippling" | "guide" | "todos" | "migrate" | "whatif" | "personal" | "users";
 type HistoryView = "table" | "scorecard" | "grid" | "chart";
+
+// A value the pf-dashboard KPI sync (app/api/cron/sync-pf-kpis) wrote into `actuals`.
+type PfSyncWrite = { goalTier: string; location: string; department: string; goalName: string; value: number };
+// A cell that already had a manual value which disagrees with what pf-dashboard now
+// computes — surfaced for a human to double-check, never auto-overwritten.
+type PfSyncReviewItem = { goalTier: string; location: string; department: string; goalName: string; manualValue: number; computedValue: number; diffPct: number | null };
 
 /** Derive a "First Last" candidate name from an email like kanon.foote@domain.com */
 function nameFromEmail(email: string): string {
@@ -1469,6 +1476,53 @@ export default function ScorecardsApp() {
     showToast("Actual saved");
   }
 
+  // Manually re-triggers the monthly pf-dashboard KPI sync (same route the
+  // Vercel cron hits automatically on the 3rd) — for pulling in corrections
+  // made in Ops Dashboard after the automatic run, or backfilling a past
+  // month. Fill-only-if-empty still applies: this can only add values into
+  // currently-blank cells, never overwrite one that's already set.
+  async function syncPfDashboardKpis(month: string): Promise<{ synced: number; reviewRecommended: PfSyncReviewItem[] } | null> {
+    if (!sb) { showToast("Supabase is not connected.", "error"); return null; }
+    const sessionResult = await sb.auth.getSession();
+    const token = sessionResult.data.session?.access_token;
+    if (sessionResult.error || !token) { showToast("Sign in again to sync.", "error"); return null; }
+
+    let response: Response;
+    try {
+      response = await fetch(`/api/cron/sync-pf-kpis?month=${encodeURIComponent(month)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+    } catch {
+      showToast("Sync request failed.", "error");
+      return null;
+    }
+    const body = await response.json().catch(() => ({}));
+    if (!response.ok) {
+      showToast(typeof body.error === "string" ? body.error : "Sync failed.", "error");
+      return null;
+    }
+
+    const synced: PfSyncWrite[] = body.synced ?? [];
+    if (synced.length > 0) {
+      const period = body.period as string;
+      const nextActuals = { ...(appData.actuals[period] || {}) };
+      for (const w of synced) {
+        nextActuals[[w.goalTier, w.location, w.department, w.goalName].join("|")] = w.value;
+      }
+      setAppData((current) => ({ ...current, actuals: { ...current.actuals, [period]: nextActuals } }));
+      persistActuals(period, nextActuals);
+    }
+
+    const reviewRecommended: PfSyncReviewItem[] = body.reviewRecommended ?? [];
+    const parts = [`Synced ${synced.length} value${synced.length === 1 ? "" : "s"} from Ops Dashboard.`];
+    if (reviewRecommended.length > 0) {
+      parts.push(`${reviewRecommended.length} already-filled value${reviewRecommended.length === 1 ? "" : "s"} may need review.`);
+    }
+    showToast(parts.join(" "));
+
+    return { synced: synced.length, reviewRecommended };
+  }
+
   async function saveMonthTarget(goal: Goal, period: string, type: "target" | "min", value: string) {
     const key = metaKey(type, goal);
     const nextActuals = { ...(appData.actuals[period] || {}), [key]: value === "" ? null : Number(value) };
@@ -1774,6 +1828,7 @@ export default function ScorecardsApp() {
               onToggle={(goal) => toggleGoal(goal, bankMonth)}
               onToggleMonth={toggleGoalForMonth}
               onAssignGoal={(goalId, employeeNames, startMonth) => employeeNames.forEach((name) => createGoalAssignment(goalId, name, startMonth))}
+              onSyncPfKpis={syncPfDashboardKpis}
               isAdmin={effectiveProfile?.role === "admin"}
               companyGoalAccess={resolveCompanyGoalAccess(effectiveProfile)}
               allowedDepartments={effectiveProfile?.role === "admin" ? undefined : (effectiveProfile?.departments || [])}
@@ -3088,6 +3143,7 @@ function GoalsScreen(props: {
   onToggle: (goal: Goal) => void;
   onToggleMonth: (goal: Goal) => void;
   onAssignGoal?: (goalId: string, employeeNames: string[], startMonth: string) => void;
+  onSyncPfKpis?: (month: string) => Promise<{ synced: number; reviewRecommended: PfSyncReviewItem[] } | null>;
   isAdmin?: boolean;
   companyGoalAccess?: boolean;
   allowedDepartments?: string[];
@@ -3100,6 +3156,20 @@ function GoalsScreen(props: {
   const [confirmDeactivate, setConfirmDeactivate] = useState<Goal | null>(null);
   const [assignEmployeeNames, setAssignEmployeeNames] = useState<string[]>([]);
   const [assignStartMonth, setAssignStartMonth] = useState(props.month);
+  const [pfSyncLoading, setPfSyncLoading] = useState(false);
+  const [pfSyncReview, setPfSyncReview] = useState<PfSyncReviewItem[] | null>(null);
+
+  const handleSyncPfKpis = async () => {
+    if (!props.onSyncPfKpis || pfSyncLoading) return;
+    setPfSyncLoading(true);
+    setPfSyncReview(null);
+    try {
+      const result = await props.onSyncPfKpis(props.month);
+      setPfSyncReview(result?.reviewRecommended ?? null);
+    } finally {
+      setPfSyncLoading(false);
+    }
+  };
 
   // Company goals are opt-in overlays assigned individually — an employee's existing
   // monthly/quarterly department goals shouldn't gate whether they can also receive one
@@ -3353,12 +3423,50 @@ function GoalsScreen(props: {
             </button>
           </div>
 
-          {/* Right spacer to balance tabs */}
-          <div style={{ width: "120px" }} />
+          {/* Right: sync-from-Ops-Dashboard (admin only), else spacer to balance tabs */}
+          <div style={{ width: "120px", display: "flex", justifyContent: "flex-end" }}>
+            {props.isAdmin && props.onSyncPfKpis ? (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-8 gap-1.5 text-[12px]"
+                disabled={pfSyncLoading}
+                onClick={handleSyncPfKpis}
+                title="Pull ratio/CPO/production actuals from Ops Dashboard for this month — only fills cells that are still blank."
+              >
+                <RefreshCw className={cn("size-3.5", pfSyncLoading && "animate-spin")} />
+                {pfSyncLoading ? "Syncing…" : "Sync"}
+              </Button>
+            ) : null}
+          </div>
         </div>
 
         {monthStatus && (
           <div className="border-t border-border bg-muted/30 px-5 py-1.5 text-[11.5px] text-muted-foreground">{monthStatus}</div>
+        )}
+
+        {pfSyncReview && pfSyncReview.length > 0 && (
+          <div className="border-t border-border bg-amber-50 px-5 py-2 text-[12px] text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+            <div className="flex items-center gap-1.5 font-medium">
+              <AlertTriangle className="size-3.5 shrink-0" />
+              {pfSyncReview.length} value{pfSyncReview.length === 1 ? "" : "s"} already filled in for this month, but Ops Dashboard now
+              computes something different — worth a double-check:
+            </div>
+            <ul className="mt-1 space-y-0.5 pl-5">
+              {pfSyncReview.map((r) => (
+                <li key={[r.goalTier, r.location, r.department, r.goalName].join("|")} className="list-disc">
+                  <span className="font-medium">{r.goalName}</span> ({locLabel(r.location)}/{r.department}) — entered:{" "}
+                  <span className="tabular-nums">{formatNumber(r.manualValue)}</span>, Ops Dashboard:{" "}
+                  <span className="tabular-nums">{formatNumber(r.computedValue)}</span>
+                </li>
+              ))}
+            </ul>
+          </div>
+        )}
+        {pfSyncReview && pfSyncReview.length === 0 && (
+          <div className="border-t border-border bg-muted/30 px-5 py-1.5 text-[11.5px] text-muted-foreground">
+            Synced from Ops Dashboard — everything already filled in matches.
+          </div>
         )}
       </section>
 
