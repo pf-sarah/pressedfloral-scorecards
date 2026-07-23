@@ -371,6 +371,10 @@ export default function ScorecardsApp() {
 
   const [scorecardMonths, setScorecardMonths] = useState<string[]>([currentMonthValue()]);
   const [deleteModal, setDeleteModal] = useState<{ scorecardId: string; goalName: string } | null>(null);
+  // Set when a to-do's "Go to scorecard" button is clicked — tells ScorecardsScreen which
+  // employee card to auto-expand and scroll to. `nonce` changes on every click (even repeat
+  // clicks on the same employee) so the scroll effect re-fires even if the target is unchanged.
+  const [scorecardFocus, setScorecardFocus] = useState<{ employeeKey: string; periodType: "monthly" | "quarterly"; nonce: number } | null>(null);
 
   const isFixture = dataMode === "fixture";
 
@@ -1869,6 +1873,9 @@ export default function ScorecardsApp() {
                 reviewChainIds={reviewChainIds}
                 employeePeriodTypes={employeePeriodTypes}
                 onDeactivateEmployee={roleAtLeast(effectiveProfile, "manager") ? deactivateEmployee : undefined}
+                focusEmployeeKey={scorecardFocus?.employeeKey ?? null}
+                focusPeriodType={scorecardFocus?.periodType}
+                focusNonce={scorecardFocus?.nonce}
               />
             </div>
           )}
@@ -1950,7 +1957,11 @@ export default function ScorecardsApp() {
               goalAssignments={appData.goalAssignments}
               employeeScorecardSettings={appData.employeeScorecardSettings}
               employeePeriodTypes={employeePeriodTypes}
-              onGoToScorecards={() => mountScreen("scorecard")}
+              onGoToScorecards={(employee, month, periodType) => {
+                setScorecardMonths([month]);
+                setScorecardFocus({ employeeKey: employee.id || employee.name, periodType, nonce: Date.now() });
+                mountScreen("scorecard");
+              }}
               onSaveTarget={saveMonthTarget}
               onSaveCurrentTargetPair={(goal, target, min) => {
                 const today = new Date();
@@ -4095,6 +4106,10 @@ function ScorecardsScreen(props: {
   reviewChainIds?: Set<string>;
   employeePeriodTypes?: Record<string, "monthly" | "quarterly">;
   onDeactivateEmployee?: (employeeName: string, isoMonth: string, mode: "month" | "from" | "reactivate") => void;
+  // Set by a "Go to scorecard" to-do link — scrolls to and auto-expands this employee's card.
+  focusEmployeeKey?: string | null;
+  focusPeriodType?: "monthly" | "quarterly";
+  focusNonce?: number;
 }) {
   const [filterEmployees, setFilterEmployees] = useState<string[]>([]);
   const [filterDepts, setFilterDepts] = useState<string[]>([]);
@@ -4103,6 +4118,27 @@ function ScorecardsScreen(props: {
   const [hideCompleted, setHideCompleted] = useState(false);
   const [viewMode, setViewMode] = useState<"cards" | "progress">("cards");
   const [progressStatusFilter, setProgressStatusFilter] = useState<ScorecardCompletionStatus[]>([]);
+
+  // Deep-link from a "Go to scorecard" to-do: switch to the right period type/view, then
+  // scroll to the target employee's card once it's rendered (double rAF — one to let the
+  // period/view state above commit, one to let the resulting card list paint).
+  useEffect(() => {
+    if (props.focusNonce == null || !props.focusEmployeeKey) return;
+    if (props.focusPeriodType) setGlobalPeriodType(props.focusPeriodType);
+    setViewMode("cards");
+    const targetKey = props.focusEmployeeKey;
+    let raf2 = 0;
+    const raf1 = requestAnimationFrame(() => {
+      raf2 = requestAnimationFrame(() => {
+        document.getElementById(`scorecard-card-${targetKey}`)?.scrollIntoView({ behavior: "smooth", block: "start" });
+      });
+    });
+    return () => {
+      cancelAnimationFrame(raf1);
+      cancelAnimationFrame(raf2);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [props.focusNonce]);
 
   // Single-month mode = exactly one month selected → live draft cards
   // Multi/all mode = 0 or 2+ months → live draft cards per month, grouped by month
@@ -4434,7 +4470,7 @@ function ScorecardsScreen(props: {
             {filteredEmployees.map((emp) => {
               const submitted = props.scorecards.find((sc) => sc.employeeName === emp.name && sc.scorecardMonth === periodLabel);
               return (
-                <div key={emp.id || emp.name} className="relative group/card">
+                <div key={emp.id || emp.name} id={`scorecard-card-${emp.id || emp.name}`} className="relative group/card">
                   {props.onDeactivateEmployee && (
                     <div className="absolute right-2 top-2 z-20 opacity-0 group-hover/card:opacity-100 transition-opacity">
                       <DropdownMenu>
@@ -4482,6 +4518,8 @@ function ScorecardsScreen(props: {
                     currentUserEmail={props.currentUserEmail}
                     currentUserProfileId={props.currentUserProfileId}
                     reviewChainIds={props.reviewChainIds}
+                    autoOpen={!!props.focusEmployeeKey && props.focusEmployeeKey === (emp.id || emp.name)}
+                    autoOpenNonce={props.focusNonce}
                   />
                 </div>
               );
@@ -4779,7 +4817,7 @@ function GoalRowMenu({ goalName, currentWeight, onApplyWeight, onRemove }: {
 }
 
 function LiveScorecardCard({
-  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, forcePeriodType, payrollAvailable, empSettings, onSettingsChange, onSubmit, onDeleteGoal, onApprove, onReturn, onSaveGoal, onSaveTargetPair, onSaveProrate, teamEmployees, isAdmin, companyGoalAccess, allowedDepartments, allowedLocations, currentUserEmail, currentUserProfileId, reviewChainIds
+  employee, isoMonth, month, baseGoals, allGoals, periodActuals, allRippling, submittedScorecard, globalPeriodType, forcePeriodType, payrollAvailable, empSettings, onSettingsChange, onSubmit, onDeleteGoal, onApprove, onReturn, onSaveGoal, onSaveTargetPair, onSaveProrate, teamEmployees, isAdmin, companyGoalAccess, allowedDepartments, allowedLocations, currentUserEmail, currentUserProfileId, reviewChainIds, autoOpen, autoOpenNonce
 }: {
   employee: Employee;
   isoMonth: string;
@@ -4809,6 +4847,8 @@ function LiveScorecardCard({
   currentUserEmail: string;
   currentUserProfileId?: string;
   reviewChainIds?: Set<string>;
+  autoOpen?: boolean;
+  autoOpenNonce?: number;
 }) {
   // --- helpers for computing goalIds from settings + baseGoals ---
   function baseIdsForPeriod(pt: "monthly" | "quarterly"): string[] {
@@ -4833,6 +4873,12 @@ function LiveScorecardCard({
 
   // --- state ---
   const [open, setOpen] = useState(false);
+  // Deep-linked from a "Go to scorecard" to-do — expand this card. Keyed on autoOpenNonce
+  // (not just autoOpen) so clicking the same to-do again re-expands a card the user closed.
+  useEffect(() => {
+    if (autoOpen) setOpen(true);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [autoOpen, autoOpenNonce]);
   const [creatingGoal, setCreatingGoal] = useState<Goal | null>(null);
   const effectivePeriodType = forcePeriodType ?? globalPeriodType;
 
@@ -6462,7 +6508,7 @@ function TodosScreen({
   onSaveCurrentTargetPair: (goal: Goal, target: string, min: string) => void;
   onSaveActual: (goal: Goal, value: string) => void;
   onRipplingUpload: (employees: Employee[]) => void;
-  onGoToScorecards: () => void;
+  onGoToScorecards: (employee: Employee, month: string, periodType: "monthly" | "quarterly") => void;
 }) {
   const [showCompletedSections, setShowCompletedSections] = useState(false);
   const [showCompletedAdmin, setShowCompletedAdmin] = useState(false);
@@ -6912,7 +6958,7 @@ function TodosScreen({
                 monthlyIndividualRows
                   .filter((r) => showCompletedIndividual || !r.done)
                   .map((row) => (
-                    <TodoIndividualRow key={row.employee.id || row.employee.name} employee={row.employee} goals={row.goals} done={row.done} onGoToScorecards={onGoToScorecards} />
+                    <TodoIndividualRow key={row.employee.id || row.employee.name} employee={row.employee} goals={row.goals} done={row.done} onGoToScorecards={() => onGoToScorecards(row.employee, workMonth, "monthly")} />
                   ))
               )}
             </TodoGroupCard>
@@ -6932,7 +6978,7 @@ function TodosScreen({
                 quarterlyIndividualRows
                   .filter((r) => showCompletedIndividualQ || !r.done)
                   .map((row) => (
-                    <TodoIndividualRow key={row.employee.id || row.employee.name} employee={row.employee} goals={row.goals} done={row.done} onGoToScorecards={onGoToScorecards} />
+                    <TodoIndividualRow key={row.employee.id || row.employee.name} employee={row.employee} goals={row.goals} done={row.done} onGoToScorecards={() => onGoToScorecards(row.employee, workMonth, "quarterly")} />
                   ))
               )}
             </TodoGroupCard>
@@ -7006,7 +7052,7 @@ function TodosScreen({
                 monthlyReadinessRows
                   .filter((r) => showCompletedReadiness || !readinessDone(r))
                   .map((row) => (
-                    <TodoScorecardReadinessRow key={row.employee.id || row.employee.name} employee={row.employee} completion={row.completion} onGoToScorecards={onGoToScorecards} />
+                    <TodoScorecardReadinessRow key={row.employee.id || row.employee.name} employee={row.employee} completion={row.completion} onGoToScorecards={() => onGoToScorecards(row.employee, currentMonthValue, "monthly")} />
                   ))
               )}
             </TodoGroupCard>
@@ -7026,7 +7072,7 @@ function TodosScreen({
                 quarterlyReadinessRows
                   .filter((r) => showCompletedReadinessQ || !readinessDone(r))
                   .map((row) => (
-                    <TodoScorecardReadinessRow key={row.employee.id || row.employee.name} employee={row.employee} completion={row.completion} onGoToScorecards={onGoToScorecards} />
+                    <TodoScorecardReadinessRow key={row.employee.id || row.employee.name} employee={row.employee} completion={row.completion} onGoToScorecards={() => onGoToScorecards(row.employee, currentMonthValue, "quarterly")} />
                   ))
               )}
             </TodoGroupCard>
@@ -7234,7 +7280,7 @@ function TodosScreen({
                       subMonthlyIndividualRows
                         .filter((r) => showIndividualCompleted || !r.done)
                         .map((row) => (
-                          <TodoIndividualRow key={row.employee.id || row.employee.name} employee={row.employee} goals={row.goals} done={row.done} onGoToScorecards={onGoToScorecards} />
+                          <TodoIndividualRow key={row.employee.id || row.employee.name} employee={row.employee} goals={row.goals} done={row.done} onGoToScorecards={() => onGoToScorecards(row.employee, workMonth, "monthly")} />
                         ))
                     )}
                   </TodoGroupCard>
@@ -7254,7 +7300,7 @@ function TodosScreen({
                       subQuarterlyIndividualRows
                         .filter((r) => showIndividualQCompleted || !r.done)
                         .map((row) => (
-                          <TodoIndividualRow key={row.employee.id || row.employee.name} employee={row.employee} goals={row.goals} done={row.done} onGoToScorecards={onGoToScorecards} />
+                          <TodoIndividualRow key={row.employee.id || row.employee.name} employee={row.employee} goals={row.goals} done={row.done} onGoToScorecards={() => onGoToScorecards(row.employee, workMonth, "quarterly")} />
                         ))
                     )}
                   </TodoGroupCard>
@@ -7328,7 +7374,7 @@ function TodosScreen({
                       subMonthlyReadinessRows
                         .filter((r) => showReadinessCompleted || !readinessDone(r))
                         .map((row) => (
-                          <TodoScorecardReadinessRow key={row.employee.id || row.employee.name} employee={row.employee} completion={row.completion} onGoToScorecards={onGoToScorecards} />
+                          <TodoScorecardReadinessRow key={row.employee.id || row.employee.name} employee={row.employee} completion={row.completion} onGoToScorecards={() => onGoToScorecards(row.employee, currentMonthValue, "monthly")} />
                         ))
                     )}
                   </TodoGroupCard>
@@ -7348,7 +7394,7 @@ function TodosScreen({
                       subQuarterlyReadinessRows
                         .filter((r) => showReadinessQCompleted || !readinessDone(r))
                         .map((row) => (
-                          <TodoScorecardReadinessRow key={row.employee.id || row.employee.name} employee={row.employee} completion={row.completion} onGoToScorecards={onGoToScorecards} />
+                          <TodoScorecardReadinessRow key={row.employee.id || row.employee.name} employee={row.employee} completion={row.completion} onGoToScorecards={() => onGoToScorecards(row.employee, currentMonthValue, "quarterly")} />
                         ))
                     )}
                   </TodoGroupCard>
